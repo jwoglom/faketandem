@@ -1,20 +1,18 @@
 package main
 
 import (
+	"encoding/hex"
 	"flag"
 	"time"
 
 	"github.com/avereha/pod/pkg/api"
 	"github.com/avereha/pod/pkg/bluetooth"
-	"github.com/avereha/pod/pkg/pod"
 
 	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 )
 
 func main() {
-	var stateFile = flag.String("state", "state.toml", "pod state")
-	var freshState = flag.Bool("fresh", false, "start fresh. not activated, empty state")
 	// if both verbose and quiet are chosen, e.g., -v -q, the verbose dominates
 	var traceLevel = flag.Bool("v", false, "verbose off by default, TraceLevel")
 	var infoLevel = flag.Bool("q", false, "quiet off by default, InfoLevel")
@@ -34,34 +32,52 @@ func main() {
 		ForceColors:  true,
 	})
 
-	// TODO: This is kinda ugly, move state reader into own file and pass state to both BLE and pod
-	state := &pod.PODState{
-		Filename: *stateFile,
-	}
-	var err error
-	if !(*freshState) {
-		state, err = pod.NewState(*stateFile)
-		if err != nil {
-			log.Fatalf("pkg pod; could not restore pod state from %s: %+v", stateFile, err)
-		}
-	}
+	log.Info("Starting Tandem Pump Emulator")
+	log.Info("Service UUID: ", bluetooth.PumpServiceUUID)
+	log.Info("Characteristics:")
+	log.Info("  CurrentStatus:     ", bluetooth.CurrentStatusCharUUID)
+	log.Info("  QualifyingEvents:  ", bluetooth.QualifyingEventsCharUUID)
+	log.Info("  HistoryLog:        ", bluetooth.HistoryLogCharUUID)
+	log.Info("  Authorization:     ", bluetooth.AuthorizationCharUUID)
+	log.Info("  Control:           ", bluetooth.ControlCharUUID)
+	log.Info("  ControlStream:     ", bluetooth.ControlStreamCharUUID)
 
-	log.Tracef("podId %@ %x", state.Id, state.Id)
-
-	ble, err := bluetooth.New("hci0", state.Id)
-	//defer ble.Close()
+	ble, err := bluetooth.New("hci0")
 	if err != nil {
 		log.Fatalf("Could not start BLE: %s", err)
 	}
 
-	p := pod.New(ble, *stateFile, *freshState)
-	go func() {
-		p.StartAcceptingCommands()
-	}()
+	// Create API server
+	server := api.New(ble)
 
-	log.Info("Starting API")
-	s := api.New(p)
-	s.Start()
+	// Set up write handler to log incoming data and notify websocket clients
+	ble.SetWriteHandler(func(charType bluetooth.CharacteristicType, data []byte) {
+		log.Infof("Received write on %s: %s", charType, hex.EncodeToString(data))
+		server.SendWriteEvent(charType, data)
+		// TODO: Add your response logic here
+	})
 
-	time.Sleep(9999 * time.Second)
+	// Set up read handler
+	ble.SetReadHandler(func(charType bluetooth.CharacteristicType) []byte {
+		log.Debugf("Read request on %s", charType)
+		// TODO: Return appropriate data based on characteristic
+		return nil
+	})
+
+	// Set up custom command handler for websocket commands
+	server.SetCommandHandler(func(command string, params map[string]interface{}) {
+		log.Infof("Received command from websocket: %s, params: %v", command, params)
+		// TODO: Handle custom commands
+	})
+
+	log.Info("Bluetooth device initialized, waiting for connections...")
+	log.Info("Starting API server on :8080")
+
+	// Start API server (blocking)
+	go server.Start()
+
+	// Keep the program running
+	for {
+		time.Sleep(time.Hour)
+	}
 }
