@@ -89,6 +89,10 @@ func main() {
 	// Set pairing code in bridge
 	bridge.SetPairingCode(pumpState.GetPairingCode())
 
+	// Start background simulator
+	simulator := state.NewSimulator(pumpState, 1*time.Second)
+	defer simulator.Stop()
+
 	ble, err := bluetooth.New("hci0")
 	if err != nil {
 		log.Fatalf("Could not start BLE: %s", err)
@@ -97,6 +101,14 @@ func main() {
 	// Create message router
 	router := handler.NewRouter(bridge, pumpState, ble, txManager)
 	log.Info("Message router initialized")
+
+	// Connect simulator with qualifying events notifier
+	simulator.SetEventNotifier(router.GetQualifyingEventsNotifier())
+	log.Info("Qualifying events notifier connected to simulator")
+
+	// Start simulator after event notifier is connected
+	simulator.Start()
+	log.Info("Background simulator started (update interval: 1s)")
 
 	// Create API server
 	server := api.New(ble)

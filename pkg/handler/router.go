@@ -20,6 +20,9 @@ type Router struct {
 	ble        *bluetooth.Ble
 	txManager  *protocol.TransactionManager
 
+	// Qualifying events notifier
+	qeNotifier *QualifyingEventsNotifier
+
 	// Default handler for unknown messages
 	defaultHandler MessageHandler
 }
@@ -27,11 +30,12 @@ type Router struct {
 // NewRouter creates a new message router
 func NewRouter(bridge *pumpx2.Bridge, pumpState *state.PumpState, ble *bluetooth.Ble, txManager *protocol.TransactionManager) *Router {
 	r := &Router{
-		handlers:  make(map[string]MessageHandler),
-		bridge:    bridge,
-		pumpState: pumpState,
-		ble:       ble,
-		txManager: txManager,
+		handlers:   make(map[string]MessageHandler),
+		bridge:     bridge,
+		pumpState:  pumpState,
+		ble:        ble,
+		txManager:  txManager,
+		qeNotifier: NewQualifyingEventsNotifier(bridge, ble, pumpState),
 	}
 
 	// Register handlers
@@ -69,6 +73,14 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewRemoteBgEntryHandler(r.bridge))
 	r.RegisterHandler(NewRemoteCarbEntryHandler(r.bridge))
 	r.RegisterHandler(NewBolusPermissionReleaseHandler(r.bridge))
+
+	// Settings handlers
+	r.RegisterHandler(NewBasalIQSettingsHandler(r.bridge))
+	r.RegisterHandler(NewControlIQSettingsHandler(r.bridge))
+	r.RegisterHandler(NewProfileBasalHandler(r.bridge))
+	r.RegisterHandler(NewGlobalsHandler(r.bridge, "PumpGlobalsRequest"))
+	r.RegisterHandler(NewGlobalsHandler(r.bridge, "TherapySettingsGlobalsRequest"))
+	r.RegisterHandler(NewGlobalsHandler(r.bridge, "ControlIQGlobalsRequest"))
 
 	// Set default handler for unknown messages
 	r.SetDefaultHandler(NewDefaultHandler(r.bridge))
@@ -204,8 +216,22 @@ func (r *Router) applyStateChange(change StateChange) {
 		if bolusState, ok := change.Data.(*state.BolusState); ok {
 			if bolusState.Active {
 				r.pumpState.StartBolus(bolusState.UnitsTotal, bolusState.BolusID)
+				// Notify bolus start
+				if r.qeNotifier != nil {
+					r.qeNotifier.NotifyBolusStart(bolusState.BolusID, bolusState.UnitsTotal)
+				}
 			} else {
+				// Get current bolus info before stopping
+				currentBolus := r.pumpState.Bolus
 				r.pumpState.StopBolus()
+				// Notify bolus canceled
+				if r.qeNotifier != nil && currentBolus.Active {
+					r.qeNotifier.NotifyBolusCanceled(
+						currentBolus.BolusID,
+						currentBolus.UnitsDelivered,
+						currentBolus.UnitsTotal,
+					)
+				}
 			}
 		}
 
@@ -213,6 +239,11 @@ func (r *Router) applyStateChange(change StateChange) {
 	default:
 		log.Warnf("Unknown state change type: %d", change.Type)
 	}
+}
+
+// GetQualifyingEventsNotifier returns the qualifying events notifier
+func (r *Router) GetQualifyingEventsNotifier() *QualifyingEventsNotifier {
+	return r.qeNotifier
 }
 
 // GetStats returns router statistics
