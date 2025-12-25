@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"sync"
 
-	"github.com/avereha/pod/pkg/bluetooth"
+	"github.com/jwoglom/faketandem/pkg/bluetooth"
 	"github.com/gorilla/websocket"
 	log "github.com/sirupsen/logrus"
 )

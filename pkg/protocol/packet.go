@@ -4,7 +4,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/avereha/pod/pkg/bluetooth"
+	"github.com/jwoglom/faketandem/pkg/bluetooth"
 	log "github.com/sirupsen/logrus"
 )
 

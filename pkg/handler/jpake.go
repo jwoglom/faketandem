@@ -3,8 +3,8 @@ package handler
 import (
 	"fmt"
 
-	"github.com/avereha/pod/pkg/pumpx2"
-	"github.com/avereha/pod/pkg/state"
+	"github.com/jwoglom/faketandem/pkg/pumpx2"
+	"github.com/jwoglom/faketandem/pkg/state"
 
 	log "github.com/sirupsen/logrus"
 )

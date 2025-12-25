@@ -4,10 +4,10 @@ import (
 	"encoding/hex"
 	"fmt"
 
-	"github.com/avereha/pod/pkg/bluetooth"
-	"github.com/avereha/pod/pkg/protocol"
-	"github.com/avereha/pod/pkg/pumpx2"
-	"github.com/avereha/pod/pkg/state"
+	"github.com/jwoglom/faketandem/pkg/bluetooth"
+	"github.com/jwoglom/faketandem/pkg/protocol"
+	"github.com/jwoglom/faketandem/pkg/pumpx2"
+	"github.com/jwoglom/faketandem/pkg/state"
 
 	log "github.com/sirupsen/logrus"
 )

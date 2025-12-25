@@ -1,4 +1,4 @@
-module github.com/avereha/pod
+module github.com/jwoglom/faketandem
 
 go 1.15
 
