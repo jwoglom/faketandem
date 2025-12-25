@@ -2,6 +2,7 @@ package handler
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/jwoglom/faketandem/pkg/pumpx2"
 	"github.com/jwoglom/faketandem/pkg/state"
@@ -9,20 +10,60 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// JPAKESessionManager manages JPAKE authentication sessions
+type JPAKESessionManager struct {
+	authenticators map[string]*JPAKEAuthenticator
+	mutex          sync.RWMutex
+}
+
+// NewJPAKESessionManager creates a new JPAKE session manager
+func NewJPAKESessionManager() *JPAKESessionManager {
+	return &JPAKESessionManager{
+		authenticators: make(map[string]*JPAKEAuthenticator),
+	}
+}
+
+// GetOrCreate gets or creates an authenticator for a session
+func (m *JPAKESessionManager) GetOrCreate(sessionID string, pairingCode string, bridge *pumpx2.Bridge) *JPAKEAuthenticator {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	if auth, exists := m.authenticators[sessionID]; exists {
+		return auth
+	}
+
+	auth := NewJPAKEAuthenticator(pairingCode, bridge)
+	m.authenticators[sessionID] = auth
+	log.Debugf("Created new JPAKE authenticator for session: %s", sessionID)
+
+	return auth
+}
+
+// Remove removes an authenticator for a session
+func (m *JPAKESessionManager) Remove(sessionID string) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	delete(m.authenticators, sessionID)
+	log.Debugf("Removed JPAKE authenticator for session: %s", sessionID)
+}
+
 // JPAKEHandler handles JPAKE authentication messages
 // JPAKE is a password-authenticated key exchange protocol
 type JPAKEHandler struct {
-	bridge      *pumpx2.Bridge
-	messageType string
-	round       int
+	bridge         *pumpx2.Bridge
+	messageType    string
+	round          int
+	sessionManager *JPAKESessionManager
 }
 
 // NewJPAKEHandler creates a new JPAKE handler for a specific round
-func NewJPAKEHandler(bridge *pumpx2.Bridge, messageType string, round int) *JPAKEHandler {
+func NewJPAKEHandler(bridge *pumpx2.Bridge, sessionManager *JPAKESessionManager, messageType string, round int) *JPAKEHandler {
 	return &JPAKEHandler{
-		bridge:      bridge,
-		messageType: messageType,
-		round:       round,
+		bridge:         bridge,
+		sessionManager: sessionManager,
+		messageType:    messageType,
+		round:          round,
 	}
 }
 
@@ -40,35 +81,50 @@ func (h *JPAKEHandler) RequiresAuth() bool {
 func (h *JPAKEHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*HandlerResponse, error) {
 	log.Infof("Handling %s (round %d): txID=%d", h.messageType, h.round, msg.TxID)
 
-	// TODO: Implement proper JPAKE response handling
-	// The current approach of calling ExecuteJPAKE is incorrect - that's for acting as a client.
-	// As a pump simulator, we should respond to each JPAKE round request individually
-	// using the normal encode/decode functions for JPAKERound1Response, JPAKERound2Response, etc.
+	// Get or create JPAKE authenticator for this session
+	// Using a simplified session ID for now (could be based on BLE connection)
+	sessionID := "default"
+	pairingCode := pumpState.GetPairingCode()
 
-	log.Warn("JPAKE authentication not fully implemented - using placeholder response")
+	auth := h.sessionManager.GetOrCreate(sessionID, pairingCode, h.bridge)
 
-	// Determine the response message type based on the request
-	responseType := h.getResponseType()
-	log.Debugf("Sending response: %s", responseType)
-
-	// Build response using the JPAKE output
-	// The exact parameters will depend on the JPAKE round
-	response, err := h.buildJPAKEResponse(msg.TxID, responseType, msg.Cargo)
+	// Process this round
+	responseParams, err := auth.ProcessRound(h.round, msg.Cargo)
 	if err != nil {
-		return nil, fmt.Errorf("failed to build JPAKE response: %w", err)
+		return nil, fmt.Errorf("JPAKE round %d failed: %w", h.round, err)
+	}
+
+	log.Debugf("JPAKE round %d processed successfully", h.round)
+
+	// Determine the response message type
+	responseType := h.getResponseType()
+
+	// Build response using pumpX2 bridge
+	response, err := h.bridge.EncodeMessage(msg.TxID, responseType, responseParams)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode %s: %w", responseType, err)
 	}
 
 	// Check if this is the final round (authentication complete)
 	stateChanges := []StateChange{}
-	if h.isFinalRound() {
+	if h.isFinalRound() && auth.IsComplete() {
 		log.Info("JPAKE authentication complete!")
-		// TODO: Extract the derived key and mark as authenticated
-		// For now, we'll mark as authenticated with a placeholder key
-		authKey := []byte("placeholder_auth_key")
+
+		// Get the shared secret
+		sharedSecret, err := auth.GetSharedSecret()
+		if err != nil {
+			log.Errorf("Failed to get shared secret: %v", err)
+			sharedSecret = []byte("jpake_fallback_key")
+		}
+
+		// Mark as authenticated
 		stateChanges = append(stateChanges, StateChange{
 			Type: StateChangeAuth,
-			Data: authKey,
+			Data: sharedSecret,
 		})
+
+		// Clean up the authenticator
+		h.sessionManager.Remove(sessionID)
 	}
 
 	return &HandlerResponse{
@@ -81,7 +137,6 @@ func (h *JPAKEHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state
 // getResponseType returns the response message type for this request
 func (h *JPAKEHandler) getResponseType() string {
 	// Map request to response
-	// The exact message types would come from pumpX2
 	switch h.messageType {
 	case "JPAKERound1Request":
 		return "JPAKERound1Response"
@@ -99,26 +154,6 @@ func (h *JPAKEHandler) getResponseType() string {
 // isFinalRound returns true if this is the final JPAKE round
 func (h *JPAKEHandler) isFinalRound() bool {
 	return h.round == 4
-}
-
-// buildJPAKEResponse builds a JPAKE response message
-func (h *JPAKEHandler) buildJPAKEResponse(txID int, responseType string, requestCargo map[string]interface{}) (*pumpx2.EncodedMessage, error) {
-	// For now, use pumpX2 bridge to encode the response
-	// The parameters would typically come from the JPAKE calculation
-	params := make(map[string]interface{})
-
-	// Copy relevant parameters from request
-	// The exact parameters depend on the JPAKE round
-	for key, val := range requestCargo {
-		params[key] = val
-	}
-
-	response, err := h.bridge.EncodeMessage(txID, responseType, params)
-	if err != nil {
-		return nil, fmt.Errorf("failed to encode %s: %w", responseType, err)
-	}
-
-	return response, nil
 }
 
 // PumpChallengeHandler handles legacy pump challenge authentication

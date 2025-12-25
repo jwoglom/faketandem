@@ -21,6 +21,7 @@ type Router struct {
 	ble             *bluetooth.Ble
 	txManager       *protocol.TransactionManager
 	settingsManager *settings.Manager
+	jpakeManager    *JPAKESessionManager
 
 	// Qualifying events notifier
 	qeNotifier *QualifyingEventsNotifier
@@ -42,6 +43,7 @@ func NewRouter(bridge *pumpx2.Bridge, pumpState *state.PumpState, ble *bluetooth
 		ble:             ble,
 		txManager:       txManager,
 		settingsManager: settingsManager,
+		jpakeManager:    NewJPAKESessionManager(),
 		qeNotifier:      NewQualifyingEventsNotifier(bridge, ble, pumpState),
 	}
 
@@ -67,11 +69,10 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewPumpChallengeHandler(r.bridge))
 
 	// JPAKE authentication handlers (rounds 1-4)
-	// Note: The exact message types may vary - these are placeholders
-	r.RegisterHandler(NewJPAKEHandler(r.bridge, "JPAKERound1Request", 1))
-	r.RegisterHandler(NewJPAKEHandler(r.bridge, "JPAKERound2Request", 2))
-	r.RegisterHandler(NewJPAKEHandler(r.bridge, "JPAKERound3Request", 3))
-	r.RegisterHandler(NewJPAKEHandler(r.bridge, "JPAKERound4Request", 4))
+	r.RegisterHandler(NewJPAKEHandler(r.bridge, r.jpakeManager, "JPAKERound1Request", 1))
+	r.RegisterHandler(NewJPAKEHandler(r.bridge, r.jpakeManager, "JPAKERound2Request", 2))
+	r.RegisterHandler(NewJPAKEHandler(r.bridge, r.jpakeManager, "JPAKERound3Request", 3))
+	r.RegisterHandler(NewJPAKEHandler(r.bridge, r.jpakeManager, "JPAKERound4Request", 4))
 
 	// Status and data handlers
 	r.RegisterHandler(NewCurrentStatusHandler(r.bridge))
