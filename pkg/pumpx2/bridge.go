@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jwoglom/faketandem/pkg/bluetooth"
+
 	log "github.com/sirupsen/logrus"
 )
 
@@ -59,29 +61,9 @@ func (b *Bridge) SetTimeSinceReset(seconds uint32) {
 	b.timeSinceReset = seconds
 }
 
-// charTypeToBtChar maps characteristic type to btChar name for gradle mode
-func charTypeToBtChar(charType int) string {
-	// Map based on the bluetooth package characteristic types
-	// CharAuthorization=3, CharControl=4, CharControlStream=5, CharCurrentStatus=0, CharHistoryLog=2
-	switch charType {
-	case 0: // CharCurrentStatus
-		return "currentStatus"
-	case 2: // CharHistoryLog
-		return "historyLog"
-	case 3: // CharAuthorization
-		return "authentication"
-	case 4: // CharControl
-		return "control"
-	case 5: // CharControlStream
-		return "controlStream"
-	default:
-		return "currentStatus" // Default fallback
-	}
-}
-
 // ParseMessage parses a hex message into a structured format
-func (b *Bridge) ParseMessage(charType int, hexData string) (*ParsedMessage, error) {
-	btChar := charTypeToBtChar(charType)
+func (b *Bridge) ParseMessage(charType bluetooth.CharacteristicType, hexData string) (*ParsedMessage, error) {
+	btChar := charType.ToBtChar()
 	output, err := b.runner.Parse(btChar, hexData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse message: %w", err)
@@ -196,9 +178,11 @@ func (b *Bridge) parseEncodeTextOutput(output string, txID int, messageName stri
 	return msg, nil
 }
 
-// ExecuteJPAKE runs the JPAKE authentication flow
-func (b *Bridge) ExecuteJPAKE(pairingCode string) (string, error) {
-	output, err := b.runner.ExecuteJPAKE(pairingCode)
+// ExecuteJPAKE runs the JPAKE authentication flow with interactive response handling
+// Note: This is for when acting as a CLIENT connecting to a pump.
+// For pump simulator operation, use individual encode/decode for each JPAKE round instead.
+func (b *Bridge) ExecuteJPAKE(pairingCode string, responseProvider JPAKEResponseProvider) (string, error) {
+	output, err := b.runner.ExecuteJPAKE(pairingCode, responseProvider)
 	if err != nil {
 		return "", fmt.Errorf("JPAKE execution failed: %w", err)
 	}

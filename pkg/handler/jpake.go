@@ -40,18 +40,12 @@ func (h *JPAKEHandler) RequiresAuth() bool {
 func (h *JPAKEHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*HandlerResponse, error) {
 	log.Infof("Handling %s (round %d): txID=%d", h.messageType, h.round, msg.TxID)
 
-	// Get the pairing code from pump state
-	pairingCode := pumpState.GetPairingCode()
-	log.Debugf("Using pairing code: %s", pairingCode)
+	// TODO: Implement proper JPAKE response handling
+	// The current approach of calling ExecuteJPAKE is incorrect - that's for acting as a client.
+	// As a pump simulator, we should respond to each JPAKE round request individually
+	// using the normal encode/decode functions for JPAKERound1Response, JPAKERound2Response, etc.
 
-	// Use pumpX2's JPAKE functionality to handle the exchange
-	// The cliparser has built-in JPAKE support
-	output, err := h.bridge.ExecuteJPAKE(pairingCode)
-	if err != nil {
-		return nil, fmt.Errorf("JPAKE execution failed: %w", err)
-	}
-
-	log.Tracef("JPAKE output: %s", output)
+	log.Warn("JPAKE authentication not fully implemented - using placeholder response")
 
 	// Determine the response message type based on the request
 	responseType := h.getResponseType()

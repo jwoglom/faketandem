@@ -112,6 +112,7 @@ func main() {
 
 	// Create API server
 	server := api.New(ble)
+	server.SetSettingsManager(router.GetSettingsManager())
 
 	// Set up write handler to log incoming data and notify websocket clients
 	ble.SetWriteHandler(func(charType bluetooth.CharacteristicType, data []byte) {
@@ -134,7 +135,7 @@ func main() {
 		log.Infof("Received complete message on %s: %s", charType, hex.EncodeToString(message))
 
 		// Parse the message using pumpX2 bridge
-		parsed, err := bridge.ParseMessage(int(charType), hex.EncodeToString(message))
+		parsed, err := bridge.ParseMessage(charType, hex.EncodeToString(message))
 		if err != nil {
 			log.Errorf("Failed to parse message: %v", err)
 			return

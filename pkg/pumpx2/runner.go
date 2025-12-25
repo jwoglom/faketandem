@@ -1,6 +1,7 @@
 package pumpx2
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -11,11 +12,15 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// JPAKEResponseProvider is a function that provides responses for each JPAKE round
+// It receives the step name and the hex-encoded request, and returns the hex-encoded response
+type JPAKEResponseProvider func(step string, requestHex string) (responseHex string, err error)
+
 // Runner is an interface for executing cliparser commands
 type Runner interface {
 	Parse(btChar, hexValue string) (string, error)
 	Encode(txID int, messageName string, params map[string]interface{}) (string, error)
-	ExecuteJPAKE(pairingCode string) (string, error)
+	ExecuteJPAKE(pairingCode string, responseProvider JPAKEResponseProvider) (string, error)
 	ListAllCommands() (string, error)
 }
 
@@ -110,25 +115,96 @@ func (r *GradleRunner) Encode(txID int, messageName string, params map[string]in
 	return output, nil
 }
 
-// ExecuteJPAKE runs JPAKE authentication
-func (r *GradleRunner) ExecuteJPAKE(pairingCode string) (string, error) {
+// ExecuteJPAKE runs JPAKE authentication with interactive stdin/stdout
+func (r *GradleRunner) ExecuteJPAKE(pairingCode string, responseProvider JPAKEResponseProvider) (string, error) {
 	args := fmt.Sprintf("jpake %s", pairingCode)
 
 	gradlePath := filepath.Join(r.pumpX2Path, r.gradleCmd)
 	cmd := exec.Command(gradlePath, "cliparser", "-q", "--console=plain", "--args="+args)
 	cmd.Dir = r.pumpX2Path
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	// Set up pipes for interactive communication
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return "", fmt.Errorf("failed to create stdin pipe: %w", err)
+	}
+	defer stdin.Close()
 
-	log.Tracef("Executing gradle JPAKE: %s", args)
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("gradle JPAKE failed: %w\nStderr: %s", err, stderr.String())
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
-	return stdout.String(), nil
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	log.Infof("Starting interactive JPAKE authentication with pairing code: %s", pairingCode)
+
+	// Start the command
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("failed to start JPAKE command: %w", err)
+	}
+
+	// Read from stdout line by line and interact
+	scanner := bufio.NewScanner(stdout)
+	var finalResult strings.Builder
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		log.Tracef("JPAKE output: %s", line)
+
+		// Check if this is a step output (format: "STEP_NAME: encoded_hex")
+		if strings.Contains(line, ": ") {
+			parts := strings.SplitN(line, ": ", 2)
+			if len(parts) == 2 {
+				step := strings.TrimSpace(parts[0])
+				requestHex := strings.TrimSpace(parts[1])
+
+				log.Infof("JPAKE step: %s, request: %s", step, requestHex)
+
+				// Call the response provider to get the pump's response
+				responseHex, err := responseProvider(step, requestHex)
+				if err != nil {
+					log.Errorf("Response provider failed for step %s: %v", step, err)
+					stdin.Close()
+					cmd.Wait()
+					return "", fmt.Errorf("response provider error at step %s: %w", step, err)
+				}
+
+				log.Infof("JPAKE step %s: sending response: %s", step, responseHex)
+
+				// Write the response to stdin
+				if _, err := fmt.Fprintln(stdin, responseHex); err != nil {
+					return "", fmt.Errorf("failed to write response for step %s: %w", step, err)
+				}
+			}
+		} else {
+			// This might be the final result (JSON output)
+			finalResult.WriteString(line)
+			finalResult.WriteString("\n")
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("error reading JPAKE output: %w", err)
+	}
+
+	// Close stdin to signal we're done
+	stdin.Close()
+
+	// Wait for command to finish
+	if err := cmd.Wait(); err != nil {
+		stderrStr := stderr.String()
+		if stderrStr != "" {
+			return "", fmt.Errorf("JPAKE command failed: %w\nStderr: %s", err, stderrStr)
+		}
+		return "", fmt.Errorf("JPAKE command failed: %w", err)
+	}
+
+	result := strings.TrimSpace(finalResult.String())
+	log.Infof("JPAKE authentication completed: %s", result)
+
+	return result, nil
 }
 
 // ListAllCommands lists all available commands
@@ -213,19 +289,92 @@ func (r *JarRunner) Encode(txID int, messageName string, params map[string]inter
 	return output, nil
 }
 
-// ExecuteJPAKE runs JPAKE authentication
-func (r *JarRunner) ExecuteJPAKE(pairingCode string) (string, error) {
+// ExecuteJPAKE runs JPAKE authentication with interactive stdin/stdout
+func (r *JarRunner) ExecuteJPAKE(pairingCode string, responseProvider JPAKEResponseProvider) (string, error) {
 	cmd := exec.Command(r.javaCmd, "-jar", r.jarPath, "jpake", pairingCode)
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	// Set up pipes for interactive communication
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return "", fmt.Errorf("failed to create stdin pipe: %w", err)
+	}
+	defer stdin.Close()
 
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("JAR JPAKE failed: %w\nStderr: %s", err, stderr.String())
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
-	return stdout.String(), nil
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	log.Infof("Starting interactive JPAKE authentication (JAR mode) with pairing code: %s", pairingCode)
+
+	// Start the command
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("failed to start JPAKE command: %w", err)
+	}
+
+	// Read from stdout line by line and interact
+	scanner := bufio.NewScanner(stdout)
+	var finalResult strings.Builder
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		log.Tracef("JPAKE output: %s", line)
+
+		// Check if this is a step output (format: "STEP_NAME: encoded_hex")
+		if strings.Contains(line, ": ") {
+			parts := strings.SplitN(line, ": ", 2)
+			if len(parts) == 2 {
+				step := strings.TrimSpace(parts[0])
+				requestHex := strings.TrimSpace(parts[1])
+
+				log.Infof("JPAKE step: %s, request: %s", step, requestHex)
+
+				// Call the response provider to get the pump's response
+				responseHex, err := responseProvider(step, requestHex)
+				if err != nil {
+					log.Errorf("Response provider failed for step %s: %v", step, err)
+					stdin.Close()
+					cmd.Wait()
+					return "", fmt.Errorf("response provider error at step %s: %w", step, err)
+				}
+
+				log.Infof("JPAKE step %s: sending response: %s", step, responseHex)
+
+				// Write the response to stdin
+				if _, err := fmt.Fprintln(stdin, responseHex); err != nil {
+					return "", fmt.Errorf("failed to write response for step %s: %w", step, err)
+				}
+			}
+		} else {
+			// This might be the final result (JSON output)
+			finalResult.WriteString(line)
+			finalResult.WriteString("\n")
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("error reading JPAKE output: %w", err)
+	}
+
+	// Close stdin to signal we're done
+	stdin.Close()
+
+	// Wait for command to finish
+	if err := cmd.Wait(); err != nil {
+		stderrStr := stderr.String()
+		if stderrStr != "" {
+			return "", fmt.Errorf("JPAKE command failed: %w\nStderr: %s", err, stderrStr)
+		}
+		return "", fmt.Errorf("JPAKE command failed: %w", err)
+	}
+
+	result := strings.TrimSpace(finalResult.String())
+	log.Infof("JPAKE authentication completed: %s", result)
+
+	return result, nil
 }
 
 // ListAllCommands lists all available commands

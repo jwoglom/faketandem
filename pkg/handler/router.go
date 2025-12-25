@@ -7,6 +7,7 @@ import (
 	"github.com/jwoglom/faketandem/pkg/bluetooth"
 	"github.com/jwoglom/faketandem/pkg/protocol"
 	"github.com/jwoglom/faketandem/pkg/pumpx2"
+	"github.com/jwoglom/faketandem/pkg/settings"
 	"github.com/jwoglom/faketandem/pkg/state"
 
 	log "github.com/sirupsen/logrus"
@@ -14,11 +15,12 @@ import (
 
 // Router routes messages to appropriate handlers
 type Router struct {
-	handlers   map[string]MessageHandler
-	bridge     *pumpx2.Bridge
-	pumpState  *state.PumpState
-	ble        *bluetooth.Ble
-	txManager  *protocol.TransactionManager
+	handlers        map[string]MessageHandler
+	bridge          *pumpx2.Bridge
+	pumpState       *state.PumpState
+	ble             *bluetooth.Ble
+	txManager       *protocol.TransactionManager
+	settingsManager *settings.Manager
 
 	// Qualifying events notifier
 	qeNotifier *QualifyingEventsNotifier
@@ -29,19 +31,29 @@ type Router struct {
 
 // NewRouter creates a new message router
 func NewRouter(bridge *pumpx2.Bridge, pumpState *state.PumpState, ble *bluetooth.Ble, txManager *protocol.TransactionManager) *Router {
+	// Create and initialize settings manager
+	settingsManager := settings.NewManager()
+	settings.RegisterDefaults(settingsManager)
+
 	r := &Router{
-		handlers:   make(map[string]MessageHandler),
-		bridge:     bridge,
-		pumpState:  pumpState,
-		ble:        ble,
-		txManager:  txManager,
-		qeNotifier: NewQualifyingEventsNotifier(bridge, ble, pumpState),
+		handlers:        make(map[string]MessageHandler),
+		bridge:          bridge,
+		pumpState:       pumpState,
+		ble:             ble,
+		txManager:       txManager,
+		settingsManager: settingsManager,
+		qeNotifier:      NewQualifyingEventsNotifier(bridge, ble, pumpState),
 	}
 
 	// Register handlers
 	r.registerHandlers()
 
 	return r
+}
+
+// GetSettingsManager returns the settings manager
+func (r *Router) GetSettingsManager() *settings.Manager {
+	return r.settingsManager
 }
 
 // registerHandlers registers all message handlers
@@ -74,13 +86,15 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewRemoteCarbEntryHandler(r.bridge))
 	r.RegisterHandler(NewBolusPermissionReleaseHandler(r.bridge))
 
-	// Settings handlers
-	r.RegisterHandler(NewBasalIQSettingsHandler(r.bridge))
-	r.RegisterHandler(NewControlIQSettingsHandler(r.bridge))
+	// Settings handlers - use generic settings manager
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "BasalIQSettingsRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ControlIQSettingsRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "PumpGlobalsRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "TherapySettingsGlobalsRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ControlIQGlobalsRequest", true))
+
+	// Keep ProfileBasalHandler as custom since it uses pump state
 	r.RegisterHandler(NewProfileBasalHandler(r.bridge))
-	r.RegisterHandler(NewGlobalsHandler(r.bridge, "PumpGlobalsRequest"))
-	r.RegisterHandler(NewGlobalsHandler(r.bridge, "TherapySettingsGlobalsRequest"))
-	r.RegisterHandler(NewGlobalsHandler(r.bridge, "ControlIQGlobalsRequest"))
 
 	// Set default handler for unknown messages
 	r.SetDefaultHandler(NewDefaultHandler(r.bridge))
