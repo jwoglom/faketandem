@@ -42,9 +42,27 @@ func NewRouter(bridge *pumpx2.Bridge, pumpState *state.PumpState, ble *bluetooth
 
 // registerHandlers registers all message handlers
 func (r *Router) registerHandlers() {
-	// Register each handler
+	// Core handlers
 	r.RegisterHandler(NewApiVersionHandler(r.bridge))
 	r.RegisterHandler(NewTimeSinceResetHandler(r.bridge))
+
+	// Authentication handlers
+	r.RegisterHandler(NewCentralChallengeHandler(r.bridge))
+	r.RegisterHandler(NewPumpChallengeHandler(r.bridge))
+
+	// JPAKE authentication handlers (rounds 1-4)
+	// Note: The exact message types may vary - these are placeholders
+	r.RegisterHandler(NewJPAKEHandler(r.bridge, "JPAKERound1Request", 1))
+	r.RegisterHandler(NewJPAKEHandler(r.bridge, "JPAKERound2Request", 2))
+	r.RegisterHandler(NewJPAKEHandler(r.bridge, "JPAKERound3Request", 3))
+	r.RegisterHandler(NewJPAKEHandler(r.bridge, "JPAKERound4Request", 4))
+
+	// Status and data handlers
+	r.RegisterHandler(NewCurrentStatusHandler(r.bridge))
+	r.RegisterHandler(NewHistoryLogHandler(r.bridge))
+
+	// Set default handler for unknown messages
+	r.SetDefaultHandler(NewDefaultHandler(r.bridge))
 
 	log.Infof("Registered %d message handlers", len(r.handlers))
 }
