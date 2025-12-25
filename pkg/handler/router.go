@@ -61,6 +61,15 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewCurrentStatusHandler(r.bridge))
 	r.RegisterHandler(NewHistoryLogHandler(r.bridge))
 
+	// Bolus handlers
+	r.RegisterHandler(NewBolusPermissionHandler(r.bridge))
+	r.RegisterHandler(NewBolusCalcDataSnapshotHandler(r.bridge))
+	r.RegisterHandler(NewInitiateBolusHandler(r.bridge))
+	r.RegisterHandler(NewBolusTerminationHandler(r.bridge))
+	r.RegisterHandler(NewRemoteBgEntryHandler(r.bridge))
+	r.RegisterHandler(NewRemoteCarbEntryHandler(r.bridge))
+	r.RegisterHandler(NewBolusPermissionReleaseHandler(r.bridge))
+
 	// Set default handler for unknown messages
 	r.SetDefaultHandler(NewDefaultHandler(r.bridge))
 
@@ -191,7 +200,16 @@ func (r *Router) applyStateChange(change StateChange) {
 	case StateChangeTime:
 		r.pumpState.UpdateTimeSinceReset()
 
-	// TODO: Implement other state changes
+	case StateChangeBolus:
+		if bolusState, ok := change.Data.(*state.BolusState); ok {
+			if bolusState.Active {
+				r.pumpState.StartBolus(bolusState.UnitsTotal, bolusState.BolusID)
+			} else {
+				r.pumpState.StopBolus()
+			}
+		}
+
+	// TODO: Implement other state changes (basal, reservoir, battery, alerts)
 	default:
 		log.Warnf("Unknown state change type: %d", change.Type)
 	}

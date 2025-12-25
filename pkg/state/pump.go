@@ -244,3 +244,60 @@ func (ps *PumpState) GetBasalRate() float64 {
 	}
 	return ps.Basal.CurrentRate
 }
+
+// GetNextBolusID returns the next bolus ID
+func (ps *PumpState) GetNextBolusID() uint32 {
+	ps.mutex.RLock()
+	defer ps.mutex.RUnlock()
+
+	// Simple incrementing ID based on time
+	return uint32(time.Now().Unix() % 1000000)
+}
+
+// StartBolus starts a bolus delivery
+func (ps *PumpState) StartBolus(units float64, bolusID uint32) {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+
+	ps.Bolus.Active = true
+	ps.Bolus.UnitsTotal = units
+	ps.Bolus.UnitsDelivered = 0
+	ps.Bolus.StartTime = time.Now()
+	ps.Bolus.BolusID = bolusID
+
+	log.Infof("Started bolus: %.2f units, ID=%d", units, bolusID)
+}
+
+// StopBolus stops an active bolus
+func (ps *PumpState) StopBolus() {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+
+	if ps.Bolus.Active {
+		log.Infof("Stopped bolus: delivered %.2f of %.2f units",
+			ps.Bolus.UnitsDelivered, ps.Bolus.UnitsTotal)
+		ps.Bolus.Active = false
+	}
+}
+
+// UpdateBolusDelivery updates the bolus delivery progress
+func (ps *PumpState) UpdateBolusDelivery(delivered float64) {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+
+	if ps.Bolus.Active {
+		ps.Bolus.UnitsDelivered = delivered
+		if ps.Bolus.UnitsDelivered >= ps.Bolus.UnitsTotal {
+			ps.Bolus.Active = false
+			log.Infof("Bolus complete: %.2f units delivered", ps.Bolus.UnitsDelivered)
+		}
+	}
+}
+
+// IsBolusActive returns true if a bolus is currently active
+func (ps *PumpState) IsBolusActive() bool {
+	ps.mutex.RLock()
+	defer ps.mutex.RUnlock()
+
+	return ps.Bolus.Active
+}
