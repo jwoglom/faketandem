@@ -5,6 +5,7 @@ import (
 	"flag"
 	"time"
 
+	"github.com/avereha/pod/pkg/api"
 	"github.com/avereha/pod/pkg/bluetooth"
 
 	"github.com/sirupsen/logrus"
@@ -46,9 +47,13 @@ func main() {
 		log.Fatalf("Could not start BLE: %s", err)
 	}
 
-	// Set up write handler to log incoming data
+	// Create API server
+	server := api.New(ble)
+
+	// Set up write handler to log incoming data and notify websocket clients
 	ble.SetWriteHandler(func(charType bluetooth.CharacteristicType, data []byte) {
 		log.Infof("Received write on %s: %s", charType, hex.EncodeToString(data))
+		server.SendWriteEvent(charType, data)
 		// TODO: Add your response logic here
 	})
 
@@ -59,7 +64,17 @@ func main() {
 		return nil
 	})
 
+	// Set up custom command handler for websocket commands
+	server.SetCommandHandler(func(command string, params map[string]interface{}) {
+		log.Infof("Received command from websocket: %s, params: %v", command, params)
+		// TODO: Handle custom commands
+	})
+
 	log.Info("Bluetooth device initialized, waiting for connections...")
+	log.Info("Starting API server on :8080")
+
+	// Start API server (blocking)
+	go server.Start()
 
 	// Keep the program running
 	for {
