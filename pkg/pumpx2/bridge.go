@@ -1,10 +1,8 @@
 package pumpx2
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
@@ -12,26 +10,34 @@ import (
 
 // Bridge provides an interface to the pumpX2 cliparser
 type Bridge struct {
-	jarPath      string
-	javaCmd      string
-	authKey      string
-	pairingCode  string
+	runner         Runner
+	mode           string
+	authKey        string
+	pairingCode    string
 	timeSinceReset uint32
 }
 
 // NewBridge creates a new pumpX2 cliparser bridge
-func NewBridge(pumpX2Path, gradleCmd, javaCmd string) (*Bridge, error) {
-	// Build/find the cliparser JAR
-	jarPath, err := BuildCliParserJAR(pumpX2Path, gradleCmd)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initialize cliparser: %w", err)
+func NewBridge(pumpX2Path, mode, gradleCmd, javaCmd string) (*Bridge, error) {
+	var runner Runner
+
+	if mode == "gradle" {
+		log.Info("Using gradle mode for cliparser")
+		runner = NewGradleRunner(pumpX2Path, gradleCmd)
+	} else {
+		log.Info("Using JAR mode for cliparser")
+		// Build/find the cliparser JAR
+		jarPath, err := BuildCliParserJAR(pumpX2Path, gradleCmd)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize cliparser JAR: %w", err)
+		}
+		log.Infof("Using cliparser JAR: %s", jarPath)
+		runner = NewJarRunner(jarPath, javaCmd)
 	}
 
-	log.Infof("Initialized pumpX2 bridge with JAR: %s", jarPath)
-
 	return &Bridge{
-		jarPath:        jarPath,
-		javaCmd:        javaCmd,
+		runner:         runner,
+		mode:           mode,
 		timeSinceReset: 0, // Will be updated as needed
 	}, nil
 }
@@ -53,96 +59,30 @@ func (b *Bridge) SetTimeSinceReset(seconds uint32) {
 	b.timeSinceReset = seconds
 }
 
-// execCliParser executes a cliparser command and returns the output
-func (b *Bridge) execCliParser(args ...string) (string, error) {
-	cmdArgs := []string{"-jar", b.jarPath}
-	cmdArgs = append(cmdArgs, args...)
-
-	cmd := exec.Command(b.javaCmd, cmdArgs...)
-
-	// Set environment variables for authentication
-	env := []string{}
-	if b.authKey != "" {
-		env = append(env, fmt.Sprintf("PUMP_AUTHENTICATION_KEY=%s", b.authKey))
+// charTypeToBtChar maps characteristic type to btChar name for gradle mode
+func charTypeToBtChar(charType int) string {
+	// Map based on the bluetooth package characteristic types
+	// CharAuthorization=3, CharControl=4, CharControlStream=5, CharCurrentStatus=0, CharHistoryLog=2
+	switch charType {
+	case 0: // CharCurrentStatus
+		return "currentStatus"
+	case 2: // CharHistoryLog
+		return "historyLog"
+	case 3: // CharAuthorization
+		return "authentication"
+	case 4: // CharControl
+		return "control"
+	case 5: // CharControlStream
+		return "controlStream"
+	default:
+		return "currentStatus" // Default fallback
 	}
-	if b.pairingCode != "" {
-		env = append(env, fmt.Sprintf("PUMP_PAIRING_CODE=%s", b.pairingCode))
-	}
-	if b.timeSinceReset > 0 {
-		env = append(env, fmt.Sprintf("PUMP_TIME_SINCE_RESET=%d", b.timeSinceReset))
-	}
-	cmd.Env = append(cmd.Env, env...)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	log.Tracef("Executing cliparser: %s %s", b.javaCmd, strings.Join(cmdArgs, " "))
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("cliparser execution failed: %w\nStderr: %s", err, stderr.String())
-	}
-
-	output := stdout.String()
-	log.Tracef("cliparser output: %s", output)
-
-	return output, nil
-}
-
-// ParseOpcode identifies the opcode and message type from hex data
-func (b *Bridge) ParseOpcode(hexData string) (*OpcodeInfo, error) {
-	output, err := b.execCliParser("opcode", hexData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse opcode: %w", err)
-	}
-
-	// The opcode command outputs format like: "Opcode: 65 (0x41) - ApiVersionRequest"
-	// We need to parse this
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	if len(lines) == 0 {
-		return nil, fmt.Errorf("no output from opcode command")
-	}
-
-	// For now, return a simple struct - we can enhance parsing later
-	info := &OpcodeInfo{}
-
-	// Try to extract opcode and message type from the output
-	// This is a simple parser - enhance as needed
-	for _, line := range lines {
-		if strings.Contains(line, "Opcode:") {
-			// Parse opcode value
-			var opcode int
-			var msgType string
-			_, err := fmt.Sscanf(line, "Opcode: %d", &opcode)
-			if err == nil {
-				info.Opcode = opcode
-			}
-
-			// Extract message type (after the dash)
-			if idx := strings.Index(line, "-"); idx >= 0 {
-				msgType = strings.TrimSpace(line[idx+1:])
-				info.MessageType = msgType
-
-				// Determine direction
-				if strings.HasSuffix(msgType, "Request") {
-					info.Direction = "request"
-				} else if strings.HasSuffix(msgType, "Response") {
-					info.Direction = "response"
-				}
-			}
-		}
-	}
-
-	if info.MessageType == "" {
-		return nil, fmt.Errorf("could not parse message type from output: %s", output)
-	}
-
-	return info, nil
 }
 
 // ParseMessage parses a hex message into a structured format
-func (b *Bridge) ParseMessage(hexData string) (*ParsedMessage, error) {
-	output, err := b.execCliParser("parse", hexData)
+func (b *Bridge) ParseMessage(charType int, hexData string) (*ParsedMessage, error) {
+	btChar := charTypeToBtChar(charType)
+	output, err := b.runner.Parse(btChar, hexData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse message: %w", err)
 	}
@@ -187,15 +127,7 @@ func (b *Bridge) ParseMessage(hexData string) (*ParsedMessage, error) {
 
 // EncodeMessage builds a message using the specified parameters
 func (b *Bridge) EncodeMessage(txID int, messageName string, params map[string]interface{}) (*EncodedMessage, error) {
-	// Build the encode command arguments
-	args := []string{"encode", fmt.Sprintf("%d", txID), messageName}
-
-	// Add parameters as key=value pairs
-	for key, value := range params {
-		args = append(args, fmt.Sprintf("%s=%v", key, value))
-	}
-
-	output, err := b.execCliParser(args...)
+	output, err := b.runner.Encode(txID, messageName, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode message: %w", err)
 	}
@@ -266,7 +198,7 @@ func (b *Bridge) parseEncodeTextOutput(output string, txID int, messageName stri
 
 // ExecuteJPAKE runs the JPAKE authentication flow
 func (b *Bridge) ExecuteJPAKE(pairingCode string) (string, error) {
-	output, err := b.execCliParser("jpake", pairingCode)
+	output, err := b.runner.ExecuteJPAKE(pairingCode)
 	if err != nil {
 		return "", fmt.Errorf("JPAKE execution failed: %w", err)
 	}
@@ -276,7 +208,7 @@ func (b *Bridge) ExecuteJPAKE(pairingCode string) (string, error) {
 
 // ListAllCommands returns all available request opcodes
 func (b *Bridge) ListAllCommands() ([]string, error) {
-	output, err := b.execCliParser("listallcommands")
+	output, err := b.runner.ListAllCommands()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list commands: %w", err)
 	}

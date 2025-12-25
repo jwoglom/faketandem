@@ -10,6 +10,7 @@ import (
 type Config struct {
 	// pumpX2 configuration
 	PumpX2Path string
+	PumpX2Mode string // "gradle" or "jar"
 	GradleCmd  string
 	JavaCmd    string
 
@@ -18,7 +19,7 @@ type Config struct {
 }
 
 // New creates a new configuration
-func New(pumpX2Path, gradleCmd, javaCmd, logLevel string) (*Config, error) {
+func New(pumpX2Path, pumpX2Mode, gradleCmd, javaCmd, logLevel string) (*Config, error) {
 	// Check for environment variable if path not provided
 	if pumpX2Path == "" {
 		pumpX2Path = os.Getenv("PUMPX2_PATH")
@@ -44,8 +45,14 @@ func New(pumpX2Path, gradleCmd, javaCmd, logLevel string) (*Config, error) {
 		return nil, fmt.Errorf("path does not appear to be a pumpX2 repository (missing gradlew): %s", pumpX2Path)
 	}
 
+	// Validate mode
+	if pumpX2Mode != "gradle" && pumpX2Mode != "jar" {
+		return nil, fmt.Errorf("invalid pumpx2-mode: %s (must be 'gradle' or 'jar')", pumpX2Mode)
+	}
+
 	return &Config{
 		PumpX2Path: pumpX2Path,
+		PumpX2Mode: pumpX2Mode,
 		GradleCmd:  gradleCmd,
 		JavaCmd:    javaCmd,
 		LogLevel:   logLevel,

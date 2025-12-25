@@ -22,6 +22,7 @@ func main() {
 	var traceLevel = flag.Bool("v", false, "verbose off by default, TraceLevel")
 	var infoLevel = flag.Bool("q", false, "quiet off by default, InfoLevel")
 	var pumpX2Path = flag.String("pumpx2-path", "", "path to pumpX2 repository (required)")
+	var pumpX2Mode = flag.String("pumpx2-mode", "gradle", "mode to run cliparser: 'gradle' or 'jar'")
 	var gradleCmd = flag.String("gradle-cmd", "./gradlew", "gradle command to use")
 	var javaCmd = flag.String("java-cmd", "java", "java command to use")
 
@@ -45,13 +46,14 @@ func main() {
 	})
 
 	// Initialize configuration
-	cfg, err := config.New(*pumpX2Path, *gradleCmd, *javaCmd, logLevel)
+	cfg, err := config.New(*pumpX2Path, *pumpX2Mode, *gradleCmd, *javaCmd, logLevel)
 	if err != nil {
 		log.Fatalf("Configuration error: %s", err)
 	}
 
 	log.Info("Starting Tandem Pump Emulator")
 	log.Infof("pumpX2 repository: %s", cfg.PumpX2Path)
+	log.Infof("pumpX2 mode: %s", cfg.PumpX2Mode)
 	log.Info("Service UUID: ", bluetooth.PumpServiceUUID)
 	log.Info("Characteristics:")
 	log.Info("  CurrentStatus:     ", bluetooth.CurrentStatusCharUUID)
@@ -63,7 +65,7 @@ func main() {
 
 	// Initialize pumpX2 bridge
 	log.Info("Initializing pumpX2 bridge...")
-	bridge, err := pumpx2.NewBridge(cfg.PumpX2Path, cfg.GradleCmd, cfg.JavaCmd)
+	bridge, err := pumpx2.NewBridge(cfg.PumpX2Path, cfg.PumpX2Mode, cfg.GradleCmd, cfg.JavaCmd)
 	if err != nil {
 		log.Fatalf("Failed to initialize pumpX2 bridge: %s", err)
 	}
@@ -120,7 +122,7 @@ func main() {
 		log.Infof("Received complete message on %s: %s", charType, hex.EncodeToString(message))
 
 		// Parse the message using pumpX2 bridge
-		parsed, err := bridge.ParseMessage(hex.EncodeToString(message))
+		parsed, err := bridge.ParseMessage(int(charType), hex.EncodeToString(message))
 		if err != nil {
 			log.Errorf("Failed to parse message: %v", err)
 			return
