@@ -8,8 +8,10 @@ import (
 	"github.com/avereha/pod/pkg/api"
 	"github.com/avereha/pod/pkg/bluetooth"
 	"github.com/avereha/pod/pkg/config"
+	"github.com/avereha/pod/pkg/handler"
 	"github.com/avereha/pod/pkg/protocol"
 	"github.com/avereha/pod/pkg/pumpx2"
+	"github.com/avereha/pod/pkg/state"
 
 	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
@@ -75,10 +77,24 @@ func main() {
 
 	log.Debugf("Protocol components initialized: reassembler timeout=30s, transaction timeout=10s")
 
+	// Initialize pump state
+	pumpState := state.NewPumpState()
+	log.Infof("Pump state initialized: serial=%s, model=%s, API version=%d",
+		pumpState.GetSerialNumber(), pumpState.Model, pumpState.GetAPIVersion())
+	log.Infof("Initial state: reservoir=%.1f units, battery=%d%%, basal rate=%.2f U/hr",
+		pumpState.GetReservoirLevel(), pumpState.GetBatteryLevel(), pumpState.GetBasalRate())
+
+	// Set pairing code in bridge
+	bridge.SetPairingCode(pumpState.GetPairingCode())
+
 	ble, err := bluetooth.New("hci0")
 	if err != nil {
 		log.Fatalf("Could not start BLE: %s", err)
 	}
+
+	// Create message router
+	router := handler.NewRouter(bridge, pumpState, ble, txManager)
+	log.Info("Message router initialized")
 
 	// Create API server
 	server := api.New(ble)
@@ -113,9 +129,11 @@ func main() {
 		log.Infof("Parsed message: type=%s, txID=%d, opcode=%d",
 			parsed.MessageType, parsed.TxID, parsed.Opcode)
 
-		// TODO: Route to appropriate handler based on message type
-		// For now, we're just logging
-		_ = txManager // Will be used in handlers
+		// Route to handler
+		if err := router.RouteMessage(charType, parsed); err != nil {
+			log.Errorf("Failed to route message: %v", err)
+			return
+		}
 	})
 
 	// Set up read handler
