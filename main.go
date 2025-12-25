@@ -7,6 +7,9 @@ import (
 
 	"github.com/avereha/pod/pkg/api"
 	"github.com/avereha/pod/pkg/bluetooth"
+	"github.com/avereha/pod/pkg/config"
+	"github.com/avereha/pod/pkg/protocol"
+	"github.com/avereha/pod/pkg/pumpx2"
 
 	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
@@ -16,13 +19,20 @@ func main() {
 	// if both verbose and quiet are chosen, e.g., -v -q, the verbose dominates
 	var traceLevel = flag.Bool("v", false, "verbose off by default, TraceLevel")
 	var infoLevel = flag.Bool("q", false, "quiet off by default, InfoLevel")
+	var pumpX2Path = flag.String("pumpx2-path", "", "path to pumpX2 repository (required)")
+	var gradleCmd = flag.String("gradle-cmd", "./gradlew", "gradle command to use")
+	var javaCmd = flag.String("java-cmd", "java", "java command to use")
 
 	flag.Parse()
 
+	// Determine log level
+	logLevel := "debug"
 	if *traceLevel {
 		log.SetLevel(log.TraceLevel)
+		logLevel = "trace"
 	} else if *infoLevel {
 		log.SetLevel(log.InfoLevel)
+		logLevel = "info"
 	} else {
 		log.SetLevel(log.DebugLevel)
 	}
@@ -32,7 +42,14 @@ func main() {
 		ForceColors:  true,
 	})
 
+	// Initialize configuration
+	cfg, err := config.New(*pumpX2Path, *gradleCmd, *javaCmd, logLevel)
+	if err != nil {
+		log.Fatalf("Configuration error: %s", err)
+	}
+
 	log.Info("Starting Tandem Pump Emulator")
+	log.Infof("pumpX2 repository: %s", cfg.PumpX2Path)
 	log.Info("Service UUID: ", bluetooth.PumpServiceUUID)
 	log.Info("Characteristics:")
 	log.Info("  CurrentStatus:     ", bluetooth.CurrentStatusCharUUID)
@@ -41,6 +58,22 @@ func main() {
 	log.Info("  Authorization:     ", bluetooth.AuthorizationCharUUID)
 	log.Info("  Control:           ", bluetooth.ControlCharUUID)
 	log.Info("  ControlStream:     ", bluetooth.ControlStreamCharUUID)
+
+	// Initialize pumpX2 bridge
+	log.Info("Initializing pumpX2 bridge...")
+	bridge, err := pumpx2.NewBridge(cfg.PumpX2Path, cfg.GradleCmd, cfg.JavaCmd)
+	if err != nil {
+		log.Fatalf("Failed to initialize pumpX2 bridge: %s", err)
+	}
+	log.Info("pumpX2 bridge initialized successfully")
+
+	// Initialize protocol components
+	reassembler := protocol.NewReassembler(30 * time.Second)
+	defer reassembler.Stop()
+
+	txManager := protocol.NewTransactionManager(10 * time.Second)
+
+	log.Debugf("Protocol components initialized: reassembler timeout=30s, transaction timeout=10s")
 
 	ble, err := bluetooth.New("hci0")
 	if err != nil {
@@ -52,9 +85,37 @@ func main() {
 
 	// Set up write handler to log incoming data and notify websocket clients
 	ble.SetWriteHandler(func(charType bluetooth.CharacteristicType, data []byte) {
-		log.Infof("Received write on %s: %s", charType, hex.EncodeToString(data))
+		protocol.LogPacket("RX", charType, data)
 		server.SendWriteEvent(charType, data)
-		// TODO: Add your response logic here
+
+		// Reassemble multi-packet messages
+		message, isComplete, err := reassembler.AddPacket(charType, data)
+		if err != nil {
+			log.Errorf("Failed to add packet to reassembler: %v", err)
+			return
+		}
+
+		if !isComplete {
+			log.Trace("Waiting for more packets...")
+			return
+		}
+
+		// We have a complete message, parse it
+		log.Infof("Received complete message on %s: %s", charType, hex.EncodeToString(message))
+
+		// Parse the message using pumpX2 bridge
+		parsed, err := bridge.ParseMessage(hex.EncodeToString(message))
+		if err != nil {
+			log.Errorf("Failed to parse message: %v", err)
+			return
+		}
+
+		log.Infof("Parsed message: type=%s, txID=%d, opcode=%d",
+			parsed.MessageType, parsed.TxID, parsed.Opcode)
+
+		// TODO: Route to appropriate handler based on message type
+		// For now, we're just logging
+		_ = txManager // Will be used in handlers
 	})
 
 	// Set up read handler
