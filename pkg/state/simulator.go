@@ -144,7 +144,9 @@ func (s *Simulator) updateBolusDelivery() {
 
 		// Notify qualifying event
 		if s.eventNotifier != nil {
-			s.eventNotifier.NotifyBolusComplete(bolusID, unitsDelivered, unitsTotal)
+			if err := s.eventNotifier.NotifyBolusComplete(bolusID, unitsDelivered, unitsTotal); err != nil {
+				log.Warnf("Failed to notify bolus complete: %v", err)
+			}
 		}
 	}
 }
@@ -221,11 +223,15 @@ func (s *Simulator) checkAlerts() {
 
 	// Check low reservoir
 	if s.pumpState.Reservoir.CurrentUnits < 20.0 && !s.hasAlert(AlertLowReservoir) {
-		log.Warn("Low reservoir alert: %.1f units remaining", s.pumpState.Reservoir.CurrentUnits)
+		log.Warnf("Low reservoir alert: %.1f units remaining", s.pumpState.Reservoir.CurrentUnits)
 		alert := s.addAlert(AlertLowReservoir, PriorityWarning, "Low reservoir")
 		if s.eventNotifier != nil {
-			s.eventNotifier.NotifyAlert(alert)
-			s.eventNotifier.NotifyReservoirLow(s.pumpState.Reservoir.CurrentUnits)
+			if err := s.eventNotifier.NotifyAlert(alert); err != nil {
+				log.Warnf("Failed to notify alert: %v", err)
+			}
+			if err := s.eventNotifier.NotifyReservoirLow(s.pumpState.Reservoir.CurrentUnits); err != nil {
+				log.Warnf("Failed to notify reservoir low: %v", err)
+			}
 		}
 	}
 
@@ -234,8 +240,12 @@ func (s *Simulator) checkAlerts() {
 		log.Warnf("Low battery alert: %d%% remaining", s.pumpState.Battery.Percentage)
 		alert := s.addAlert(AlertLowBattery, PriorityWarning, "Low battery")
 		if s.eventNotifier != nil {
-			s.eventNotifier.NotifyAlert(alert)
-			s.eventNotifier.NotifyBatteryLow(s.pumpState.Battery.Percentage)
+			if err := s.eventNotifier.NotifyAlert(alert); err != nil {
+				log.Warnf("Failed to notify alert: %v", err)
+			}
+			if err := s.eventNotifier.NotifyBatteryLow(s.pumpState.Battery.Percentage); err != nil {
+				log.Warnf("Failed to notify battery low: %v", err)
+			}
 		}
 	}
 
@@ -244,8 +254,12 @@ func (s *Simulator) checkAlerts() {
 		log.Errorf("Critical battery alert: %d%% remaining", s.pumpState.Battery.Percentage)
 		alert := s.addAlert(AlertLowBattery, PriorityCritical, "Critical battery")
 		if s.eventNotifier != nil {
-			s.eventNotifier.NotifyAlert(alert)
-			s.eventNotifier.NotifyBatteryLow(s.pumpState.Battery.Percentage)
+			if err := s.eventNotifier.NotifyAlert(alert); err != nil {
+				log.Warnf("Failed to notify alert: %v", err)
+			}
+			if err := s.eventNotifier.NotifyBatteryLow(s.pumpState.Battery.Percentage); err != nil {
+				log.Warnf("Failed to notify battery low: %v", err)
+			}
 		}
 	}
 }

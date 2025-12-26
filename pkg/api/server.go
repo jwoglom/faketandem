@@ -331,7 +331,8 @@ func (s *Server) handleSettingsAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetAllSettings returns all registered settings configurations
-func (s *Server) handleGetAllSettings(w http.ResponseWriter, r *http.Request) {
+//nolint:unparam // r is required by http.HandlerFunc interface
+func (s *Server) handleGetAllSettings(w http.ResponseWriter, _ *http.Request) {
 	configs := s.settingsManager.GetAllConfigs()
 
 	if err := json.NewEncoder(w).Encode(configs); err != nil {
@@ -341,7 +342,8 @@ func (s *Server) handleGetAllSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetSetting returns a specific settings configuration
-func (s *Server) handleGetSetting(w http.ResponseWriter, r *http.Request, messageType string) {
+//nolint:unparam // r is required by http.HandlerFunc interface
+func (s *Server) handleGetSetting(w http.ResponseWriter, _ *http.Request, messageType string) {
 	config, err := s.settingsManager.GetConfig(messageType)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("Configuration not found: %s", err), http.StatusNotFound)
@@ -391,7 +393,8 @@ func (s *Server) handleUpdateSetting(w http.ResponseWriter, r *http.Request, mes
 }
 
 // handleResetSetting resets the state for a settings configuration
-func (s *Server) handleResetSetting(w http.ResponseWriter, r *http.Request, messageType string) {
+//nolint:unparam // r is required by http.HandlerFunc interface
+func (s *Server) handleResetSetting(w http.ResponseWriter, _ *http.Request, messageType string) {
 	if messageType == "" {
 		http.Error(w, "Message type is required", http.StatusBadRequest)
 		return

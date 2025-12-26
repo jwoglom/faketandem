@@ -90,11 +90,15 @@ func (b *Bridge) ParseMessage(charType bluetooth.CharacteristicType, hexData str
 			msg.MessageType = strings.TrimSpace(strings.TrimPrefix(line, "Message:"))
 		} else if strings.HasPrefix(line, "TxID:") || strings.HasPrefix(line, "Transaction ID:") {
 			var txid int
-			fmt.Sscanf(line, "TxID: %d", &txid)
+			if _, err := fmt.Sscanf(line, "TxID: %d", &txid); err != nil {
+				log.Debugf("Failed to parse TxID: %v", err)
+			}
 			msg.TxID = txid
 		} else if strings.HasPrefix(line, "Opcode:") {
 			var opcode int
-			fmt.Sscanf(line, "Opcode: %d", &opcode)
+			if _, err := fmt.Sscanf(line, "Opcode: %d", &opcode); err != nil {
+				log.Debugf("Failed to parse Opcode: %v", err)
+			}
 			msg.Opcode = opcode
 		}
 	}

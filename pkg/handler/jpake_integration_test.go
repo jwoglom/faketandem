@@ -6,8 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jwoglom/faketandem/pkg/pumpx2"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/jwoglom/faketandem/pkg/pumpx2"
 )
 
 // TestPumpX2JPAKEAuthenticator_FullFlow tests the complete JPAKE authentication flow

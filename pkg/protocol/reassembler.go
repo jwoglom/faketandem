@@ -6,8 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/jwoglom/faketandem/pkg/bluetooth"
 	log "github.com/sirupsen/logrus"
+
+	"github.com/jwoglom/faketandem/pkg/bluetooth"
 )
 
 // PacketBuffer holds packets being assembled into a complete message

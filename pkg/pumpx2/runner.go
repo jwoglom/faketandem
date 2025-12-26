@@ -167,7 +167,7 @@ func (r *GradleRunner) ExecuteJPAKE(pairingCode string, responseProvider JPAKERe
 				if err != nil {
 					log.Errorf("Response provider failed for step %s: %v", step, err)
 					stdin.Close()
-					cmd.Wait()
+					_ = cmd.Wait() // Ignore error in cleanup path
 					return "", fmt.Errorf("response provider error at step %s: %w", step, err)
 				}
 
@@ -337,7 +337,7 @@ func (r *JarRunner) ExecuteJPAKE(pairingCode string, responseProvider JPAKERespo
 				if err != nil {
 					log.Errorf("Response provider failed for step %s: %v", step, err)
 					stdin.Close()
-					cmd.Wait()
+					_ = cmd.Wait() // Ignore error in cleanup path
 					return "", fmt.Errorf("response provider error at step %s: %w", step, err)
 				}
 

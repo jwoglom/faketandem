@@ -11,9 +11,9 @@ import (
 	"time"
 
 	expect "github.com/google/goexpect"
-	"github.com/jwoglom/faketandem/pkg/pumpx2"
-
 	log "github.com/sirupsen/logrus"
+
+	"github.com/jwoglom/faketandem/pkg/pumpx2"
 )
 
 // PumpX2JPAKEAuthenticator uses pumpX2's actual server-side JPAKE implementation
@@ -190,7 +190,9 @@ func (j *PumpX2JPAKEAuthenticator) processRound1(requestData map[string]interfac
 
 	// Send client's request to pumpX2 server
 	log.Debugf("Sending client Jpake1aRequest to pumpX2: %s", requestHex)
-	j.gexp.Send(requestHex + "\n")
+	if err := j.gexp.Send(requestHex + "\n"); err != nil {
+		log.Warnf("Failed to send to pumpX2: %v", err)
+	}
 
 	// The round 1a involves two sub-rounds
 	// First call returns round1a response
@@ -208,7 +210,9 @@ func (j *PumpX2JPAKEAuthenticator) processRound1(requestData map[string]interfac
 	}
 
 	log.Debugf("Sending client Jpake1bRequest to pumpX2: %s", requestHex)
-	j.gexp.Send(requestHex + "\n")
+	if err := j.gexp.Send(requestHex + "\n"); err != nil {
+		log.Warnf("Failed to send to pumpX2: %v", err)
+	}
 
 	// Read server's round 2 response (pumpX2 sends it after receiving round 1b)
 	round2Regex := regexp.MustCompile(`JPAKE_2:\s*({.+})`)
@@ -240,7 +244,9 @@ func (j *PumpX2JPAKEAuthenticator) processRound2(requestData map[string]interfac
 	}
 
 	log.Debugf("Sending client Jpake2Request to pumpX2: %s", requestHex)
-	j.gexp.Send(requestHex + "\n")
+	if err := j.gexp.Send(requestHex + "\n"); err != nil {
+		log.Warnf("Failed to send to pumpX2: %v", err)
+	}
 
 	// Read server's round 3 response
 	round3Regex := regexp.MustCompile(`JPAKE_3:\s*({.+})`)
@@ -266,6 +272,7 @@ func (j *PumpX2JPAKEAuthenticator) processRound2(requestData map[string]interfac
 }
 
 // processRound3 handles round 3
+//nolint:unparam // error return required by interface, may be used in future
 func (j *PumpX2JPAKEAuthenticator) processRound3(requestData map[string]interface{}) (map[string]interface{}, error) {
 	// Send client's Jpake3SessionKeyRequest
 	requestHex, err := j.encodeClientRequest(requestData)
@@ -274,7 +281,9 @@ func (j *PumpX2JPAKEAuthenticator) processRound3(requestData map[string]interfac
 	}
 
 	log.Debugf("Sending client Jpake3SessionKeyRequest to pumpX2: %s", requestHex)
-	j.gexp.Send(requestHex + "\n")
+	if err := j.gexp.Send(requestHex + "\n"); err != nil {
+		log.Warnf("Failed to send to pumpX2: %v", err)
+	}
 
 	j.round = 3
 
@@ -295,7 +304,9 @@ func (j *PumpX2JPAKEAuthenticator) processRound4(requestData map[string]interfac
 	}
 
 	log.Debugf("Sending client Jpake4KeyConfirmationRequest to pumpX2: %s", requestHex)
-	j.gexp.Send(requestHex + "\n")
+	if err := j.gexp.Send(requestHex + "\n"); err != nil {
+		log.Warnf("Failed to send to pumpX2: %v", err)
+	}
 
 	// Read server's round 4 response
 	round4Regex := regexp.MustCompile(`JPAKE_4:\s*({.+})`)

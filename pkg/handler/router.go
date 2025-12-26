@@ -233,7 +233,9 @@ func (r *Router) applyStateChange(change StateChange) {
 				r.pumpState.StartBolus(bolusState.UnitsTotal, bolusState.BolusID)
 				// Notify bolus start
 				if r.qeNotifier != nil {
-					r.qeNotifier.NotifyBolusStart(bolusState.BolusID, bolusState.UnitsTotal)
+					if err := r.qeNotifier.NotifyBolusStart(bolusState.BolusID, bolusState.UnitsTotal); err != nil {
+						log.Warnf("Failed to notify bolus start: %v", err)
+					}
 				}
 			} else {
 				// Get current bolus info before stopping

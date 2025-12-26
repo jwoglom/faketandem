@@ -217,7 +217,9 @@ func (b *Ble) addCharacteristic(s *gatt.Service, uuidStr string, charType Charac
 		}
 
 		log.Tracef("pkg bluetooth; read request on %s, responding with: %s", charType, hex.EncodeToString(data))
-		rsp.Write(data)
+		if _, err := rsp.Write(data); err != nil {
+			log.Warnf("Failed to write BLE response: %v", err)
+		}
 	})
 
 	// Handle notifications

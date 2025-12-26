@@ -145,7 +145,7 @@ func (tm *TransactionManager) CancelRequest(txID uint8) {
 	defer tm.mutex.Unlock()
 
 	if req, exists := tm.pendingReqs[txID]; exists {
-		log.Debugf("Cancelling request: txID=%d, messageType=%s", txID, req.MessageType)
+		log.Debugf("Canceling request: txID=%d, messageType=%s", txID, req.MessageType)
 		close(req.ResponseChan)
 		delete(tm.pendingReqs, txID)
 	}

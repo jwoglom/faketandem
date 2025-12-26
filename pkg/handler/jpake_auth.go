@@ -67,6 +67,7 @@ func (j *JPAKEAuthenticator) ProcessRound(round int, requestData map[string]inte
 // processRound1 handles the first JPAKE round
 // Client sends gx3, gx4 (their ephemeral public keys)
 // Server responds with gx1, gx2 (our ephemeral public keys)
+//nolint:unparam // error return required by interface, may be used in future
 func (j *JPAKEAuthenticator) processRound1(requestData map[string]interface{}) (map[string]interface{}, error) {
 	log.Debug("JPAKE Round 1: Generating server ephemeral keys")
 
