@@ -3,9 +3,11 @@ package handler
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"sync"
 	"time"
 
@@ -86,6 +88,23 @@ func (j *PumpX2JPAKEAuthenticator) ProcessRound(round int, requestData map[strin
 	}
 }
 
+// getRepoRoot returns the absolute path to the git repository root
+// Falls back to current working directory if not in a git repo
+func getRepoRoot() string {
+	cmd := exec.Command("git", "rev-parse", "--show-toplevel")
+	output, err := cmd.Output()
+	if err != nil {
+		// Not in a git repo, use current working directory
+		cwd, err := os.Getwd()
+		if err != nil {
+			log.Warnf("Failed to get current working directory: %v", err)
+			return "."
+		}
+		return cwd
+	}
+	return strings.TrimSpace(string(output))
+}
+
 // startJPAKEServerProcess starts the pumpX2 jpake-server command
 func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 	var scriptPath string
@@ -93,7 +112,9 @@ func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 
 	if j.pumpX2Mode == "gradle" {
 		// Use wrapper script that handles directory change and gradle invocation
-		scriptPath = "scripts/cliparser-gradle.sh"
+		// Get absolute path to the script in the repo
+		repoRoot := getRepoRoot()
+		scriptPath = filepath.Join(repoRoot, "scripts", "cliparser-gradle.sh")
 		args = []string{
 			j.pumpX2Path,
 			"jpake-server",
