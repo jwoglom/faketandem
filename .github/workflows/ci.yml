@@ -91,13 +91,20 @@ jobs:
 
     - name: Build pumpX2 cliparser
       working-directory: pumpX2
-      run: ./gradlew :cliparser:build --console=plain -q
-
-    - name: Verify cliparser JAR
       run: |
-        if [ -f pumpX2/cliparser/build/libs/cliparser.jar ]; then
+        echo "Building cliparser JAR..."
+        ./gradlew :cliparser:build --console=plain -q
+        echo "Build complete"
+
+    - name: Verify cliparser JAR and jpake-server support
+      working-directory: pumpX2
+      run: |
+        if [ -f cliparser/build/libs/cliparser.jar ]; then
           echo "✓ cliparser.jar found"
-          ls -lh pumpX2/cliparser/build/libs/cliparser.jar
+          ls -lh cliparser/build/libs/cliparser.jar
+          echo ""
+          echo "Checking if jpake-server is implemented..."
+          grep -r "jpake-server" cliparser/src/ || echo "⚠️  jpake-server not found in source"
         else
           echo "✗ cliparser.jar not found"
           exit 1
