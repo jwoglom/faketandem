@@ -17,12 +17,12 @@ const (
 
 // Characteristic UUIDs
 const (
-	CurrentStatusCharUUID      = "7B83FFF6-9F77-4E5C-8064-AAE2C24838B9"
-	QualifyingEventsCharUUID   = "7B83FFF7-9F77-4E5C-8064-AAE2C24838B9"
-	HistoryLogCharUUID         = "7B83FFF8-9F77-4E5C-8064-AAE2C24838B9"
-	AuthorizationCharUUID      = "7B83FFF9-9F77-4E5C-8064-AAE2C24838B9"
-	ControlCharUUID            = "7B83FFFC-9F77-4E5C-8064-AAE2C24838B9"
-	ControlStreamCharUUID      = "7B83FFFD-9F77-4E5C-8064-AAE2C24838B9"
+	CurrentStatusCharUUID    = "7B83FFF6-9F77-4E5C-8064-AAE2C24838B9"
+	QualifyingEventsCharUUID = "7B83FFF7-9F77-4E5C-8064-AAE2C24838B9"
+	HistoryLogCharUUID       = "7B83FFF8-9F77-4E5C-8064-AAE2C24838B9"
+	AuthorizationCharUUID    = "7B83FFF9-9F77-4E5C-8064-AAE2C24838B9"
+	ControlCharUUID          = "7B83FFFC-9F77-4E5C-8064-AAE2C24838B9"
+	ControlStreamCharUUID    = "7B83FFFD-9F77-4E5C-8064-AAE2C24838B9"
 )
 
 // CharacteristicType identifies which characteristic received data

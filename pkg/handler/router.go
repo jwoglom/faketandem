@@ -61,7 +61,7 @@ func (r *Router) GetSettingsManager() *settings.Manager {
 // registerHandlers registers all message handlers
 func (r *Router) registerHandlers() {
 	// Core handlers
-	r.RegisterHandler(NewApiVersionHandler(r.bridge))
+	r.RegisterHandler(NewAPIVersionHandler(r.bridge))
 	r.RegisterHandler(NewTimeSinceResetHandler(r.bridge))
 
 	// Authentication handlers
@@ -157,7 +157,7 @@ func (r *Router) RouteMessage(charType bluetooth.CharacteristicType, msg *pumpx2
 }
 
 // sendResponse sends a handler response
-func (r *Router) sendResponse(requestCharType bluetooth.CharacteristicType, response *HandlerResponse) error {
+func (r *Router) sendResponse(requestCharType bluetooth.CharacteristicType, response *Response) error {
 	// Determine characteristic to use
 	charType := response.Characteristic
 	if charType == 0 {
@@ -243,11 +243,13 @@ func (r *Router) applyStateChange(change StateChange) {
 				r.pumpState.StopBolus()
 				// Notify bolus canceled
 				if r.qeNotifier != nil && currentBolus.Active {
-					r.qeNotifier.NotifyBolusCanceled(
+					if err := r.qeNotifier.NotifyBolusCanceled(
 						currentBolus.BolusID,
 						currentBolus.UnitsDelivered,
 						currentBolus.UnitsTotal,
-					)
+					); err != nil {
+						log.Warnf("Failed to notify bolus canceled: %v", err)
+					}
 				}
 			}
 		}

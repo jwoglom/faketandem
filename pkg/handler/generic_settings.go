@@ -12,19 +12,19 @@ import (
 
 // GenericSettingsHandler handles configurable settings messages
 type GenericSettingsHandler struct {
-	bridge         *pumpx2.Bridge
+	bridge          *pumpx2.Bridge
 	settingsManager *settings.Manager
-	messageType    string
-	requiresAuth   bool
+	messageType     string
+	requiresAuth    bool
 }
 
 // NewGenericSettingsHandler creates a new generic settings handler
 func NewGenericSettingsHandler(bridge *pumpx2.Bridge, settingsManager *settings.Manager, messageType string, requiresAuth bool) *GenericSettingsHandler {
 	return &GenericSettingsHandler{
-		bridge:         bridge,
+		bridge:          bridge,
 		settingsManager: settingsManager,
-		messageType:    messageType,
-		requiresAuth:   requiresAuth,
+		messageType:     messageType,
+		requiresAuth:    requiresAuth,
 	}
 }
 
@@ -39,7 +39,7 @@ func (h *GenericSettingsHandler) RequiresAuth() bool {
 }
 
 // HandleMessage processes a settings request
-func (h *GenericSettingsHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*HandlerResponse, error) {
+func (h *GenericSettingsHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling %s: txID=%d", h.messageType, msg.TxID)
 
 	// Get response from settings manager
@@ -67,7 +67,7 @@ func (h *GenericSettingsHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpSt
 		return nil, fmt.Errorf("failed to encode %s: %w", responseType, err)
 	}
 
-	return &HandlerResponse{
+	return &Response{
 		ResponseMessage: response,
 		Immediate:       true,
 	}, nil

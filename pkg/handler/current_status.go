@@ -34,7 +34,7 @@ func (h *CurrentStatusHandler) RequiresAuth() bool {
 }
 
 // HandleMessage processes a CurrentStatusRequest
-func (h *CurrentStatusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*HandlerResponse, error) {
+func (h *CurrentStatusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling CurrentStatusRequest: txID=%d", msg.TxID)
 
 	// Update time before generating status
@@ -57,7 +57,7 @@ func (h *CurrentStatusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpStat
 		return nil, fmt.Errorf("failed to encode CurrentStatusResponse: %w", err)
 	}
 
-	return &HandlerResponse{
+	return &Response{
 		ResponseMessage: response,
 		Characteristic:  bluetooth.CharCurrentStatus, // Use CurrentStatus characteristic
 		Immediate:       true,
@@ -81,9 +81,9 @@ func (h *CurrentStatusHandler) gatherPumpStatus(pumpState *state.PumpState) map[
 		"bolusTotal":     pumpState.Bolus.UnitsTotal,
 
 		// Physical state
-		"reservoirLevel":  pumpState.GetReservoirLevel(),
-		"batteryPercent":  pumpState.GetBatteryLevel(),
-		"cartridgeAge":    pumpState.Cartridge.DaysSinceChange,
+		"reservoirLevel": pumpState.GetReservoirLevel(),
+		"batteryPercent": pumpState.GetBatteryLevel(),
+		"cartridgeAge":   pumpState.Cartridge.DaysSinceChange,
 
 		// Pump info
 		"serialNumber": pumpState.GetSerialNumber(),

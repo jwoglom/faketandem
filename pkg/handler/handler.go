@@ -9,7 +9,7 @@ import (
 // MessageHandler handles a specific message type
 type MessageHandler interface {
 	// HandleMessage processes a message and returns a response
-	HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*HandlerResponse, error)
+	HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error)
 
 	// MessageType returns the message type this handler processes
 	MessageType() string
@@ -18,8 +18,8 @@ type MessageHandler interface {
 	RequiresAuth() bool
 }
 
-// HandlerResponse represents the response from a message handler
-type HandlerResponse struct {
+// Response represents the response from a message handler
+type Response struct {
 	// Response message to send (if any)
 	ResponseMessage *pumpx2.EncodedMessage
 
@@ -44,8 +44,8 @@ type Notification struct {
 
 // StateChange represents a change to pump state
 type StateChange struct {
-	Type  StateChangeType
-	Data  interface{}
+	Type StateChangeType
+	Data interface{}
 }
 
 // StateChangeType identifies the type of state change

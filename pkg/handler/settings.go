@@ -32,7 +32,7 @@ func (h *BasalIQSettingsHandler) RequiresAuth() bool {
 }
 
 // HandleMessage processes a BasalIQSettingsRequest
-func (h *BasalIQSettingsHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*HandlerResponse, error) {
+func (h *BasalIQSettingsHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling BasalIQSettingsRequest: txID=%d", msg.TxID)
 
 	// Return basal IQ settings (placeholders)
@@ -52,7 +52,7 @@ func (h *BasalIQSettingsHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpSt
 		return nil, fmt.Errorf("failed to encode BasalIQSettingsResponse: %w", err)
 	}
 
-	return &HandlerResponse{
+	return &Response{
 		ResponseMessage: response,
 		Immediate:       true,
 	}, nil
@@ -81,7 +81,7 @@ func (h *ControlIQSettingsHandler) RequiresAuth() bool {
 }
 
 // HandleMessage processes a ControlIQSettingsRequest
-func (h *ControlIQSettingsHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*HandlerResponse, error) {
+func (h *ControlIQSettingsHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling ControlIQSettingsRequest: txID=%d", msg.TxID)
 
 	// Return Control-IQ settings (placeholders)
@@ -101,7 +101,7 @@ func (h *ControlIQSettingsHandler) HandleMessage(msg *pumpx2.ParsedMessage, pump
 		return nil, fmt.Errorf("failed to encode ControlIQSettingsResponse: %w", err)
 	}
 
-	return &HandlerResponse{
+	return &Response{
 		ResponseMessage: response,
 		Immediate:       true,
 	}, nil
@@ -130,7 +130,7 @@ func (h *ProfileBasalHandler) RequiresAuth() bool {
 }
 
 // HandleMessage processes a ProfileBasalRequest
-func (h *ProfileBasalHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*HandlerResponse, error) {
+func (h *ProfileBasalHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling ProfileBasalRequest: txID=%d", msg.TxID)
 
 	// Return basal profile (simplified - single rate)
@@ -149,7 +149,7 @@ func (h *ProfileBasalHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState
 		return nil, fmt.Errorf("failed to encode ProfileBasalResponse: %w", err)
 	}
 
-	return &HandlerResponse{
+	return &Response{
 		ResponseMessage: response,
 		Immediate:       true,
 	}, nil
@@ -180,7 +180,7 @@ func (h *GlobalsHandler) RequiresAuth() bool {
 }
 
 // HandleMessage processes a globals request
-func (h *GlobalsHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*HandlerResponse, error) {
+func (h *GlobalsHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling %s: txID=%d", h.messageType, msg.TxID)
 
 	// Determine response type
@@ -206,7 +206,7 @@ func (h *GlobalsHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *sta
 		return nil, fmt.Errorf("failed to encode %s: %w", responseType, err)
 	}
 
-	return &HandlerResponse{
+	return &Response{
 		ResponseMessage: response,
 		Immediate:       true,
 	}, nil

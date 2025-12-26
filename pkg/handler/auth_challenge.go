@@ -33,7 +33,7 @@ func (h *CentralChallengeHandler) RequiresAuth() bool {
 }
 
 // HandleMessage processes a CentralChallengeRequest
-func (h *CentralChallengeHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*HandlerResponse, error) {
+func (h *CentralChallengeHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling CentralChallengeRequest: txID=%d", msg.TxID)
 	log.Info("Client is initiating authentication")
 
@@ -63,7 +63,7 @@ func (h *CentralChallengeHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpS
 
 	log.Info("Sent CentralChallengeResponse - waiting for JPAKE or legacy auth")
 
-	return &HandlerResponse{
+	return &Response{
 		ResponseMessage: response,
 		Immediate:       true,
 	}, nil

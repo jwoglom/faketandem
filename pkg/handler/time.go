@@ -32,7 +32,7 @@ func (h *TimeSinceResetHandler) RequiresAuth() bool {
 }
 
 // HandleMessage processes a TimeSinceResetRequest
-func (h *TimeSinceResetHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*HandlerResponse, error) {
+func (h *TimeSinceResetHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling TimeSinceResetRequest: txID=%d", msg.TxID)
 
 	// Update the time since reset
@@ -57,7 +57,7 @@ func (h *TimeSinceResetHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpSta
 		return nil, fmt.Errorf("failed to encode TimeSinceResetResponse: %w", err)
 	}
 
-	return &HandlerResponse{
+	return &Response{
 		ResponseMessage: response,
 		Immediate:       true,
 		StateChanges: []StateChange{

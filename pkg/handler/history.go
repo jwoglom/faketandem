@@ -33,7 +33,7 @@ func (h *HistoryLogHandler) RequiresAuth() bool {
 }
 
 // HandleMessage processes a HistoryLogRequest
-func (h *HistoryLogHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*HandlerResponse, error) {
+func (h *HistoryLogHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling HistoryLogRequest: txID=%d", msg.TxID)
 
 	// Extract request parameters
@@ -67,7 +67,7 @@ func (h *HistoryLogHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *
 
 	log.Debug("Sent empty history log response")
 
-	return &HandlerResponse{
+	return &Response{
 		ResponseMessage: response,
 		Characteristic:  bluetooth.CharHistoryLog,
 		Immediate:       true,
@@ -97,7 +97,7 @@ func (h *DefaultHandler) RequiresAuth() bool {
 }
 
 // HandleMessage processes an unknown message
-func (h *DefaultHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*HandlerResponse, error) {
+func (h *DefaultHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Warnf("No handler for message type '%s' (opcode=%d, txID=%d)",
 		msg.MessageType, msg.Opcode, msg.TxID)
 	log.Debugf("Message cargo: %+v", msg.Cargo)
@@ -126,7 +126,7 @@ func (h *DefaultHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *sta
 
 	log.Infof("Sent generic response: %s", responseType)
 
-	return &HandlerResponse{
+	return &Response{
 		ResponseMessage: response,
 		Immediate:       true,
 	}, nil

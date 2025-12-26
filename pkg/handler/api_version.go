@@ -9,30 +9,30 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// ApiVersionHandler handles ApiVersionRequest messages
-type ApiVersionHandler struct {
+// APIVersionHandler handles ApiVersionRequest messages
+type APIVersionHandler struct {
 	bridge *pumpx2.Bridge
 }
 
-// NewApiVersionHandler creates a new API version handler
-func NewApiVersionHandler(bridge *pumpx2.Bridge) *ApiVersionHandler {
-	return &ApiVersionHandler{
+// NewAPIVersionHandler creates a new API version handler
+func NewAPIVersionHandler(bridge *pumpx2.Bridge) *APIVersionHandler {
+	return &APIVersionHandler{
 		bridge: bridge,
 	}
 }
 
 // MessageType returns the message type this handler processes
-func (h *ApiVersionHandler) MessageType() string {
+func (h *APIVersionHandler) MessageType() string {
 	return "ApiVersionRequest"
 }
 
 // RequiresAuth returns true if this message requires authentication
-func (h *ApiVersionHandler) RequiresAuth() bool {
+func (h *APIVersionHandler) RequiresAuth() bool {
 	return false // ApiVersion doesn't require authentication
 }
 
 // HandleMessage processes an ApiVersionRequest
-func (h *ApiVersionHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*HandlerResponse, error) {
+func (h *APIVersionHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling ApiVersionRequest: txID=%d", msg.TxID)
 
 	// Get the API version from pump state
@@ -53,7 +53,7 @@ func (h *ApiVersionHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *
 		return nil, fmt.Errorf("failed to encode ApiVersionResponse: %w", err)
 	}
 
-	return &HandlerResponse{
+	return &Response{
 		ResponseMessage: response,
 		Immediate:       true,
 	}, nil

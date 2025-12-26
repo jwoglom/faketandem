@@ -34,8 +34,8 @@ type CommandHandler func(command string, params map[string]interface{})
 
 // PumpState represents the current state of the pump emulator
 type PumpState struct {
-	Connected      bool                       `json:"connected"`
-	Characteristics map[string]string         `json:"characteristics"`
+	Connected       bool              `json:"connected"`
+	Characteristics map[string]string `json:"characteristics"`
 }
 
 // BleEvent represents a BLE event sent to websocket clients
@@ -67,7 +67,9 @@ func (s *Server) SetCommandHandler(handler CommandHandler) {
 func (s *Server) Start() {
 	fmt.Println("Pump emulator web API listening on :8080")
 	s.setupRoutes()
-	http.ListenAndServe(":8080", nil)
+	if err := http.ListenAndServe(":8080", nil); err != nil {
+		log.Fatalf("HTTP server failed: %v", err)
+	}
 }
 
 // SendEvent sends a BLE event to connected websocket clients
@@ -386,10 +388,12 @@ func (s *Server) handleUpdateSetting(w http.ResponseWriter, r *http.Request, mes
 
 	// Return the updated configuration
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":  "success",
 		"message": fmt.Sprintf("Configuration updated for %s", messageType),
-	})
+	}); err != nil {
+		log.Errorf("Failed to encode update response: %v", err)
+	}
 }
 
 // handleResetSetting resets the state for a settings configuration
@@ -406,10 +410,12 @@ func (s *Server) handleResetSetting(w http.ResponseWriter, _ *http.Request, mess
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"status":  "success",
 		"message": fmt.Sprintf("State reset for %s", messageType),
-	})
+	}); err != nil {
+		log.Errorf("Failed to encode reset response: %v", err)
+	}
 }
 
 var upgrader = websocket.Upgrader{

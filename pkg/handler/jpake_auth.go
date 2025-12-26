@@ -19,17 +19,17 @@ type JPAKEAuthenticator struct {
 	bridge      *pumpx2.Bridge
 
 	// JPAKE state
-	round          int
-	clientID       string
-	serverID       string
-	sharedSecret   []byte
+	round        int
+	clientID     string
+	serverID     string
+	sharedSecret []byte
 
 	// Crypto parameters (simplified for now)
-	x2             *big.Int // Server's secret
-	gx1, gx2       []byte   // Server's public values
-	gx3, gx4       []byte   // Client's public values (from round 1)
+	x2       *big.Int // Server's secret
+	gx1, gx2 []byte   // Server's public values
+	gx3, gx4 []byte   // Client's public values (from round 1)
 
-	mutex          sync.Mutex
+	mutex sync.Mutex
 }
 
 // NewJPAKEAuthenticator creates a new JPAKE authenticator

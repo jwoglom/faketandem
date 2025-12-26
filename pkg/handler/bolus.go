@@ -32,7 +32,7 @@ func (h *BolusPermissionHandler) RequiresAuth() bool {
 }
 
 // HandleMessage processes a BolusPermissionRequest
-func (h *BolusPermissionHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*HandlerResponse, error) {
+func (h *BolusPermissionHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling BolusPermissionRequest: txID=%d", msg.TxID)
 
 	// Check if pump is in a state where bolus is allowed
@@ -56,7 +56,7 @@ func (h *BolusPermissionHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpSt
 		return nil, fmt.Errorf("failed to encode BolusPermissionResponse: %w", err)
 	}
 
-	return &HandlerResponse{
+	return &Response{
 		ResponseMessage: response,
 		Immediate:       true,
 	}, nil
@@ -85,7 +85,7 @@ func (h *BolusCalcDataSnapshotHandler) RequiresAuth() bool {
 }
 
 // HandleMessage processes a BolusCalcDataSnapshotRequest
-func (h *BolusCalcDataSnapshotHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*HandlerResponse, error) {
+func (h *BolusCalcDataSnapshotHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling BolusCalcDataSnapshotRequest: txID=%d", msg.TxID)
 
 	// Provide current bolus calculation data
@@ -112,7 +112,7 @@ func (h *BolusCalcDataSnapshotHandler) HandleMessage(msg *pumpx2.ParsedMessage, 
 		return nil, fmt.Errorf("failed to encode BolusCalcDataSnapshotResponse: %w", err)
 	}
 
-	return &HandlerResponse{
+	return &Response{
 		ResponseMessage: response,
 		Immediate:       true,
 	}, nil
@@ -141,7 +141,7 @@ func (h *InitiateBolusHandler) RequiresAuth() bool {
 }
 
 // HandleMessage processes an InitiateBolusRequest
-func (h *InitiateBolusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*HandlerResponse, error) {
+func (h *InitiateBolusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling InitiateBolusRequest: txID=%d", msg.TxID)
 
 	// Extract bolus parameters
@@ -192,7 +192,7 @@ func (h *InitiateBolusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpStat
 		return nil, fmt.Errorf("failed to encode InitiateBolusResponse: %w", err)
 	}
 
-	return &HandlerResponse{
+	return &Response{
 		ResponseMessage: response,
 		Immediate:       true,
 		StateChanges:    stateChanges,
@@ -222,7 +222,7 @@ func (h *BolusTerminationHandler) RequiresAuth() bool {
 }
 
 // HandleMessage processes a BolusTerminationRequest
-func (h *BolusTerminationHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*HandlerResponse, error) {
+func (h *BolusTerminationHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling BolusTerminationRequest: txID=%d", msg.TxID)
 
 	if !pumpState.Bolus.Active {
@@ -254,7 +254,7 @@ func (h *BolusTerminationHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpS
 		return nil, fmt.Errorf("failed to encode BolusTerminationResponse: %w", err)
 	}
 
-	return &HandlerResponse{
+	return &Response{
 		ResponseMessage: response,
 		Immediate:       true,
 		StateChanges:    stateChanges,
@@ -284,7 +284,7 @@ func (h *RemoteBgEntryHandler) RequiresAuth() bool {
 }
 
 // HandleMessage processes a RemoteBgEntryRequest
-func (h *RemoteBgEntryHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*HandlerResponse, error) {
+func (h *RemoteBgEntryHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling RemoteBgEntryRequest: txID=%d", msg.TxID)
 
 	bgValue := 0.0
@@ -308,7 +308,7 @@ func (h *RemoteBgEntryHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpStat
 		return nil, fmt.Errorf("failed to encode RemoteBgEntryResponse: %w", err)
 	}
 
-	return &HandlerResponse{
+	return &Response{
 		ResponseMessage: response,
 		Immediate:       true,
 	}, nil
@@ -337,7 +337,7 @@ func (h *RemoteCarbEntryHandler) RequiresAuth() bool {
 }
 
 // HandleMessage processes a RemoteCarbEntryRequest
-func (h *RemoteCarbEntryHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*HandlerResponse, error) {
+func (h *RemoteCarbEntryHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling RemoteCarbEntryRequest: txID=%d", msg.TxID)
 
 	carbGrams := 0.0
@@ -361,7 +361,7 @@ func (h *RemoteCarbEntryHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpSt
 		return nil, fmt.Errorf("failed to encode RemoteCarbEntryResponse: %w", err)
 	}
 
-	return &HandlerResponse{
+	return &Response{
 		ResponseMessage: response,
 		Immediate:       true,
 	}, nil
@@ -390,7 +390,7 @@ func (h *BolusPermissionReleaseHandler) RequiresAuth() bool {
 }
 
 // HandleMessage processes a BolusPermissionReleaseRequest
-func (h *BolusPermissionReleaseHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*HandlerResponse, error) {
+func (h *BolusPermissionReleaseHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling BolusPermissionReleaseRequest: txID=%d", msg.TxID)
 
 	log.Info("Releasing bolus permission")
@@ -407,7 +407,7 @@ func (h *BolusPermissionReleaseHandler) HandleMessage(msg *pumpx2.ParsedMessage,
 		return nil, fmt.Errorf("failed to encode BolusPermissionReleaseResponse: %w", err)
 	}
 
-	return &HandlerResponse{
+	return &Response{
 		ResponseMessage: response,
 		Immediate:       true,
 	}, nil

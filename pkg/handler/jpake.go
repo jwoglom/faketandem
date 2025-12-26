@@ -106,7 +106,7 @@ func (h *JPAKEHandler) RequiresAuth() bool {
 }
 
 // HandleMessage processes a JPAKE message
-func (h *JPAKEHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*HandlerResponse, error) {
+func (h *JPAKEHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling %s (round %d): txID=%d", h.messageType, h.round, msg.TxID)
 
 	// Get or create JPAKE authenticator for this session
@@ -155,7 +155,7 @@ func (h *JPAKEHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state
 		h.sessionManager.Remove(sessionID)
 	}
 
-	return &HandlerResponse{
+	return &Response{
 		ResponseMessage: response,
 		Immediate:       true,
 		StateChanges:    stateChanges,
@@ -207,7 +207,7 @@ func (h *PumpChallengeHandler) RequiresAuth() bool {
 }
 
 // HandleMessage processes a PumpChallengeRequest (legacy authentication)
-func (h *PumpChallengeHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*HandlerResponse, error) {
+func (h *PumpChallengeHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling PumpChallengeRequest (legacy auth): txID=%d", msg.TxID)
 
 	// For legacy auth, the client provides HMAC computed from pairing code
@@ -230,7 +230,7 @@ func (h *PumpChallengeHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpStat
 	log.Info("Legacy authentication complete!")
 	authKey := []byte("legacy_auth_key")
 
-	return &HandlerResponse{
+	return &Response{
 		ResponseMessage: response,
 		Immediate:       true,
 		StateChanges: []StateChange{
