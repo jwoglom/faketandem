@@ -189,7 +189,7 @@ func (j *PumpX2JPAKEAuthenticator) readServerRound1Responses() error {
 	// The regex needs to handle potential stderr output before the JPAKE_1A line
 	// Match JPAKE_1A: followed by JSON (JSONObject.toString() outputs single-line JSON)
 	round1aRegex := regexp.MustCompile(`(?s).*?JPAKE_1A:\s*(\{.*?\})`)
-	output, _, err := j.gexp.Expect(round1aRegex, 10*time.Second)
+	output, _, err := j.gexp.Expect(round1aRegex, 30*time.Second)
 	if err != nil {
 		// Try to get any remaining output for debugging
 		log.Errorf("Failed to read JPAKE_1A. Last output captured: %s", output)
@@ -214,7 +214,7 @@ func (j *PumpX2JPAKEAuthenticator) readServerRound1Responses() error {
 	// The regex needs to handle potential output between JPAKE_1A and JPAKE_1B
 	// Match JPAKE_1B: followed by JSON (JSONObject.toString() outputs single-line JSON)
 	round1bRegex := regexp.MustCompile(`(?s).*?JPAKE_1B:\s*(\{.*?\})`)
-	output, _, err = j.gexp.Expect(round1bRegex, 10*time.Second)
+	output, _, err = j.gexp.Expect(round1bRegex, 30*time.Second)
 	if err != nil {
 		log.Errorf("Failed to read JPAKE_1B. Last output captured: %s", output)
 		return fmt.Errorf("failed to read JPAKE_1B from pumpX2: %w", err)
@@ -276,7 +276,7 @@ func (j *PumpX2JPAKEAuthenticator) processRound1(requestData map[string]interfac
 
 	// Read server's round 2 response (pumpX2 sends it after receiving round 1b)
 	round2Regex := regexp.MustCompile(`JPAKE_2:\s*({.+})`)
-	output, _, err := j.gexp.Expect(round2Regex, 10*time.Second)
+	output, _, err := j.gexp.Expect(round2Regex, 30*time.Second)
 	if err != nil {
 		if j.gexp != nil {
 			log.Errorf("Failed to read JPAKE_2. Last output captured: %s", output)
@@ -316,7 +316,7 @@ func (j *PumpX2JPAKEAuthenticator) processRound2(requestData map[string]interfac
 
 	// Read server's round 3 response
 	round3Regex := regexp.MustCompile(`JPAKE_3:\s*({.+})`)
-	output, _, err := j.gexp.Expect(round3Regex, 10*time.Second)
+	output, _, err := j.gexp.Expect(round3Regex, 30*time.Second)
 	if err != nil {
 		if j.gexp != nil {
 			log.Errorf("Failed to read JPAKE_3. Last output captured: %s", output)
@@ -382,7 +382,7 @@ func (j *PumpX2JPAKEAuthenticator) processRound4(requestData map[string]interfac
 
 	// Read server's round 4 response
 	round4Regex := regexp.MustCompile(`JPAKE_4:\s*({.+})`)
-	output, _, err := j.gexp.Expect(round4Regex, 10*time.Second)
+	output, _, err := j.gexp.Expect(round4Regex, 30*time.Second)
 	if err != nil {
 		if j.gexp != nil {
 			log.Errorf("Failed to read JPAKE_4. Last output captured: %s", output)
@@ -405,7 +405,7 @@ func (j *PumpX2JPAKEAuthenticator) processRound4(requestData map[string]interfac
 
 	// Read the final result with derived secret
 	resultRegex := regexp.MustCompile(`({[^{}]*"derivedSecret"[^{}]*})`)
-	resultOutput, _, err := j.gexp.Expect(resultRegex, 10*time.Second)
+	resultOutput, _, err := j.gexp.Expect(resultRegex, 30*time.Second)
 	if err != nil {
 		if j.gexp != nil {
 			log.Errorf("Failed to read derivedSecret. Last output captured: %s", resultOutput)
