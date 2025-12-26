@@ -134,12 +134,14 @@ func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 	}
 
 	// Kill the test process - we'll spawn it properly with expect
-	if err := cmd.Process.Kill(); err != nil {
-		log.Warnf("Failed to kill test process: %v", err)
+	if cmd.Process != nil {
+		if err := cmd.Process.Kill(); err != nil {
+			log.Warnf("Failed to kill test process: %v", err)
+		}
 	}
 
-	// Now spawn with expect using a shell command that changes directory first
-	// This ensures the command runs in the correct directory
+	// Now spawn with expect using sh -c to run a shell command
+	// This allows us to change directory before executing the gradle/java command
 	var shellCmd string
 	if j.pumpX2Mode == "gradle" {
 		shellCmd = fmt.Sprintf("cd %s && %s %s",
@@ -153,11 +155,12 @@ func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 			strings.Join(args, " "))
 	}
 
-	log.Debugf("Spawning with shell command: %s", shellCmd)
+	log.Debugf("Spawning with shell command: sh -c '%s'", shellCmd)
 
 	var err error
+	// Use sh -c to execute the command with directory change
 	j.gexp, _, err = expect.Spawn(
-		shellCmd,
+		fmt.Sprintf("sh -c '%s'", shellCmd),
 		-1,
 		expect.CheckDuration(100*time.Millisecond),
 		expect.PartialMatch(true),
