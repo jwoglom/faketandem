@@ -10,21 +10,40 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// JPAKEAuthenticatorInterface defines the interface for JPAKE authenticators
+type JPAKEAuthenticatorInterface interface {
+	ProcessRound(round int, requestData map[string]interface{}) (map[string]interface{}, error)
+	GetSharedSecret() ([]byte, error)
+	IsComplete() bool
+}
+
 // JPAKESessionManager manages JPAKE authentication sessions
 type JPAKESessionManager struct {
-	authenticators map[string]*JPAKEAuthenticator
+	authenticators map[string]JPAKEAuthenticatorInterface
 	mutex          sync.RWMutex
+
+	// Configuration for creating authenticators
+	jpakeMode  string
+	pumpX2Path string
+	pumpX2Mode string
+	gradleCmd  string
+	javaCmd    string
 }
 
 // NewJPAKESessionManager creates a new JPAKE session manager
-func NewJPAKESessionManager() *JPAKESessionManager {
+func NewJPAKESessionManager(jpakeMode, pumpX2Path, pumpX2Mode, gradleCmd, javaCmd string) *JPAKESessionManager {
 	return &JPAKESessionManager{
-		authenticators: make(map[string]*JPAKEAuthenticator),
+		authenticators: make(map[string]JPAKEAuthenticatorInterface),
+		jpakeMode:      jpakeMode,
+		pumpX2Path:     pumpX2Path,
+		pumpX2Mode:     pumpX2Mode,
+		gradleCmd:      gradleCmd,
+		javaCmd:        javaCmd,
 	}
 }
 
 // GetOrCreate gets or creates an authenticator for a session
-func (m *JPAKESessionManager) GetOrCreate(sessionID string, pairingCode string, bridge *pumpx2.Bridge) *JPAKEAuthenticator {
+func (m *JPAKESessionManager) GetOrCreate(sessionID string, pairingCode string, bridge *pumpx2.Bridge) JPAKEAuthenticatorInterface {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -32,9 +51,18 @@ func (m *JPAKESessionManager) GetOrCreate(sessionID string, pairingCode string, 
 		return auth
 	}
 
-	auth := NewJPAKEAuthenticator(pairingCode, bridge)
+	var auth JPAKEAuthenticatorInterface
+
+	if m.jpakeMode == "pumpx2" {
+		log.Infof("Creating pumpX2-based JPAKE authenticator for session: %s", sessionID)
+		auth = NewPumpX2JPAKEAuthenticator(pairingCode, bridge, m.pumpX2Path, m.pumpX2Mode, m.gradleCmd, m.javaCmd)
+	} else {
+		log.Infof("Creating Go-based JPAKE authenticator for session: %s", sessionID)
+		auth = NewJPAKEAuthenticator(pairingCode, bridge)
+	}
+
 	m.authenticators[sessionID] = auth
-	log.Debugf("Created new JPAKE authenticator for session: %s", sessionID)
+	log.Debugf("Created new JPAKE authenticator (%s mode) for session: %s", m.jpakeMode, sessionID)
 
 	return auth
 }

@@ -23,6 +23,7 @@ func main() {
 	var infoLevel = flag.Bool("q", false, "quiet off by default, InfoLevel")
 	var pumpX2Path = flag.String("pumpx2-path", "", "path to pumpX2 repository (required)")
 	var pumpX2Mode = flag.String("pumpx2-mode", "gradle", "mode to run cliparser: 'gradle' or 'jar'")
+	var jpakeMode = flag.String("jpake-mode", "go", "JPAKE mode: 'go' (simplified) or 'pumpx2' (use pumpX2's JPAKE)")
 	var gradleCmd = flag.String("gradle-cmd", "./gradlew", "gradle command to use")
 	var javaCmd = flag.String("java-cmd", "java", "java command to use")
 
@@ -46,7 +47,7 @@ func main() {
 	})
 
 	// Initialize configuration
-	cfg, err := config.New(*pumpX2Path, *pumpX2Mode, *gradleCmd, *javaCmd, logLevel)
+	cfg, err := config.New(*pumpX2Path, *pumpX2Mode, *jpakeMode, *gradleCmd, *javaCmd, logLevel)
 	if err != nil {
 		log.Fatalf("Configuration error: %s", err)
 	}
@@ -54,6 +55,7 @@ func main() {
 	log.Info("Starting Tandem Pump Emulator")
 	log.Infof("pumpX2 repository: %s", cfg.PumpX2Path)
 	log.Infof("pumpX2 mode: %s", cfg.PumpX2Mode)
+	log.Infof("JPAKE mode: %s", cfg.JPAKEMode)
 	log.Info("Service UUID: ", bluetooth.PumpServiceUUID)
 	log.Info("Characteristics:")
 	log.Info("  CurrentStatus:     ", bluetooth.CurrentStatusCharUUID)
@@ -99,7 +101,7 @@ func main() {
 	}
 
 	// Create message router
-	router := handler.NewRouter(bridge, pumpState, ble, txManager)
+	router := handler.NewRouter(bridge, pumpState, ble, txManager, cfg.JPAKEMode, cfg.PumpX2Path, cfg.PumpX2Mode, cfg.GradleCmd, cfg.JavaCmd)
 	log.Info("Message router initialized")
 
 	// Connect simulator with qualifying events notifier

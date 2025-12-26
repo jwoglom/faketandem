@@ -14,12 +14,15 @@ type Config struct {
 	GradleCmd  string
 	JavaCmd    string
 
+	// JPAKE configuration
+	JPAKEMode string // "go" or "pumpx2"
+
 	// Logging configuration
 	LogLevel string
 }
 
 // New creates a new configuration
-func New(pumpX2Path, pumpX2Mode, gradleCmd, javaCmd, logLevel string) (*Config, error) {
+func New(pumpX2Path, pumpX2Mode, jpakeMode, gradleCmd, javaCmd, logLevel string) (*Config, error) {
 	// Check for environment variable if path not provided
 	if pumpX2Path == "" {
 		pumpX2Path = os.Getenv("PUMPX2_PATH")
@@ -50,9 +53,15 @@ func New(pumpX2Path, pumpX2Mode, gradleCmd, javaCmd, logLevel string) (*Config, 
 		return nil, fmt.Errorf("invalid pumpx2-mode: %s (must be 'gradle' or 'jar')", pumpX2Mode)
 	}
 
+	// Validate JPAKE mode
+	if jpakeMode != "go" && jpakeMode != "pumpx2" {
+		return nil, fmt.Errorf("invalid jpake-mode: %s (must be 'go' or 'pumpx2')", jpakeMode)
+	}
+
 	return &Config{
 		PumpX2Path: pumpX2Path,
 		PumpX2Mode: pumpX2Mode,
+		JPAKEMode:  jpakeMode,
 		GradleCmd:  gradleCmd,
 		JavaCmd:    javaCmd,
 		LogLevel:   logLevel,
