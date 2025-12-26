@@ -6,7 +6,14 @@ This directory contains utility scripts for the faketandem project.
 
 ### Pre-push Hook
 
-The `pre-push.sh` script runs `golangci-lint` before pushing code to ensure no linting issues are introduced.
+The `pre-push.sh` script automatically fixes linting issues where possible and checks for remaining issues before pushing code.
+
+#### How It Works
+
+1. **Auto-fix**: Runs `golangci-lint run --fix` to automatically fix formatting and other auto-fixable issues
+2. **Stage changes**: If files were modified, they're automatically staged with `git add -u`
+3. **Verify**: Runs `golangci-lint run` again to check for remaining issues
+4. **Block or allow**: Blocks the push if non-fixable issues remain
 
 #### Installation
 
@@ -19,17 +26,23 @@ chmod +x scripts/pre-push.sh
 
 #### Usage
 
-The hook runs automatically before every `git push`. If linting issues are found:
+The hook runs automatically before every `git push`. It will:
 
-1. **Fix automatically** (where possible):
-   ```bash
-   golangci-lint run --fix
-   ```
+- ✅ **Auto-fix** formatting issues (gofmt, goimports, etc.)
+- ✅ **Stage** the fixed files automatically
+- ❌ **Block** the push if non-fixable issues remain (errcheck, gocyclo, etc.)
 
-2. **Skip the check** (not recommended):
-   ```bash
-   git push --no-verify
-   ```
+**To skip the check** (not recommended):
+```bash
+git push --no-verify
+```
+
+**To manually run the same process**:
+```bash
+golangci-lint run --fix
+git add -u
+git commit --amend --no-edit  # if you want to include fixes in last commit
+```
 
 #### Requirements
 

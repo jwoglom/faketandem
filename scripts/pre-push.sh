@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # Pre-push hook to run golangci-lint
-# This prevents pushing code with linting issues
+# This automatically fixes issues where possible, then checks for remaining issues
 
 echo "Running golangci-lint before push..."
 
@@ -19,19 +19,31 @@ else
     GOLANGCI_LINT="golangci-lint"
 fi
 
-# Run the linter
+# First, try to auto-fix issues
+echo "🔧 Auto-fixing issues..."
+$GOLANGCI_LINT run --fix --timeout=5m &> /dev/null
+
+# Check if any files were modified by --fix
+if ! git diff --quiet; then
+    echo "✏️  Auto-fixed some issues. Changes:"
+    git diff --stat
+    echo ""
+    echo "📝 Staging auto-fixed changes..."
+    git add -u
+fi
+
+# Now run the linter to check for remaining issues
+echo "🔍 Checking for remaining issues..."
 $GOLANGCI_LINT run --timeout=5m
 
 # Check the exit code
 if [ $? -ne 0 ]; then
     echo ""
-    echo "❌ golangci-lint found issues!"
+    echo "❌ golangci-lint found issues that cannot be auto-fixed!"
     echo ""
-    echo "To fix automatically (where possible), run:"
-    echo "  golangci-lint run --fix"
-    echo ""
-    echo "To skip this check, use:"
-    echo "  git push --no-verify"
+    echo "Please fix the remaining issues manually, or:"
+    echo "  - Review the changes and commit them"
+    echo "  - Skip this check with: git push --no-verify"
     echo ""
     exit 1
 fi
