@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
-	"strings"
 	"sync"
 	"time"
 
@@ -89,21 +88,21 @@ func (j *PumpX2JPAKEAuthenticator) ProcessRound(round int, requestData map[strin
 
 // startJPAKEServerProcess starts the pumpX2 jpake-server command
 func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
-	var cmdPath string
+	var scriptPath string
 	var args []string
 
 	if j.pumpX2Mode == "gradle" {
-		cmdPath = filepath.Join(j.pumpX2Path, j.gradleCmd)
+		// Use wrapper script that handles directory change and gradle invocation
+		scriptPath = "scripts/cliparser-gradle.sh"
 		args = []string{
-			"cliparser",
-			"-q",
-			"--console=plain",
-			"--args=jpake-server " + j.pairingCode,
+			j.pumpX2Path,
+			"jpake-server",
+			j.pairingCode,
 		}
 	} else {
-		// JAR mode
+		// JAR mode - run java directly
 		jarPath := filepath.Join(j.pumpX2Path, "cliparser/build/libs/cliparser.jar")
-		cmdPath = j.javaCmd
+		scriptPath = j.javaCmd
 		args = []string{
 			"-jar",
 			jarPath,
@@ -112,15 +111,12 @@ func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 		}
 	}
 
-	log.Infof("Starting pumpX2 JPAKE server process: %s %v (in dir: %s)", cmdPath, args, j.pumpX2Path)
+	log.Infof("Starting pumpX2 JPAKE server process: %s %v", scriptPath, args)
 
-	// Create command to run in the correct directory
-	cmd := exec.Command(cmdPath, args...)
-	cmd.Dir = j.pumpX2Path
-
-	// Test if we can actually run the command
+	// Test if we can run the command
+	cmd := exec.Command(scriptPath, args...)
 	if err := cmd.Start(); err != nil {
-		log.Errorf("Failed to start command %s %v: %v", cmdPath, args, err)
+		log.Errorf("Failed to start command %s %v: %v", scriptPath, args, err)
 		return fmt.Errorf("failed to start JPAKE server process: %w", err)
 	}
 
@@ -140,33 +136,13 @@ func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 		}
 	}
 
-	// Build properly quoted shell command
-	// We need to escape arguments for the shell
-	quotedArgs := make([]string, len(args))
-	for i, arg := range args {
-		// Use single quotes and escape any single quotes in the arg
-		quotedArgs[i] = "'" + strings.ReplaceAll(arg, "'", "'\\''") + "'"
-	}
-
-	var shellCmd string
-	if j.pumpX2Mode == "gradle" {
-		shellCmd = fmt.Sprintf("cd '%s' && %s %s",
-			strings.ReplaceAll(j.pumpX2Path, "'", "'\\''"),
-			j.gradleCmd,
-			strings.Join(quotedArgs, " "))
-	} else {
-		shellCmd = fmt.Sprintf("cd '%s' && '%s' %s",
-			strings.ReplaceAll(j.pumpX2Path, "'", "'\\''"),
-			strings.ReplaceAll(cmdPath, "'", "'\\''"),
-			strings.Join(quotedArgs, " "))
-	}
-
-	log.Debugf("Spawning with shell command: sh -c %q", shellCmd)
+	// Now spawn with expect using the script
+	fullCmd := append([]string{scriptPath}, args...)
+	log.Debugf("Spawning with expect: %v", fullCmd)
 
 	var err error
-	// Use sh -c to execute the command with directory change
-	j.gexp, _, err = expect.Spawn(
-		fmt.Sprintf("sh -c %s", shellQuote(shellCmd)),
+	j.gexp, _, err = expect.SpawnWithArgs(
+		fullCmd,
 		-1,
 		expect.CheckDuration(100*time.Millisecond),
 		expect.PartialMatch(true),
@@ -181,12 +157,6 @@ func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 	log.Debug("pumpX2 JPAKE server process started successfully with expect")
 
 	return nil
-}
-
-// shellQuote quotes a string for safe use in a shell command
-func shellQuote(s string) string {
-	// Use single quotes and escape any single quotes in the string
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 // readServerRound1Responses reads the server's initial round 1a and 1b responses
