@@ -1,0 +1,206 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, claude/** ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        go-version: ['1.21', '1.22']
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ matrix.go-version }}
+
+    - name: Cache Go modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/go-build
+          ~/go/pkg/mod
+        key: ${{ runner.os }}-go-${{ matrix.go-version }}-${{ hashFiles('**/go.sum') }}
+        restore-keys: |
+          ${{ runner.os }}-go-${{ matrix.go-version }}-
+
+    - name: Download dependencies
+      run: go mod download
+
+    - name: Verify dependencies
+      run: go mod verify
+
+    - name: Run go vet
+      run: go vet ./...
+
+    - name: Run unit tests
+      run: go test -v -race -coverprofile=coverage.out -covermode=atomic ./...
+
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v4
+      with:
+        files: ./coverage.out
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+    - name: Run benchmarks
+      run: go test -bench=. -benchmem ./pkg/handler -run=^$ || true
+
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout faketandem
+      uses: actions/checkout@v4
+      with:
+        path: faketandem
+
+    - name: Checkout pumpX2
+      uses: actions/checkout@v4
+      with:
+        repository: jwoglom/pumpX2
+        ref: dev
+        path: pumpX2
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.22'
+
+    - name: Set up Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+
+    - name: Cache Gradle packages
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.gradle/caches
+          ~/.gradle/wrapper
+        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+        restore-keys: |
+          ${{ runner.os }}-gradle-
+
+    - name: Make gradlew executable
+      run: chmod +x pumpX2/gradlew
+
+    - name: Build pumpX2 cliparser
+      run: |
+        cd pumpX2
+        ./gradlew cliparser --console=plain -q || echo "Gradle build failed, integration tests may fail"
+
+    - name: Verify cliparser JAR
+      run: |
+        if [ -f pumpX2/cliparser/build/libs/cliparser.jar ]; then
+          echo "✓ cliparser.jar found"
+          ls -lh pumpX2/cliparser/build/libs/cliparser.jar
+        else
+          echo "✗ cliparser.jar not found"
+          exit 1
+        fi
+
+    - name: Download Go dependencies
+      run: |
+        cd faketandem
+        go mod download
+
+    - name: Run integration tests
+      env:
+        PUMPX2_PATH: ${{ github.workspace }}/pumpX2
+      run: |
+        cd faketandem
+        go test -v -timeout 5m ./pkg/handler -run Integration
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.22'
+
+    - name: Build
+      run: go build -v -o faketandem .
+
+    - name: Test binary exists
+      run: |
+        if [ -f faketandem ]; then
+          echo "✓ Binary built successfully"
+          ls -lh faketandem
+          ./faketandem -h || true
+        else
+          echo "✗ Binary not found"
+          exit 1
+        fi
+
+    - name: Upload binary artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: faketandem-${{ runner.os }}-${{ github.sha }}
+        path: faketandem
+        retention-days: 7
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.22'
+
+    - name: Run golangci-lint
+      uses: golangci/golangci-lint-action@v4
+      with:
+        version: latest
+        args: --timeout=5m
+
+  status-check:
+    name: CI Status
+    runs-on: ubuntu-latest
+    needs: [test, integration-tests, build, lint]
+    if: always()
+
+    steps:
+    - name: Check all jobs
+      run: |
+        if [ "${{ needs.test.result }}" != "success" ]; then
+          echo "❌ Unit tests failed"
+          exit 1
+        fi
+        if [ "${{ needs.build.result }}" != "success" ]; then
+          echo "❌ Build failed"
+          exit 1
+        fi
+        if [ "${{ needs.lint.result }}" != "success" ]; then
+          echo "❌ Lint failed"
+          exit 1
+        fi
+        if [ "${{ needs.integration-tests.result }}" != "success" ]; then
+          echo "⚠️  Integration tests failed or were skipped"
+          # Don't fail CI on integration test failures
+        fi
+        echo "✅ All critical checks passed"

@@ -1,8 +1,9 @@
-module github.com/avereha/pod
+module github.com/jwoglom/faketandem
 
 go 1.15
 
 require (
+	github.com/google/goexpect v0.0.0-20210430020637-ab937bf7fd6f
 	github.com/gorilla/websocket v1.4.2
 	github.com/paypal/gatt v0.0.0-20151011220935-4ae819d591cf
 	github.com/sirupsen/logrus v1.6.0

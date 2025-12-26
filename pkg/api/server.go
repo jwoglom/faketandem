@@ -4,10 +4,14 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"sync"
 
-	"github.com/avereha/pod/pkg/bluetooth"
+	"github.com/jwoglom/faketandem/pkg/bluetooth"
+	"github.com/jwoglom/faketandem/pkg/settings"
+
 	"github.com/gorilla/websocket"
 	log "github.com/sirupsen/logrus"
 )
@@ -16,9 +20,10 @@ import (
 type Server struct {
 	http.Handler
 
-	ble  *bluetooth.Ble
-	conn *websocket.Conn
-	mtx  sync.Mutex
+	ble             *bluetooth.Ble
+	conn            *websocket.Conn
+	mtx             sync.Mutex
+	settingsManager *settings.Manager
 
 	// Callback for when a command is received from the websocket
 	commandHandler CommandHandler
@@ -46,6 +51,11 @@ func New(ble *bluetooth.Ble) *Server {
 	return &Server{
 		ble: ble,
 	}
+}
+
+// SetSettingsManager sets the settings manager for this server
+func (s *Server) SetSettingsManager(manager *settings.Manager) {
+	s.settingsManager = manager
 }
 
 // SetCommandHandler sets the callback for when commands are received
@@ -120,9 +130,11 @@ func (s *Server) SendConnectionEvent(connected bool) {
 
 func (s *Server) setupRoutes() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "Pump Emulator API - Connect via WebSocket at /ws")
+		fmt.Fprintf(w, "Pump Emulator API - Connect via WebSocket at /ws\n\nSettings API:\n  GET    /api/settings\n  GET    /api/settings/{messageType}\n  PUT    /api/settings/{messageType}\n  POST   /api/settings/{messageType}/reset")
 	})
 	http.Handle("/ws", s)
+	http.HandleFunc("/api/settings", s.handleSettingsAPI)
+	http.HandleFunc("/api/settings/", s.handleSettingsAPI)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -275,6 +287,129 @@ func (s *Server) parseCharacteristicName(name string) bluetooth.CharacteristicTy
 	default:
 		return -1
 	}
+}
+
+// handleSettingsAPI handles the RESTful settings API
+func (s *Server) handleSettingsAPI(w http.ResponseWriter, r *http.Request) {
+	if s.settingsManager == nil {
+		http.Error(w, "Settings manager not initialized", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	// Parse the path to extract message type
+	path := strings.TrimPrefix(r.URL.Path, "/api/settings")
+	path = strings.Trim(path, "/")
+
+	switch r.Method {
+	case http.MethodGet:
+		if path == "" {
+			// GET /api/settings - list all configurations
+			s.handleGetAllSettings(w, r)
+		} else {
+			// GET /api/settings/{messageType} - get specific configuration
+			s.handleGetSetting(w, r, path)
+		}
+
+	case http.MethodPut:
+		// PUT /api/settings/{messageType} - update configuration
+		s.handleUpdateSetting(w, r, path)
+
+	case http.MethodPost:
+		// POST /api/settings/{messageType}/reset - reset state
+		if strings.HasSuffix(path, "/reset") {
+			messageType := strings.TrimSuffix(path, "/reset")
+			s.handleResetSetting(w, r, messageType)
+		} else {
+			http.Error(w, "Invalid POST endpoint", http.StatusNotFound)
+		}
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleGetAllSettings returns all registered settings configurations
+//nolint:unparam // r is required by http.HandlerFunc interface
+func (s *Server) handleGetAllSettings(w http.ResponseWriter, _ *http.Request) {
+	configs := s.settingsManager.GetAllConfigs()
+
+	if err := json.NewEncoder(w).Encode(configs); err != nil {
+		log.Errorf("Failed to encode settings: %v", err)
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+// handleGetSetting returns a specific settings configuration
+//nolint:unparam // r is required by http.HandlerFunc interface
+func (s *Server) handleGetSetting(w http.ResponseWriter, _ *http.Request, messageType string) {
+	config, err := s.settingsManager.GetConfig(messageType)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Configuration not found: %s", err), http.StatusNotFound)
+		return
+	}
+
+	if err := json.NewEncoder(w).Encode(config); err != nil {
+		log.Errorf("Failed to encode setting: %v", err)
+		http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+	}
+}
+
+// handleUpdateSetting updates a settings configuration
+func (s *Server) handleUpdateSetting(w http.ResponseWriter, r *http.Request, messageType string) {
+	if messageType == "" {
+		http.Error(w, "Message type is required", http.StatusBadRequest)
+		return
+	}
+
+	// Read the request body
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusBadRequest)
+		return
+	}
+	defer r.Body.Close()
+
+	// Parse the configuration
+	var config settings.ResponseConfig
+	if err := json.Unmarshal(body, &config); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to parse configuration: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Update the configuration
+	if err := s.settingsManager.SetConfig(messageType, &config); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to set configuration: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Return the updated configuration
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "success",
+		"message": fmt.Sprintf("Configuration updated for %s", messageType),
+	})
+}
+
+// handleResetSetting resets the state for a settings configuration
+//nolint:unparam // r is required by http.HandlerFunc interface
+func (s *Server) handleResetSetting(w http.ResponseWriter, _ *http.Request, messageType string) {
+	if messageType == "" {
+		http.Error(w, "Message type is required", http.StatusBadRequest)
+		return
+	}
+
+	if err := s.settingsManager.ResetState(messageType); err != nil {
+		http.Error(w, fmt.Sprintf("Failed to reset state: %v", err), http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":  "success",
+		"message": fmt.Sprintf("State reset for %s", messageType),
+	})
 }
 
 var upgrader = websocket.Upgrader{

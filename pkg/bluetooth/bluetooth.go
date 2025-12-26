@@ -56,6 +56,26 @@ func (c CharacteristicType) String() string {
 	}
 }
 
+// ToBtChar returns the btChar name used by pumpX2 cliparser
+func (c CharacteristicType) ToBtChar() string {
+	switch c {
+	case CharCurrentStatus:
+		return "currentStatus"
+	case CharQualifyingEvents:
+		return "qualifyingEvents"
+	case CharHistoryLog:
+		return "historyLog"
+	case CharAuthorization:
+		return "authentication"
+	case CharControl:
+		return "control"
+	case CharControlStream:
+		return "controlStream"
+	default:
+		return "currentStatus"
+	}
+}
+
 // WriteHandler is called when data is written to a characteristic
 type WriteHandler func(charType CharacteristicType, data []byte)
 
@@ -197,7 +217,9 @@ func (b *Ble) addCharacteristic(s *gatt.Service, uuidStr string, charType Charac
 		}
 
 		log.Tracef("pkg bluetooth; read request on %s, responding with: %s", charType, hex.EncodeToString(data))
-		rsp.Write(data)
+		if _, err := rsp.Write(data); err != nil {
+			log.Warnf("Failed to write BLE response: %v", err)
+		}
 	})
 
 	// Handle notifications

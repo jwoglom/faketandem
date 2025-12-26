@@ -1,0 +1,65 @@
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    - gofmt
+    - govet
+    - errcheck
+    - staticcheck
+    - unused
+    - gosimple
+    - ineffassign
+    - typecheck
+    - gocyclo
+    - misspell
+    - revive
+    - unconvert
+    - unparam
+    - goimports
+
+  disable:
+    # Disabled linters that are deprecated or replaced
+    - exportloopref  # Deprecated since Go 1.22, replaced by copyloopvar
+
+linters-settings:
+  gocyclo:
+    min-complexity: 15
+
+  misspell:
+    locale: US
+
+  revive:
+    rules:
+      - name: var-naming
+        disabled: false
+      - name: exported
+        disabled: false
+
+  goimports:
+    local-prefixes: github.com/jwoglom/faketandem
+
+issues:
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+
+    # Exclude known issues
+    - text: "weak cryptographic primitive"
+      linters:
+        - gosec
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
