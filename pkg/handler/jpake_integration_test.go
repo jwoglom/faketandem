@@ -310,21 +310,21 @@ func generateMockJpake1aRequest() map[string]interface{} {
 	// Generate mock Jpake1aRequest data
 	// In a real scenario, this would come from an actual client
 	return map[string]interface{}{
-		"messageName":         "Jpake1aRequest",
+		"messageName":          "Jpake1aRequest",
 		"centralChallengeHash": generateRandomHex(165),
 	}
 }
 
 func generateMockJpake1bRequest() map[string]interface{} {
 	return map[string]interface{}{
-		"messageName":         "Jpake1bRequest",
+		"messageName":          "Jpake1bRequest",
 		"centralChallengeHash": generateRandomHex(165),
 	}
 }
 
 func generateMockJpake2Request() map[string]interface{} {
 	return map[string]interface{}{
-		"messageName":         "Jpake2Request",
+		"messageName":          "Jpake2Request",
 		"centralChallengeHash": generateRandomHex(165),
 	}
 }

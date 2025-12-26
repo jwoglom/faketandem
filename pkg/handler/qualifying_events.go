@@ -41,11 +41,11 @@ func (qe *QualifyingEventsNotifier) NotifyBolusStart(bolusID uint32, units float
 
 	// Build the event message
 	params := map[string]interface{}{
-		"bolusId":    bolusID,
-		"units":      units,
-		"timestamp":  time.Now().Unix(),
-		"bolusType":  "normal", // Could be "normal", "extended", "dual"
-		"eventType":  "start",
+		"bolusId":   bolusID,
+		"units":     units,
+		"timestamp": time.Now().Unix(),
+		"bolusType": "normal", // Could be "normal", "extended", "dual"
+		"eventType": "start",
 	}
 
 	return qe.sendEvent("BolusStartEvent", params)

@@ -26,10 +26,10 @@ type PumpX2JPAKEAuthenticator struct {
 	javaCmd     string
 
 	// JPAKE state
-	round          int
-	gexp           *expect.GExpect
-	sharedSecret   []byte
-	serverNonce    []byte
+	round        int
+	gexp         *expect.GExpect
+	sharedSecret []byte
+	serverNonce  []byte
 
 	// Response cache for each round
 	round1aResponse map[string]interface{}
@@ -38,7 +38,7 @@ type PumpX2JPAKEAuthenticator struct {
 	round3Response  map[string]interface{}
 	round4Response  map[string]interface{}
 
-	mutex          sync.Mutex
+	mutex sync.Mutex
 }
 
 // NewPumpX2JPAKEAuthenticator creates a new pumpX2-based JPAKE authenticator

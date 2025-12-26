@@ -1,3 +1,5 @@
+version: "2"
+
 run:
   timeout: 5m
   tests: true
@@ -5,24 +7,16 @@ run:
 
 linters:
   enable:
-    - gofmt
     - govet
     - errcheck
     - staticcheck
     - unused
-    - gosimple
     - ineffassign
-    - typecheck
     - gocyclo
     - misspell
     - revive
     - unconvert
     - unparam
-    - goimports
-
-  disable:
-    # Disabled linters that are deprecated or replaced
-    - exportloopref  # Deprecated since Go 1.22, replaced by copyloopvar
 
 linters-settings:
   gocyclo:
@@ -60,6 +54,8 @@ issues:
   max-same-issues: 0
 
 output:
-  format: colored-line-number
+  formats:
+    colored-line-number:
+      path: stdout
   print-issued-lines: true
   print-linter-name: true
