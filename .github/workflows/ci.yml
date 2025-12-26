@@ -85,6 +85,9 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
         cache: 'gradle'
+        cache-dependency-path: |
+          pumpX2/**/*.gradle*
+          pumpX2/**/gradle-wrapper.properties
 
     - name: Setup Gradle
       uses: gradle/actions/setup-gradle@v4

@@ -177,20 +177,32 @@ func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 
 	log.Debug("pumpX2 JPAKE server process started successfully with expect")
 
+	// Give the process a moment to start and output initial messages
+	time.Sleep(200 * time.Millisecond)
+
 	return nil
 }
 
 // readServerRound1Responses reads the server's initial round 1a and 1b responses
 func (j *PumpX2JPAKEAuthenticator) readServerRound1Responses() error {
+	// Check if process is still running before reading
+	if !j.gexp.Check() {
+		return fmt.Errorf("pumpX2 process exited before reading JPAKE_1A")
+	}
+
 	// Read JPAKE_1A response
-	round1aRegex := regexp.MustCompile(`JPAKE_1A:\s*({.+})`)
+	// The regex needs to handle potential stderr output before the JPAKE_1A line
+	// Match JPAKE_1A: followed by JSON (JSONObject.toString() outputs single-line JSON)
+	round1aRegex := regexp.MustCompile(`(?s).*?JPAKE_1A:\s*(\{.*?\})`)
 	output, _, err := j.gexp.Expect(round1aRegex, 10*time.Second)
 	if err != nil {
-		// Try to get any remaining output for debugging
-		if j.gexp != nil {
-			// Capture whatever output is available
-			log.Errorf("Failed to read JPAKE_1A. Last output captured: %s", output)
+		// Check if process exited
+		if !j.gexp.Check() {
+			log.Errorf("pumpX2 process exited while reading JPAKE_1A. Last output: %s", output)
+			return fmt.Errorf("pumpX2 process exited: %w", err)
 		}
+		// Try to get any remaining output for debugging
+		log.Errorf("Failed to read JPAKE_1A. Last output captured: %s", output)
 		return fmt.Errorf("failed to read JPAKE_1A from pumpX2: %w", err)
 	}
 
@@ -209,12 +221,17 @@ func (j *PumpX2JPAKEAuthenticator) readServerRound1Responses() error {
 	log.Debugf("Got server Round1a response: %+v", j.round1aResponse)
 
 	// Read JPAKE_1B response
-	round1bRegex := regexp.MustCompile(`JPAKE_1B:\s*({.+})`)
+	// The regex needs to handle potential output between JPAKE_1A and JPAKE_1B
+	// Match JPAKE_1B: followed by JSON (JSONObject.toString() outputs single-line JSON)
+	round1bRegex := regexp.MustCompile(`(?s).*?JPAKE_1B:\s*(\{.*?\})`)
 	output, _, err = j.gexp.Expect(round1bRegex, 10*time.Second)
 	if err != nil {
-		if j.gexp != nil {
-			log.Errorf("Failed to read JPAKE_1B. Last output captured: %s", output)
+		// Check if process exited
+		if !j.gexp.Check() {
+			log.Errorf("pumpX2 process exited while reading JPAKE_1B. Last output: %s", output)
+			return fmt.Errorf("pumpX2 process exited: %w", err)
 		}
+		log.Errorf("Failed to read JPAKE_1B. Last output captured: %s", output)
 		return fmt.Errorf("failed to read JPAKE_1B from pumpX2: %w", err)
 	}
 
