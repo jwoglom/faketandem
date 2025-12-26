@@ -91,7 +91,6 @@ func (j *PumpX2JPAKEAuthenticator) ProcessRound(round int, requestData map[strin
 func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 	var cmdPath string
 	var args []string
-	var fullCmdArgs []string
 
 	if j.pumpX2Mode == "gradle" {
 		cmdPath = filepath.Join(j.pumpX2Path, j.gradleCmd)
@@ -101,7 +100,6 @@ func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 			"--console=plain",
 			"--args=jpake-server " + j.pairingCode,
 		}
-		fullCmdArgs = append([]string{cmdPath}, args...)
 	} else {
 		// JAR mode
 		jarPath := filepath.Join(j.pumpX2Path, "cliparser/build/libs/cliparser.jar")
@@ -112,11 +110,9 @@ func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 			"jpake-server",
 			j.pairingCode,
 		}
-		fullCmdArgs = append([]string{cmdPath}, args...)
 	}
 
 	log.Infof("Starting pumpX2 JPAKE server process: %s %v (in dir: %s)", cmdPath, args, j.pumpX2Path)
-	log.Debugf("Full command: %s", strings.Join(fullCmdArgs, " "))
 
 	// Create command to run in the correct directory
 	cmd := exec.Command(cmdPath, args...)
@@ -124,7 +120,7 @@ func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 
 	// Test if we can actually run the command
 	if err := cmd.Start(); err != nil {
-		log.Errorf("Failed to start command %s: %v", strings.Join(fullCmdArgs, " "), err)
+		log.Errorf("Failed to start command %s %v: %v", cmdPath, args, err)
 		return fmt.Errorf("failed to start JPAKE server process: %w", err)
 	}
 
@@ -142,10 +138,26 @@ func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 		log.Warnf("Failed to kill test process: %v", err)
 	}
 
-	// Now spawn with expect, which will capture stdout/stderr
+	// Now spawn with expect using a shell command that changes directory first
+	// This ensures the command runs in the correct directory
+	var shellCmd string
+	if j.pumpX2Mode == "gradle" {
+		shellCmd = fmt.Sprintf("cd %s && %s %s",
+			j.pumpX2Path,
+			j.gradleCmd,
+			strings.Join(args, " "))
+	} else {
+		shellCmd = fmt.Sprintf("cd %s && %s %s",
+			j.pumpX2Path,
+			cmdPath,
+			strings.Join(args, " "))
+	}
+
+	log.Debugf("Spawning with shell command: %s", shellCmd)
+
 	var err error
-	j.gexp, _, err = expect.SpawnWithArgs(
-		fullCmdArgs,
+	j.gexp, _, err = expect.Spawn(
+		shellCmd,
 		-1,
 		expect.CheckDuration(100*time.Millisecond),
 		expect.PartialMatch(true),
