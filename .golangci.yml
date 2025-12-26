@@ -26,13 +26,3 @@ linters:
       enable-all-rules: false
       rules:
         - name: var-naming
-          arguments:
-            # Allow "api" as a package name
-            - ["api"]
-
-issues:
-  exclude:
-    # Exclude gocyclo from test files
-    - "cyclomatic complexity.*_test\\.go"
-    # Allow "api" package name
-    - "avoid meaningless package names.*package api"
