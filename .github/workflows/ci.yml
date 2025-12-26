@@ -111,7 +111,7 @@ jobs:
       working-directory: faketandem
       env:
         PUMPX2_PATH: ${{ github.workspace }}/pumpX2
-      run: go test -v -timeout 5m ./pkg/handler -run Integration
+      run: go test -v -timeout 5m ./pkg/handler
 
   build:
     name: Build
