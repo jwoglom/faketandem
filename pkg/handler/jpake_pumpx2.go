@@ -91,6 +91,7 @@ func (j *PumpX2JPAKEAuthenticator) ProcessRound(round int, requestData map[strin
 func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 	var cmdPath string
 	var args []string
+	var fullCmdArgs []string
 
 	if j.pumpX2Mode == "gradle" {
 		cmdPath = filepath.Join(j.pumpX2Path, j.gradleCmd)
@@ -100,6 +101,7 @@ func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 			"--console=plain",
 			"--args=jpake-server " + j.pairingCode,
 		}
+		fullCmdArgs = append([]string{cmdPath}, args...)
 	} else {
 		// JAR mode
 		jarPath := filepath.Join(j.pumpX2Path, "cliparser/build/libs/cliparser.jar")
@@ -110,26 +112,52 @@ func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 			"jpake-server",
 			j.pairingCode,
 		}
+		fullCmdArgs = append([]string{cmdPath}, args...)
 	}
 
+	log.Infof("Starting pumpX2 JPAKE server process: %s %v (in dir: %s)", cmdPath, args, j.pumpX2Path)
+	log.Debugf("Full command: %s", strings.Join(fullCmdArgs, " "))
+
+	// Create command to run in the correct directory
 	cmd := exec.Command(cmdPath, args...)
 	cmd.Dir = j.pumpX2Path
 
-	log.Infof("Starting pumpX2 JPAKE server process: %s %v", cmdPath, args)
+	// Test if we can actually run the command
+	if err := cmd.Start(); err != nil {
+		log.Errorf("Failed to start command %s: %v", strings.Join(fullCmdArgs, " "), err)
+		return fmt.Errorf("failed to start JPAKE server process: %w", err)
+	}
 
-	// Build full command line
-	fullCmd := cmdPath + " " + strings.Join(args, " ")
+	// Wait a bit to see if the process immediately exits
+	time.Sleep(100 * time.Millisecond)
+	
+	// Check if process is still running
+	if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+		log.Errorf("Process exited immediately with status: %s", cmd.ProcessState.String())
+		return fmt.Errorf("JPAKE server process exited immediately")
+	}
 
+	// Kill the test process - we'll spawn it properly with expect
+	if err := cmd.Process.Kill(); err != nil {
+		log.Warnf("Failed to kill test process: %v", err)
+	}
+
+	// Now spawn with expect, which will capture stdout/stderr
 	var err error
-	j.gexp, _, err = expect.Spawn(fullCmd, -1,
+	j.gexp, _, err = expect.SpawnWithArgs(
+		fullCmdArgs,
+		-1,
 		expect.CheckDuration(100*time.Millisecond),
+		expect.PartialMatch(true),
+		expect.Verbose(true),
 	)
 
 	if err != nil {
-		return fmt.Errorf("failed to spawn JPAKE server process: %w", err)
+		log.Errorf("Failed to spawn with expect: %v", err)
+		return fmt.Errorf("failed to spawn JPAKE server process with expect: %w", err)
 	}
 
-	log.Debug("pumpX2 JPAKE server process started successfully")
+	log.Debug("pumpX2 JPAKE server process started successfully with expect")
 
 	return nil
 }
@@ -140,16 +168,23 @@ func (j *PumpX2JPAKEAuthenticator) readServerRound1Responses() error {
 	round1aRegex := regexp.MustCompile(`JPAKE_1A:\s*({.+})`)
 	output, _, err := j.gexp.Expect(round1aRegex, 10*time.Second)
 	if err != nil {
+		// Try to get any remaining output for debugging
+		if j.gexp != nil {
+			// Capture whatever output is available
+			log.Errorf("Failed to read JPAKE_1A. Last output captured: %s", output)
+		}
 		return fmt.Errorf("failed to read JPAKE_1A from pumpX2: %w", err)
 	}
 
 	matches := round1aRegex.FindStringSubmatch(output)
 	if len(matches) < 2 {
+		log.Errorf("Failed to parse JPAKE_1A. Full output: %s", output)
 		return fmt.Errorf("failed to parse JPAKE_1A output: %s", output)
 	}
 
 	// Parse the JSON response
 	if err := json.Unmarshal([]byte(matches[1]), &j.round1aResponse); err != nil {
+		log.Errorf("Failed to unmarshal JPAKE_1A JSON: %s. Error: %v", matches[1], err)
 		return fmt.Errorf("failed to unmarshal JPAKE_1A response: %w", err)
 	}
 
@@ -159,15 +194,20 @@ func (j *PumpX2JPAKEAuthenticator) readServerRound1Responses() error {
 	round1bRegex := regexp.MustCompile(`JPAKE_1B:\s*({.+})`)
 	output, _, err = j.gexp.Expect(round1bRegex, 10*time.Second)
 	if err != nil {
+		if j.gexp != nil {
+			log.Errorf("Failed to read JPAKE_1B. Last output captured: %s", output)
+		}
 		return fmt.Errorf("failed to read JPAKE_1B from pumpX2: %w", err)
 	}
 
 	matches = round1bRegex.FindStringSubmatch(output)
 	if len(matches) < 2 {
+		log.Errorf("Failed to parse JPAKE_1B. Full output: %s", output)
 		return fmt.Errorf("failed to parse JPAKE_1B output: %s", output)
 	}
 
 	if err := json.Unmarshal([]byte(matches[1]), &j.round1bResponse); err != nil {
+		log.Errorf("Failed to unmarshal JPAKE_1B JSON: %s. Error: %v", matches[1], err)
 		return fmt.Errorf("failed to unmarshal JPAKE_1B response: %w", err)
 	}
 
@@ -218,15 +258,20 @@ func (j *PumpX2JPAKEAuthenticator) processRound1(requestData map[string]interfac
 	round2Regex := regexp.MustCompile(`JPAKE_2:\s*({.+})`)
 	output, _, err := j.gexp.Expect(round2Regex, 10*time.Second)
 	if err != nil {
+		if j.gexp != nil {
+			log.Errorf("Failed to read JPAKE_2. Last output captured: %s", output)
+		}
 		return nil, fmt.Errorf("failed to read JPAKE_2 from pumpX2: %w", err)
 	}
 
 	matches := round2Regex.FindStringSubmatch(output)
 	if len(matches) < 2 {
+		log.Errorf("Failed to parse JPAKE_2. Full output: %s", output)
 		return nil, fmt.Errorf("failed to parse JPAKE_2 output: %s", output)
 	}
 
 	if err := json.Unmarshal([]byte(matches[1]), &j.round2Response); err != nil {
+		log.Errorf("Failed to unmarshal JPAKE_2 JSON: %s. Error: %v", matches[1], err)
 		return nil, fmt.Errorf("failed to unmarshal JPAKE_2 response: %w", err)
 	}
 
@@ -245,6 +290,7 @@ func (j *PumpX2JPAKEAuthenticator) processRound2(requestData map[string]interfac
 
 	log.Debugf("Sending client Jpake2Request to pumpX2: %s", requestHex)
 	if err := j.gexp.Send(requestHex + "\n"); err != nil {
+		log.Errorf("Failed to send Jpake2Request to pumpX2: %v", err)
 		log.Warnf("Failed to send to pumpX2: %v", err)
 	}
 
@@ -252,15 +298,20 @@ func (j *PumpX2JPAKEAuthenticator) processRound2(requestData map[string]interfac
 	round3Regex := regexp.MustCompile(`JPAKE_3:\s*({.+})`)
 	output, _, err := j.gexp.Expect(round3Regex, 10*time.Second)
 	if err != nil {
+		if j.gexp != nil {
+			log.Errorf("Failed to read JPAKE_3. Last output captured: %s", output)
+		}
 		return nil, fmt.Errorf("failed to read JPAKE_3 from pumpX2: %w", err)
 	}
 
 	matches := round3Regex.FindStringSubmatch(output)
 	if len(matches) < 2 {
+		log.Errorf("Failed to parse JPAKE_3. Full output: %s", output)
 		return nil, fmt.Errorf("failed to parse JPAKE_3 output: %s", output)
 	}
 
 	if err := json.Unmarshal([]byte(matches[1]), &j.round3Response); err != nil {
+		log.Errorf("Failed to unmarshal JPAKE_3 JSON: %s. Error: %v", matches[1], err)
 		return nil, fmt.Errorf("failed to unmarshal JPAKE_3 response: %w", err)
 	}
 
@@ -305,6 +356,7 @@ func (j *PumpX2JPAKEAuthenticator) processRound4(requestData map[string]interfac
 
 	log.Debugf("Sending client Jpake4KeyConfirmationRequest to pumpX2: %s", requestHex)
 	if err := j.gexp.Send(requestHex + "\n"); err != nil {
+		log.Errorf("Failed to send Jpake4KeyConfirmationRequest to pumpX2: %v", err)
 		log.Warnf("Failed to send to pumpX2: %v", err)
 	}
 
@@ -312,15 +364,20 @@ func (j *PumpX2JPAKEAuthenticator) processRound4(requestData map[string]interfac
 	round4Regex := regexp.MustCompile(`JPAKE_4:\s*({.+})`)
 	output, _, err := j.gexp.Expect(round4Regex, 10*time.Second)
 	if err != nil {
+		if j.gexp != nil {
+			log.Errorf("Failed to read JPAKE_4. Last output captured: %s", output)
+		}
 		return nil, fmt.Errorf("failed to read JPAKE_4 from pumpX2: %w", err)
 	}
 
 	matches := round4Regex.FindStringSubmatch(output)
 	if len(matches) < 2 {
+		log.Errorf("Failed to parse JPAKE_4. Full output: %s", output)
 		return nil, fmt.Errorf("failed to parse JPAKE_4 output: %s", output)
 	}
 
 	if err := json.Unmarshal([]byte(matches[1]), &j.round4Response); err != nil {
+		log.Errorf("Failed to unmarshal JPAKE_4 JSON: %s. Error: %v", matches[1], err)
 		return nil, fmt.Errorf("failed to unmarshal JPAKE_4 response: %w", err)
 	}
 
@@ -330,6 +387,9 @@ func (j *PumpX2JPAKEAuthenticator) processRound4(requestData map[string]interfac
 	resultRegex := regexp.MustCompile(`({[^{}]*"derivedSecret"[^{}]*})`)
 	resultOutput, _, err := j.gexp.Expect(resultRegex, 10*time.Second)
 	if err != nil {
+		if j.gexp != nil {
+			log.Errorf("Failed to read derivedSecret. Last output captured: %s", resultOutput)
+		}
 		return nil, fmt.Errorf("failed to read derived secret from pumpX2: %w", err)
 	}
 
@@ -337,6 +397,7 @@ func (j *PumpX2JPAKEAuthenticator) processRound4(requestData map[string]interfac
 	if len(resultMatches) >= 2 {
 		var result map[string]interface{}
 		if err := json.Unmarshal([]byte(resultMatches[1]), &result); err != nil {
+			log.Errorf("Failed to unmarshal result JSON: %s. Error: %v", resultMatches[1], err)
 			log.Warnf("Failed to unmarshal result JSON: %v", err)
 		} else {
 			if derivedSecretHex, ok := result["derivedSecret"].(string); ok {
