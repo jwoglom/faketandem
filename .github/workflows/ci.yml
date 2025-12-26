@@ -85,23 +85,12 @@ jobs:
         distribution: 'temurin'
         java-version: '17'
 
-    - name: Cache Gradle packages
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.gradle/caches
-          ~/.gradle/wrapper
-        key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-        restore-keys: |
-          ${{ runner.os }}-gradle-
-
-    - name: Make gradlew executable
-      run: chmod +x pumpX2/gradlew
+    - name: Setup Gradle
+      uses: gradle/actions/setup-gradle@v4
 
     - name: Build pumpX2 cliparser
-      run: |
-        cd pumpX2
-        ./gradlew cliparser --console=plain -q || echo "Gradle build failed, integration tests may fail"
+      working-directory: pumpX2
+      run: ./gradlew cliparser --console=plain -q
 
     - name: Verify cliparser JAR
       run: |
@@ -114,16 +103,14 @@ jobs:
         fi
 
     - name: Download Go dependencies
-      run: |
-        cd faketandem
-        go mod download
+      working-directory: faketandem
+      run: go mod download
 
     - name: Run integration tests
+      working-directory: faketandem
       env:
         PUMPX2_PATH: ${{ github.workspace }}/pumpX2
-      run: |
-        cd faketandem
-        go test -v -timeout 5m ./pkg/handler -run Integration
+      run: go test -v -timeout 5m ./pkg/handler -run Integration
 
   build:
     name: Build

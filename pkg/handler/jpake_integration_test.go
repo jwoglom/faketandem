@@ -13,6 +13,8 @@ import (
 
 // TestPumpX2JPAKEAuthenticator_FullFlow tests the complete JPAKE authentication flow
 // using the actual pumpX2 jpake-server command
+//
+//nolint:gocyclo // Integration test with multiple sequential steps
 func TestPumpX2JPAKEAuthenticator_FullFlow(t *testing.T) {
 	// Skip if PUMPX2_PATH not set
 	pumpX2Path := os.Getenv("PUMPX2_PATH")
@@ -46,7 +48,11 @@ func TestPumpX2JPAKEAuthenticator_FullFlow(t *testing.T) {
 		"./gradlew",
 		"java",
 	)
-	defer auth.Close()
+	defer func() {
+		if err := auth.Close(); err != nil {
+			t.Logf("Error closing auth: %v", err)
+		}
+	}()
 
 	t.Log("Testing JPAKE Round 1a")
 	// Simulate client sending Jpake1aRequest

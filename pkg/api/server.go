@@ -1,3 +1,4 @@
+//nolint:revive // api is a standard package name for API servers
 package api
 
 import (
@@ -132,7 +133,9 @@ func (s *Server) SendConnectionEvent(connected bool) {
 
 func (s *Server) setupRoutes() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "Pump Emulator API - Connect via WebSocket at /ws\n\nSettings API:\n  GET    /api/settings\n  GET    /api/settings/{messageType}\n  PUT    /api/settings/{messageType}\n  POST   /api/settings/{messageType}/reset")
+		if _, err := fmt.Fprintf(w, "Pump Emulator API - Connect via WebSocket at /ws\n\nSettings API:\n  GET    /api/settings\n  GET    /api/settings/{messageType}\n  PUT    /api/settings/{messageType}\n  POST   /api/settings/{messageType}/reset"); err != nil {
+			log.Warnf("Failed to write response: %v", err)
+		}
 	})
 	http.Handle("/ws", s)
 	http.HandleFunc("/api/settings", s.handleSettingsAPI)
@@ -186,7 +189,9 @@ func (s *Server) reader(conn *websocket.Conn) {
 		s.mtx.Lock()
 		s.conn = nil
 		s.mtx.Unlock()
-		conn.Close()
+		if err := conn.Close(); err != nil {
+			log.Debugf("Error closing websocket: %v", err)
+		}
 	}()
 
 	for {
@@ -371,7 +376,11 @@ func (s *Server) handleUpdateSetting(w http.ResponseWriter, r *http.Request, mes
 		http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusBadRequest)
 		return
 	}
-	defer r.Body.Close()
+	defer func() {
+		if err := r.Body.Close(); err != nil {
+			log.Debugf("Error closing request body: %v", err)
+		}
+	}()
 
 	// Parse the configuration
 	var config settings.ResponseConfig

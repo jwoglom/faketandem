@@ -13,7 +13,6 @@ import (
 	"github.com/jwoglom/faketandem/pkg/pumpx2"
 	"github.com/jwoglom/faketandem/pkg/state"
 
-	"github.com/sirupsen/logrus"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -41,7 +40,7 @@ func main() {
 		log.SetLevel(log.DebugLevel)
 	}
 
-	log.SetFormatter(&logrus.TextFormatter{
+	log.SetFormatter(&log.TextFormatter{
 		DisableQuote: true,
 		ForceColors:  true,
 	})

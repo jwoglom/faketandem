@@ -51,12 +51,20 @@ type StateChange struct {
 // StateChangeType identifies the type of state change
 type StateChangeType int
 
+// State change type constants
 const (
+	// StateChangeAuth indicates authentication state changed
 	StateChangeAuth StateChangeType = iota
+	// StateChangeBasal indicates basal rate changed
 	StateChangeBasal
+	// StateChangeBolus indicates bolus state changed
 	StateChangeBolus
+	// StateChangeReservoir indicates reservoir level changed
 	StateChangeReservoir
+	// StateChangeBattery indicates battery level changed
 	StateChangeBattery
+	// StateChangeAlert indicates alert state changed
 	StateChangeAlert
+	// StateChangeTime indicates time since reset changed
 	StateChangeTime
 )

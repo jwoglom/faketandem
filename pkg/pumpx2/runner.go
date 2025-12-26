@@ -128,7 +128,11 @@ func (r *GradleRunner) ExecuteJPAKE(pairingCode string, responseProvider JPAKERe
 	if err != nil {
 		return "", fmt.Errorf("failed to create stdin pipe: %w", err)
 	}
-	defer stdin.Close()
+	defer func() {
+		if err := stdin.Close(); err != nil {
+			log.Debugf("Error closing stdin: %v", err)
+		}
+	}()
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -166,7 +170,9 @@ func (r *GradleRunner) ExecuteJPAKE(pairingCode string, responseProvider JPAKERe
 				responseHex, err := responseProvider(step, requestHex)
 				if err != nil {
 					log.Errorf("Response provider failed for step %s: %v", step, err)
-					stdin.Close()
+					if err := stdin.Close(); err != nil {
+					log.Debugf("Error closing stdin: %v", err)
+				}
 					_ = cmd.Wait() // Ignore error in cleanup path
 					return "", fmt.Errorf("response provider error at step %s: %w", step, err)
 				}
@@ -190,7 +196,9 @@ func (r *GradleRunner) ExecuteJPAKE(pairingCode string, responseProvider JPAKERe
 	}
 
 	// Close stdin to signal we're done
-	stdin.Close()
+	if err := stdin.Close(); err != nil {
+		log.Debugf("Error closing stdin: %v", err)
+	}
 
 	// Wait for command to finish
 	if err := cmd.Wait(); err != nil {
@@ -298,7 +306,11 @@ func (r *JarRunner) ExecuteJPAKE(pairingCode string, responseProvider JPAKERespo
 	if err != nil {
 		return "", fmt.Errorf("failed to create stdin pipe: %w", err)
 	}
-	defer stdin.Close()
+	defer func() {
+		if err := stdin.Close(); err != nil {
+			log.Debugf("Error closing stdin: %v", err)
+		}
+	}()
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -336,7 +348,9 @@ func (r *JarRunner) ExecuteJPAKE(pairingCode string, responseProvider JPAKERespo
 				responseHex, err := responseProvider(step, requestHex)
 				if err != nil {
 					log.Errorf("Response provider failed for step %s: %v", step, err)
-					stdin.Close()
+					if err := stdin.Close(); err != nil {
+					log.Debugf("Error closing stdin: %v", err)
+				}
 					_ = cmd.Wait() // Ignore error in cleanup path
 					return "", fmt.Errorf("response provider error at step %s: %w", step, err)
 				}
@@ -360,7 +374,9 @@ func (r *JarRunner) ExecuteJPAKE(pairingCode string, responseProvider JPAKERespo
 	}
 
 	// Close stdin to signal we're done
-	stdin.Close()
+	if err := stdin.Close(); err != nil {
+		log.Debugf("Error closing stdin: %v", err)
+	}
 
 	// Wait for command to finish
 	if err := cmd.Wait(); err != nil {
