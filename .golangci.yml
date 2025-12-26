@@ -2,10 +2,9 @@ version: "2"
 
 run:
   timeout: 5m
-  tests: true
-  modules-download-mode: readonly
 
 linters:
+  default: standard
   enable:
     - govet
     - errcheck
@@ -17,45 +16,12 @@ linters:
     - revive
     - unconvert
     - unparam
-
-linters-settings:
-  gocyclo:
-    min-complexity: 15
-
-  misspell:
-    locale: US
-
-  revive:
-    rules:
-      - name: var-naming
-        disabled: false
-      - name: exported
-        disabled: false
-
-  goimports:
-    local-prefixes: github.com/jwoglom/faketandem
-
-issues:
-  exclude-rules:
-    # Exclude some linters from running on tests files
-    - path: _test\.go
-      linters:
-        - gocyclo
-        - errcheck
-        - dupl
-        - gosec
-
-    # Exclude known issues
-    - text: "weak cryptographic primitive"
-      linters:
-        - gosec
-
-  max-issues-per-linter: 0
-  max-same-issues: 0
-
-output:
-  formats:
-    colored-line-number:
-      path: stdout
-  print-issued-lines: true
-  print-linter-name: true
+  settings:
+    gocyclo:
+      min-complexity: 15
+    misspell:
+      locale: US
+    revive:
+      rules:
+        - name: var-naming
+        - name: exported
