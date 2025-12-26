@@ -140,27 +140,33 @@ func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 		}
 	}
 
-	// Now spawn with expect using sh -c to run a shell command
-	// This allows us to change directory before executing the gradle/java command
-	var shellCmd string
-	if j.pumpX2Mode == "gradle" {
-		shellCmd = fmt.Sprintf("cd %s && %s %s",
-			j.pumpX2Path,
-			j.gradleCmd,
-			strings.Join(args, " "))
-	} else {
-		shellCmd = fmt.Sprintf("cd %s && %s %s",
-			j.pumpX2Path,
-			cmdPath,
-			strings.Join(args, " "))
+	// Build properly quoted shell command
+	// We need to escape arguments for the shell
+	quotedArgs := make([]string, len(args))
+	for i, arg := range args {
+		// Use single quotes and escape any single quotes in the arg
+		quotedArgs[i] = "'" + strings.ReplaceAll(arg, "'", "'\\''") + "'"
 	}
 
-	log.Debugf("Spawning with shell command: sh -c '%s'", shellCmd)
+	var shellCmd string
+	if j.pumpX2Mode == "gradle" {
+		shellCmd = fmt.Sprintf("cd '%s' && %s %s",
+			strings.ReplaceAll(j.pumpX2Path, "'", "'\\''"),
+			j.gradleCmd,
+			strings.Join(quotedArgs, " "))
+	} else {
+		shellCmd = fmt.Sprintf("cd '%s' && '%s' %s",
+			strings.ReplaceAll(j.pumpX2Path, "'", "'\\''"),
+			strings.ReplaceAll(cmdPath, "'", "'\\''"),
+			strings.Join(quotedArgs, " "))
+	}
+
+	log.Debugf("Spawning with shell command: sh -c %q", shellCmd)
 
 	var err error
 	// Use sh -c to execute the command with directory change
 	j.gexp, _, err = expect.Spawn(
-		fmt.Sprintf("sh -c '%s'", shellCmd),
+		fmt.Sprintf("sh -c %s", shellQuote(shellCmd)),
 		-1,
 		expect.CheckDuration(100*time.Millisecond),
 		expect.PartialMatch(true),
@@ -175,6 +181,12 @@ func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 	log.Debug("pumpX2 JPAKE server process started successfully with expect")
 
 	return nil
+}
+
+// shellQuote quotes a string for safe use in a shell command
+func shellQuote(s string) string {
+	// Use single quotes and escape any single quotes in the string
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 // readServerRound1Responses reads the server's initial round 1a and 1b responses
