@@ -151,6 +151,7 @@ func TestPumpX2JPAKEAuthenticator_FullFlow(t *testing.T) {
 
 			// Extract server JPAKE responses and forward to client
 			// Server outputs: JPAKE_1A: {json}, JPAKE_1B: {json}, JPAKE_2: {json}, etc.
+			// Messages are split across multiple BLE packets - send ALL packets
 			if strings.Contains(line, "JPAKE_") && strings.Contains(line, "packets") {
 				// Extract JSON from line
 				colonIdx := strings.Index(line, ": ")
@@ -158,12 +159,16 @@ func TestPumpX2JPAKEAuthenticator_FullFlow(t *testing.T) {
 					jsonStr := line[colonIdx+2:]
 					var jsonData map[string]interface{}
 					if err := json.Unmarshal([]byte(jsonStr), &jsonData); err == nil {
-						// Get the packets array and send first packet to client
+						// Get ALL packets and send them to client
 						if packets, ok := jsonData["packets"].([]interface{}); ok && len(packets) > 0 {
-							if hexData, ok := packets[0].(string); ok {
-								t.Logf("Forwarding server response to client: %s...", hexData[:min(40, len(hexData))])
-								if _, err := clientStdin.Write([]byte(hexData + "\n")); err != nil {
-									t.Logf("Error writing to client: %v", err)
+							for i, p := range packets {
+								if hexData, ok := p.(string); ok {
+									if i == 0 {
+										t.Logf("Forwarding %d server packets to client, first: %s...", len(packets), hexData[:min(40, len(hexData))])
+									}
+									if _, err := clientStdin.Write([]byte(hexData + "\n")); err != nil {
+										t.Logf("Error writing packet %d to client: %v", i, err)
+									}
 								}
 							}
 						}
