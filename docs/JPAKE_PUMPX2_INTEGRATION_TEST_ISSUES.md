@@ -1,5 +1,7 @@
 # JPAKE pumpX2 Integration Test Issues
 
+> **Status: RESOLVED** - pumpX2 now supports space/comma-delimited packet boundaries on the `dev` branch. The test sends packets space-separated and should work correctly.
+
 This document describes the issues encountered while implementing the `TestPumpX2JPAKEAuthenticator_FullFlow` integration test, which runs pumpX2's `jpake` client against `jpake-server` for end-to-end JPAKE authentication testing.
 
 ## Overview
@@ -163,7 +165,9 @@ Usage:
 ./gradlew cliparser --args="jpake-server 123456 --packet-size 20"
 ```
 
-### Option 2: Delimiter-Based Splitting
+### Option 2: Delimiter-Based Splitting ✅ IMPLEMENTED
+
+> **This fix has been implemented in pumpX2 `dev` branch.**
 
 Accept a delimiter between packets (space, comma, semicolon):
 
@@ -183,6 +187,8 @@ packet1 packet2 packet3
 # or
 packet1,packet2,packet3
 ```
+
+The faketandem integration test now uses space-separated packets.
 
 ### Option 3: Explicit Packet Count Header
 
@@ -253,4 +259,6 @@ The JPAKE integration test exposed a fundamental limitation in pumpX2's CLI pack
 2. Transaction IDs are non-zero (especially txId >= 3)
 3. Packets have variable sizes
 
-The recommended fix is to modify pumpX2 to support explicit packet boundaries through one of the options above, with **Option 2 (delimiter-based splitting)** or **Option 4 (JSON input mode)** being the most practical solutions.
+~~The recommended fix is to modify pumpX2 to support explicit packet boundaries through one of the options above, with **Option 2 (delimiter-based splitting)** or **Option 4 (JSON input mode)** being the most practical solutions.~~
+
+**Resolution:** Option 2 (delimiter-based splitting) has been implemented in pumpX2's `dev` branch. The faketandem integration test now sends packets space-separated on one line, and pumpX2 correctly splits them before parsing.
