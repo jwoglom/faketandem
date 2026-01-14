@@ -64,8 +64,12 @@ func TestPumpX2JPAKEAuthenticator_FullFlow(t *testing.T) {
 	if resp1a == nil {
 		t.Fatal("Round 1a response is nil")
 	}
-	if _, ok := resp1a["centralChallengeHash"]; !ok {
-		t.Error("Round 1a response missing centralChallengeHash")
+	// pumpX2 response format uses messageParams instead of centralChallengeHash
+	if _, ok := resp1a["messageName"]; !ok {
+		t.Error("Round 1a response missing messageName")
+	}
+	if _, ok := resp1a["messageParams"]; !ok {
+		t.Error("Round 1a response missing messageParams")
 	}
 	t.Logf("Round 1a response: %+v", resp1a)
 
@@ -82,8 +86,12 @@ func TestPumpX2JPAKEAuthenticator_FullFlow(t *testing.T) {
 	if resp1b == nil {
 		t.Fatal("Round 1b response is nil")
 	}
-	if _, ok := resp1b["centralChallengeHash"]; !ok {
-		t.Error("Round 1b response missing centralChallengeHash")
+	// pumpX2 response format uses messageParams instead of centralChallengeHash
+	if _, ok := resp1b["messageName"]; !ok {
+		t.Error("Round 1b response missing messageName")
+	}
+	if _, ok := resp1b["messageParams"]; !ok {
+		t.Error("Round 1b response missing messageParams")
 	}
 	t.Logf("Round 1b response: %+v", resp1b)
 
@@ -99,8 +107,12 @@ func TestPumpX2JPAKEAuthenticator_FullFlow(t *testing.T) {
 	if resp2 == nil {
 		t.Fatal("Round 2 response is nil")
 	}
-	if _, ok := resp2["centralChallengeHash"]; !ok {
-		t.Error("Round 2 response missing centralChallengeHash")
+	// pumpX2 response format uses messageParams instead of centralChallengeHash
+	if _, ok := resp2["messageName"]; !ok {
+		t.Error("Round 2 response missing messageName")
+	}
+	if _, ok := resp2["messageParams"]; !ok {
+		t.Error("Round 2 response missing messageParams")
 	}
 	t.Logf("Round 2 response: %+v", resp2)
 
