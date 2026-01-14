@@ -95,7 +95,8 @@ func TestPumpX2JPAKEAuthenticator_FullFlow(t *testing.T) {
 	clientReader := bufio.NewReader(clientStdout)
 
 	// Track results
-	var serverDerivedSecret, clientDerivedSecret string
+	var serverDerivedSecret string
+	var clientValidated bool
 	derivedSecretRegex := regexp.MustCompile(`"derivedSecret"\s*:\s*"([a-fA-F0-9]+)"`)
 
 	// Channels for communication between goroutines
@@ -181,10 +182,11 @@ func TestPumpX2JPAKEAuthenticator_FullFlow(t *testing.T) {
 		case line := <-clientLines:
 			t.Logf("CLIENT: %s", line)
 
-			// Check for derived secret
-			if matches := derivedSecretRegex.FindStringSubmatch(line); len(matches) > 1 {
-				clientDerivedSecret = matches[1]
-				t.Logf("Client derived secret: %s", clientDerivedSecret)
+			// Check for successful HMAC validation (client doesn't output derivedSecret,
+			// but outputs "HMAC SECRET VALIDATES" when authentication succeeds)
+			if strings.Contains(line, "HMAC SECRET VALIDATES") {
+				clientValidated = true
+				t.Logf("Client HMAC validation successful")
 			}
 
 			// Client outputs requests as ROUND_XX_SENT: {json with packets array}
@@ -219,7 +221,7 @@ func TestPumpX2JPAKEAuthenticator_FullFlow(t *testing.T) {
 				t.Logf("I/O error: %v", err)
 			}
 			// One process ended - check if we got results
-			if serverDerivedSecret != "" || clientDerivedSecret != "" {
+			if serverDerivedSecret != "" || clientValidated {
 				done = true
 			}
 
@@ -260,19 +262,15 @@ func TestPumpX2JPAKEAuthenticator_FullFlow(t *testing.T) {
 	if serverDerivedSecret == "" {
 		t.Error("Server did not derive a shared secret")
 	}
-	if clientDerivedSecret == "" {
-		t.Error("Client did not derive a shared secret")
+	if !clientValidated {
+		t.Error("Client did not validate HMAC (authentication failed)")
 	}
 
-	// The secrets should match if both used the same pairing code
-	if serverDerivedSecret != "" && clientDerivedSecret != "" {
-		if serverDerivedSecret == clientDerivedSecret {
-			t.Logf("SUCCESS: Both sides derived the same shared secret!")
-			t.Logf("Shared secret: %s", serverDerivedSecret)
-		} else {
-			t.Errorf("FAILURE: Derived secrets don't match!\nServer: %s\nClient: %s",
-				serverDerivedSecret, clientDerivedSecret)
-		}
+	// Both sides successfully authenticated
+	if serverDerivedSecret != "" && clientValidated {
+		t.Logf("SUCCESS: JPAKE authentication completed!")
+		t.Logf("Server derived secret: %s", serverDerivedSecret)
+		t.Log("Client HMAC validated successfully")
 	}
 }
 
