@@ -68,9 +68,10 @@ func (j *PumpX2JPAKEAuthenticator) ProcessRound(round int, requestData map[strin
 			return nil, fmt.Errorf("failed to start JPAKE server process: %w", err)
 		}
 
-		// Read the initial server responses for rounds 1a, 1b
-		if err := j.readServerRound1Responses(); err != nil {
-			return nil, fmt.Errorf("failed to read server round 1 responses: %w", err)
+		// Read only the initial JPAKE_1A response
+		// JPAKE_1B is read after we send the client's 1a request
+		if err := j.readServerRound1aResponse(); err != nil {
+			return nil, fmt.Errorf("failed to read server round 1a response: %w", err)
 		}
 	}
 
@@ -183,8 +184,9 @@ func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 	return nil
 }
 
-// readServerRound1Responses reads the server's initial round 1a and 1b responses
-func (j *PumpX2JPAKEAuthenticator) readServerRound1Responses() error {
+// readServerRound1aResponse reads only the server's initial JPAKE_1A response
+// JPAKE_1B is read after sending client's round 1a request (pumpX2 waits for input)
+func (j *PumpX2JPAKEAuthenticator) readServerRound1aResponse() error {
 	// Read JPAKE_1A response
 	// The regex needs to handle potential stderr output before the JPAKE_1A line
 	// Match JPAKE_1A: followed by JSON (JSONObject.toString() outputs single-line JSON)
@@ -210,17 +212,21 @@ func (j *PumpX2JPAKEAuthenticator) readServerRound1Responses() error {
 
 	log.Debugf("Got server Round1a response: %+v", j.round1aResponse)
 
+	return nil
+}
+
+// readServerRound1bResponse reads the server's JPAKE_1B response after sending client's 1a
+func (j *PumpX2JPAKEAuthenticator) readServerRound1bResponse() error {
 	// Read JPAKE_1B response
-	// The regex needs to handle potential output between JPAKE_1A and JPAKE_1B
 	// Match JPAKE_1B: followed by JSON (JSONObject.toString() outputs single-line JSON)
 	round1bRegex := regexp.MustCompile(`(?s).*?JPAKE_1B:\s*(\{.*?\})`)
-	output, _, err = j.gexp.Expect(round1bRegex, 30*time.Second)
+	output, _, err := j.gexp.Expect(round1bRegex, 30*time.Second)
 	if err != nil {
 		log.Errorf("Failed to read JPAKE_1B. Last output captured: %s", output)
 		return fmt.Errorf("failed to read JPAKE_1B from pumpX2: %w", err)
 	}
 
-	matches = round1bRegex.FindStringSubmatch(output)
+	matches := round1bRegex.FindStringSubmatch(output)
 	if len(matches) < 2 {
 		log.Errorf("Failed to parse JPAKE_1B. Full output: %s", output)
 		return fmt.Errorf("failed to parse JPAKE_1B output: %s", output)
@@ -238,36 +244,30 @@ func (j *PumpX2JPAKEAuthenticator) readServerRound1Responses() error {
 
 // processRound1 handles round 1 (combines 1a and 1b)
 func (j *PumpX2JPAKEAuthenticator) processRound1(requestData map[string]interface{}) (map[string]interface{}, error) {
-	// The client sends Jpake1aRequest first
-	// We need to encode it and send to pumpX2, then return our cached round1a response
-
-	// Encode the client's request
-	requestHex, err := j.encodeClientRequest(requestData)
-	if err != nil {
-		log.Warnf("Failed to encode client Jpake1aRequest: %v", err)
-		// Continue anyway - pumpX2 will validate
-	}
-
-	// Send client's request to pumpX2 server
-	log.Debugf("Sending client Jpake1aRequest to pumpX2: %s", requestHex)
-	if err := j.gexp.Send(requestHex + "\n"); err != nil {
-		log.Warnf("Failed to send to pumpX2: %v", err)
-	}
-
 	// The round 1a involves two sub-rounds
-	// First call returns round1a response
+	// First call (round==0): Send client's 1a, read JPAKE_1B, return round1aResponse
+	// Second call (round==1): Send client's 1b, read JPAKE_2, return round1bResponse
+
 	if j.round == 0 {
+		// First call - send client's Jpake1aRequest
+		requestHex := j.encodeClientRequest(requestData)
+
+		log.Debugf("Sending client Jpake1aRequest to pumpX2: %s", requestHex)
+		if err := j.gexp.Send(requestHex + "\n"); err != nil {
+			log.Warnf("Failed to send to pumpX2: %v", err)
+		}
+
+		// Now read JPAKE_1B (pumpX2 outputs it after receiving client's 1a)
+		if err := j.readServerRound1bResponse(); err != nil {
+			return nil, fmt.Errorf("failed to read JPAKE_1B after sending client 1a: %w", err)
+		}
+
 		j.round = 1
 		return j.round1aResponse, nil
 	}
 
-	// Second call to ProcessRound with round=1 should return round1b response
-	// We need to send the client's Jpake1bRequest first
-
-	requestHex, err = j.encodeClientRequest(requestData)
-	if err != nil {
-		log.Warnf("Failed to encode client Jpake1bRequest: %v", err)
-	}
+	// Second call - send client's Jpake1bRequest
+	requestHex := j.encodeClientRequest(requestData)
 
 	log.Debugf("Sending client Jpake1bRequest to pumpX2: %s", requestHex)
 	if err := j.gexp.Send(requestHex + "\n"); err != nil {
@@ -303,15 +303,11 @@ func (j *PumpX2JPAKEAuthenticator) processRound1(requestData map[string]interfac
 // processRound2 handles round 2
 func (j *PumpX2JPAKEAuthenticator) processRound2(requestData map[string]interface{}) (map[string]interface{}, error) {
 	// Send client's Jpake2Request
-	requestHex, err := j.encodeClientRequest(requestData)
-	if err != nil {
-		log.Warnf("Failed to encode client Jpake2Request: %v", err)
-	}
+	requestHex := j.encodeClientRequest(requestData)
 
 	log.Debugf("Sending client Jpake2Request to pumpX2: %s", requestHex)
 	if err := j.gexp.Send(requestHex + "\n"); err != nil {
-		log.Errorf("Failed to send Jpake2Request to pumpX2: %v", err)
-		log.Warnf("Failed to send to pumpX2: %v", err)
+		log.Warnf("Failed to send Jpake2Request to pumpX2: %v", err)
 	}
 
 	// Read server's round 3 response
@@ -346,10 +342,7 @@ func (j *PumpX2JPAKEAuthenticator) processRound2(requestData map[string]interfac
 //nolint:unparam // error return required by interface, may be used in future
 func (j *PumpX2JPAKEAuthenticator) processRound3(requestData map[string]interface{}) (map[string]interface{}, error) {
 	// Send client's Jpake3SessionKeyRequest
-	requestHex, err := j.encodeClientRequest(requestData)
-	if err != nil {
-		log.Warnf("Failed to encode client Jpake3SessionKeyRequest: %v", err)
-	}
+	requestHex := j.encodeClientRequest(requestData)
 
 	log.Debugf("Sending client Jpake3SessionKeyRequest to pumpX2: %s", requestHex)
 	if err := j.gexp.Send(requestHex + "\n"); err != nil {
@@ -369,15 +362,11 @@ func (j *PumpX2JPAKEAuthenticator) processRound3(requestData map[string]interfac
 // processRound4 handles round 4
 func (j *PumpX2JPAKEAuthenticator) processRound4(requestData map[string]interface{}) (map[string]interface{}, error) {
 	// Send client's Jpake4KeyConfirmationRequest
-	requestHex, err := j.encodeClientRequest(requestData)
-	if err != nil {
-		log.Warnf("Failed to encode client Jpake4KeyConfirmationRequest: %v", err)
-	}
+	requestHex := j.encodeClientRequest(requestData)
 
 	log.Debugf("Sending client Jpake4KeyConfirmationRequest to pumpX2: %s", requestHex)
 	if err := j.gexp.Send(requestHex + "\n"); err != nil {
-		log.Errorf("Failed to send Jpake4KeyConfirmationRequest to pumpX2: %v", err)
-		log.Warnf("Failed to send to pumpX2: %v", err)
+		log.Warnf("Failed to send Jpake4KeyConfirmationRequest to pumpX2: %v", err)
 	}
 
 	// Read server's round 4 response
@@ -433,26 +422,59 @@ func (j *PumpX2JPAKEAuthenticator) processRound4(requestData map[string]interfac
 }
 
 // encodeClientRequest encodes a client request using pumpX2's format
-func (j *PumpX2JPAKEAuthenticator) encodeClientRequest(requestData map[string]interface{}) (string, error) {
-	// Extract the hex data from the parsed request
-	// The requestData should contain the fields from the client's request message
+// Always returns a non-empty string (uses fallback if encoding fails)
+func (j *PumpX2JPAKEAuthenticator) encodeClientRequest(requestData map[string]interface{}) string {
+	// Extract message name from request data
+	messageName, ok := requestData["messageName"].(string)
+	if !ok {
+		log.Warnf("Request data missing messageName")
+		return "00"
+	}
 
-	// For now, we'll use the bridge to encode the message
-	// This requires the message type and parameters
+	// Try to use the bridge to encode the message if available
+	if j.bridge != nil {
+		// Build params map excluding messageName
+		params := make(map[string]interface{})
+		for key, value := range requestData {
+			if key != "messageName" {
+				params[key] = value
+			}
+		}
 
-	// The requestData coming from the client is already parsed
-	// We need to re-encode it to hex for pumpX2
+		// Use bridge to encode the message
+		// Use txID 0 for simplicity - pumpX2 jpake-server doesn't validate txID
+		encoded, err := j.bridge.EncodeMessage(0, messageName, params)
+		if err == nil && len(encoded.Packets) > 0 {
+			// Successfully encoded - join all packets into a single hex string
+			result := strings.Join(encoded.Packets, "")
+			log.Debugf("Encoded client request via bridge: %s -> %s", messageName, result)
+			return result
+		}
+		// Bridge encoding failed or returned no packets - fall through to fallback
+		if err != nil {
+			log.Debugf("Bridge encoding failed (will use fallback): %v", err)
+		} else {
+			log.Debugf("Bridge encoding returned no packets (will use fallback)")
+		}
+	}
 
-	// Since we're in the server, the requestData is what the client sent
-	// We need to find the hex representation
+	// Fallback: extract the hex data directly from request params
+	// pumpX2's cliparser may not support encoding JPAKE request messages,
+	// so we construct a minimal message from the raw data
+	if hexData, ok := requestData["centralChallengeHash"].(string); ok && len(hexData) > 0 {
+		previewLen := 40
+		if len(hexData) < previewLen {
+			previewLen = len(hexData)
+		}
+		log.Debugf("Using centralChallengeHash as fallback for %s: %s...", messageName, hexData[:previewLen])
+		return hexData
+	}
 
-	// For simplicity, we'll extract the opCode and cargo
-	// and let pumpX2 validate it
-
-	// Actually, the router should be passing us the raw hex data
-	// But for now, we'll just return an empty string and let pumpX2 handle validation
-
-	return "", nil
+	// For messages without centralChallengeHash (like Jpake3SessionKeyRequest),
+	// return a placeholder that won't crash pumpX2's parse function
+	// pumpX2 will reject it, but at least it won't crash on empty input
+	log.Debugf("No fallback data available for %s, using placeholder", messageName)
+	return "00"
 }
 
 // GetSharedSecret returns the derived shared secret
