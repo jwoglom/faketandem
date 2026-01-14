@@ -187,16 +187,28 @@ func TestPumpX2JPAKEAuthenticator_FullFlow(t *testing.T) {
 				t.Logf("Client derived secret: %s", clientDerivedSecret)
 			}
 
-			// Client outputs hex data for each request (e.g., "Jpake1aRequest: <hex>")
-			// Forward client requests to server
-			if strings.Contains(line, "Request:") {
+			// Client outputs requests as ROUND_XX_SENT: {json with packets array}
+			// Extract packets, concatenate, and forward to server
+			if strings.Contains(line, "_SENT:") && strings.Contains(line, "packets") {
 				colonIdx := strings.Index(line, ": ")
 				if colonIdx > 0 {
-					hexData := strings.TrimSpace(line[colonIdx+2:])
-					if len(hexData) > 0 {
-						t.Logf("Forwarding client request to server: %s...", hexData[:min(40, len(hexData))])
-						if _, err := serverStdin.Write([]byte(hexData + "\n")); err != nil {
-							t.Logf("Error writing to server: %v", err)
+					jsonStr := line[colonIdx+2:]
+					var jsonData map[string]interface{}
+					if err := json.Unmarshal([]byte(jsonStr), &jsonData); err == nil {
+						// Get ALL packets and concatenate them
+						if packets, ok := jsonData["packets"].([]interface{}); ok && len(packets) > 0 {
+							var allPackets strings.Builder
+							for _, p := range packets {
+								if hexData, ok := p.(string); ok {
+									allPackets.WriteString(hexData)
+								}
+							}
+							concatenated := allPackets.String()
+							t.Logf("Forwarding %d client packets to server (total %d chars): %s...",
+								len(packets), len(concatenated), concatenated[:min(60, len(concatenated))])
+							if _, err := serverStdin.Write([]byte(concatenated + "\n")); err != nil {
+								t.Logf("Error writing to server: %v", err)
+							}
 						}
 					}
 				}
