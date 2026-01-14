@@ -147,7 +147,7 @@ func TestPumpX2JPAKEAuthenticator_FullFlow(t *testing.T) {
 			if matches := derivedSecretRegex.FindStringSubmatch(line); len(matches) > 1 {
 				serverDerivedSecret = matches[1]
 				t.Logf("Server derived secret: %s", serverDerivedSecret)
-				done = true
+				// Don't exit yet - wait for client to also complete
 			}
 
 			// Extract server JPAKE responses and forward to client
@@ -226,8 +226,8 @@ func TestPumpX2JPAKEAuthenticator_FullFlow(t *testing.T) {
 			if err.Error() != "EOF" {
 				t.Logf("I/O error: %v", err)
 			}
-			// One process ended - check if we got results
-			if serverDerivedSecret != "" || clientValidated {
+			// One process ended - check if we got results from BOTH sides
+			if serverDerivedSecret != "" && clientValidated {
 				done = true
 			}
 
