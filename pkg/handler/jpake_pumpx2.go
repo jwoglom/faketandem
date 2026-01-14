@@ -68,9 +68,10 @@ func (j *PumpX2JPAKEAuthenticator) ProcessRound(round int, requestData map[strin
 			return nil, fmt.Errorf("failed to start JPAKE server process: %w", err)
 		}
 
-		// Read the initial server responses for rounds 1a, 1b
-		if err := j.readServerRound1Responses(); err != nil {
-			return nil, fmt.Errorf("failed to read server round 1 responses: %w", err)
+		// Read only the initial JPAKE_1A response
+		// JPAKE_1B is read after we send the client's 1a request
+		if err := j.readServerRound1aResponse(); err != nil {
+			return nil, fmt.Errorf("failed to read server round 1a response: %w", err)
 		}
 	}
 
@@ -183,8 +184,9 @@ func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 	return nil
 }
 
-// readServerRound1Responses reads the server's initial round 1a and 1b responses
-func (j *PumpX2JPAKEAuthenticator) readServerRound1Responses() error {
+// readServerRound1aResponse reads only the server's initial JPAKE_1A response
+// JPAKE_1B is read after sending client's round 1a request (pumpX2 waits for input)
+func (j *PumpX2JPAKEAuthenticator) readServerRound1aResponse() error {
 	// Read JPAKE_1A response
 	// The regex needs to handle potential stderr output before the JPAKE_1A line
 	// Match JPAKE_1A: followed by JSON (JSONObject.toString() outputs single-line JSON)
@@ -210,17 +212,21 @@ func (j *PumpX2JPAKEAuthenticator) readServerRound1Responses() error {
 
 	log.Debugf("Got server Round1a response: %+v", j.round1aResponse)
 
+	return nil
+}
+
+// readServerRound1bResponse reads the server's JPAKE_1B response after sending client's 1a
+func (j *PumpX2JPAKEAuthenticator) readServerRound1bResponse() error {
 	// Read JPAKE_1B response
-	// The regex needs to handle potential output between JPAKE_1A and JPAKE_1B
 	// Match JPAKE_1B: followed by JSON (JSONObject.toString() outputs single-line JSON)
 	round1bRegex := regexp.MustCompile(`(?s).*?JPAKE_1B:\s*(\{.*?\})`)
-	output, _, err = j.gexp.Expect(round1bRegex, 30*time.Second)
+	output, _, err := j.gexp.Expect(round1bRegex, 30*time.Second)
 	if err != nil {
 		log.Errorf("Failed to read JPAKE_1B. Last output captured: %s", output)
 		return fmt.Errorf("failed to read JPAKE_1B from pumpX2: %w", err)
 	}
 
-	matches = round1bRegex.FindStringSubmatch(output)
+	matches := round1bRegex.FindStringSubmatch(output)
 	if len(matches) < 2 {
 		log.Errorf("Failed to parse JPAKE_1B. Full output: %s", output)
 		return fmt.Errorf("failed to parse JPAKE_1B output: %s", output)
@@ -238,33 +244,33 @@ func (j *PumpX2JPAKEAuthenticator) readServerRound1Responses() error {
 
 // processRound1 handles round 1 (combines 1a and 1b)
 func (j *PumpX2JPAKEAuthenticator) processRound1(requestData map[string]interface{}) (map[string]interface{}, error) {
-	// The client sends Jpake1aRequest first
-	// We need to encode it and send to pumpX2, then return our cached round1a response
-
-	// Encode the client's request
-	requestHex, err := j.encodeClientRequest(requestData)
-	if err != nil {
-		log.Warnf("Failed to encode client Jpake1aRequest: %v", err)
-		// Continue anyway - pumpX2 will validate
-	}
-
-	// Send client's request to pumpX2 server
-	log.Debugf("Sending client Jpake1aRequest to pumpX2: %s", requestHex)
-	if err := j.gexp.Send(requestHex + "\n"); err != nil {
-		log.Warnf("Failed to send to pumpX2: %v", err)
-	}
-
 	// The round 1a involves two sub-rounds
-	// First call returns round1a response
+	// First call (round==0): Send client's 1a, read JPAKE_1B, return round1aResponse
+	// Second call (round==1): Send client's 1b, read JPAKE_2, return round1bResponse
+
 	if j.round == 0 {
+		// First call - send client's Jpake1aRequest
+		requestHex, err := j.encodeClientRequest(requestData)
+		if err != nil {
+			log.Warnf("Failed to encode client Jpake1aRequest: %v", err)
+		}
+
+		log.Debugf("Sending client Jpake1aRequest to pumpX2: %s", requestHex)
+		if err := j.gexp.Send(requestHex + "\n"); err != nil {
+			log.Warnf("Failed to send to pumpX2: %v", err)
+		}
+
+		// Now read JPAKE_1B (pumpX2 outputs it after receiving client's 1a)
+		if err := j.readServerRound1bResponse(); err != nil {
+			return nil, fmt.Errorf("failed to read JPAKE_1B after sending client 1a: %w", err)
+		}
+
 		j.round = 1
 		return j.round1aResponse, nil
 	}
 
-	// Second call to ProcessRound with round=1 should return round1b response
-	// We need to send the client's Jpake1bRequest first
-
-	requestHex, err = j.encodeClientRequest(requestData)
+	// Second call - send client's Jpake1bRequest
+	requestHex, err := j.encodeClientRequest(requestData)
 	if err != nil {
 		log.Warnf("Failed to encode client Jpake1bRequest: %v", err)
 	}
