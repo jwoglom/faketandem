@@ -440,25 +440,50 @@ func (j *PumpX2JPAKEAuthenticator) processRound4(requestData map[string]interfac
 
 // encodeClientRequest encodes a client request using pumpX2's format
 func (j *PumpX2JPAKEAuthenticator) encodeClientRequest(requestData map[string]interface{}) (string, error) {
-	// Extract the hex data from the parsed request
-	// The requestData should contain the fields from the client's request message
+	// If bridge is not available, return empty string
+	if j.bridge == nil {
+		log.Warnf("No bridge available for encoding client request")
+		return "", nil
+	}
 
-	// For now, we'll use the bridge to encode the message
-	// This requires the message type and parameters
+	// Extract message name from request data
+	messageName, ok := requestData["messageName"].(string)
+	if !ok {
+		log.Warnf("Request data missing messageName")
+		return "", nil
+	}
 
-	// The requestData coming from the client is already parsed
-	// We need to re-encode it to hex for pumpX2
+	// Build params map excluding messageName
+	params := make(map[string]interface{})
+	for key, value := range requestData {
+		if key != "messageName" {
+			params[key] = value
+		}
+	}
 
-	// Since we're in the server, the requestData is what the client sent
-	// We need to find the hex representation
+	// Use bridge to encode the message
+	// Use txID 0 for simplicity - pumpX2 jpake-server doesn't validate txID
+	encoded, err := j.bridge.EncodeMessage(0, messageName, params)
+	if err != nil {
+		log.Warnf("Failed to encode client request: %v", err)
+		return "", err
+	}
 
-	// For simplicity, we'll extract the opCode and cargo
-	// and let pumpX2 validate it
+	// Join all packets into a single hex string for stdin input
+	// pumpX2's jpake-server expects a single line of hex data
+	if len(encoded.Packets) == 0 {
+		log.Warnf("Encoded message has no packets")
+		return "", nil
+	}
 
-	// Actually, the router should be passing us the raw hex data
-	// But for now, we'll just return an empty string and let pumpX2 handle validation
+	// For pump messages, concatenate all packets (stripping any packet headers)
+	// The first bytes of each packet are usually sequence/length info for BLE
+	// For stdin input to jpake-server, we might need the raw message
+	// For now, try joining all packets and let pumpX2 parse it
+	result := strings.Join(encoded.Packets, "")
+	log.Debugf("Encoded client request: %s -> %s", messageName, result)
 
-	return "", nil
+	return result, nil
 }
 
 // GetSharedSecret returns the derived shared secret
