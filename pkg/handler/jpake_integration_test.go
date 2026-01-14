@@ -151,7 +151,7 @@ func TestPumpX2JPAKEAuthenticator_FullFlow(t *testing.T) {
 
 			// Extract server JPAKE responses and forward to client
 			// Server outputs: JPAKE_1A: {json}, JPAKE_1B: {json}, JPAKE_2: {json}, etc.
-			// Messages are split across multiple BLE packets - concatenate ALL packets into one line
+			// Each BLE packet must be sent on its own line (not concatenated)
 			if strings.Contains(line, "JPAKE_") && strings.Contains(line, "packets") {
 				// Extract JSON from line
 				colonIdx := strings.Index(line, ": ")
@@ -159,19 +159,16 @@ func TestPumpX2JPAKEAuthenticator_FullFlow(t *testing.T) {
 					jsonStr := line[colonIdx+2:]
 					var jsonData map[string]interface{}
 					if err := json.Unmarshal([]byte(jsonStr), &jsonData); err == nil {
-						// Get ALL packets and concatenate them
+						// Send each packet on its own line
 						if packets, ok := jsonData["packets"].([]interface{}); ok && len(packets) > 0 {
-							var allPackets strings.Builder
-							for _, p := range packets {
+							t.Logf("Forwarding %d server packets to client", len(packets))
+							for i, p := range packets {
 								if hexData, ok := p.(string); ok {
-									allPackets.WriteString(hexData)
+									t.Logf("  Packet %d: %s", i, hexData)
+									if _, err := clientStdin.Write([]byte(hexData + "\n")); err != nil {
+										t.Logf("Error writing packet %d to client: %v", i, err)
+									}
 								}
-							}
-							concatenated := allPackets.String()
-							t.Logf("Forwarding %d server packets to client (total %d chars): %s...",
-								len(packets), len(concatenated), concatenated[:min(60, len(concatenated))])
-							if _, err := clientStdin.Write([]byte(concatenated + "\n")); err != nil {
-								t.Logf("Error writing to client: %v", err)
 							}
 						}
 					}
@@ -188,26 +185,23 @@ func TestPumpX2JPAKEAuthenticator_FullFlow(t *testing.T) {
 			}
 
 			// Client outputs requests as ROUND_XX_SENT: {json with packets array}
-			// Extract packets, concatenate, and forward to server
+			// Each BLE packet must be sent on its own line (not concatenated)
 			if strings.Contains(line, "_SENT:") && strings.Contains(line, "packets") {
 				colonIdx := strings.Index(line, ": ")
 				if colonIdx > 0 {
 					jsonStr := line[colonIdx+2:]
 					var jsonData map[string]interface{}
 					if err := json.Unmarshal([]byte(jsonStr), &jsonData); err == nil {
-						// Get ALL packets and concatenate them
+						// Send each packet on its own line
 						if packets, ok := jsonData["packets"].([]interface{}); ok && len(packets) > 0 {
-							var allPackets strings.Builder
-							for _, p := range packets {
+							t.Logf("Forwarding %d client packets to server", len(packets))
+							for i, p := range packets {
 								if hexData, ok := p.(string); ok {
-									allPackets.WriteString(hexData)
+									t.Logf("  Packet %d: %s", i, hexData)
+									if _, err := serverStdin.Write([]byte(hexData + "\n")); err != nil {
+										t.Logf("Error writing packet %d to server: %v", i, err)
+									}
 								}
-							}
-							concatenated := allPackets.String()
-							t.Logf("Forwarding %d client packets to server (total %d chars): %s...",
-								len(packets), len(concatenated), concatenated[:min(60, len(concatenated))])
-							if _, err := serverStdin.Write([]byte(concatenated + "\n")); err != nil {
-								t.Logf("Error writing to server: %v", err)
 							}
 						}
 					}
@@ -274,14 +268,6 @@ func TestPumpX2JPAKEAuthenticator_FullFlow(t *testing.T) {
 				serverDerivedSecret, clientDerivedSecret)
 		}
 	}
-}
-
-// min returns the smaller of two ints
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // TestGoJPAKEAuthenticator_FullFlow tests the Go implementation
