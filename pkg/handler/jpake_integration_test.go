@@ -95,7 +95,7 @@ func TestPumpX2JPAKEAuthenticator_FullFlow(t *testing.T) {
 	clientReader := bufio.NewReader(clientStdout)
 
 	// Track results
-	var serverDerivedSecret string
+	var serverDerivedSecret, clientDerivedSecret string
 	var clientValidated bool
 	derivedSecretRegex := regexp.MustCompile(`"derivedSecret"\s*:\s*"([a-fA-F0-9]+)"`)
 
@@ -182,8 +182,14 @@ func TestPumpX2JPAKEAuthenticator_FullFlow(t *testing.T) {
 		case line := <-clientLines:
 			t.Logf("CLIENT: %s", line)
 
-			// Check for successful HMAC validation (client doesn't output derivedSecret,
-			// but outputs "HMAC SECRET VALIDATES" when authentication succeeds)
+			// Check for derived secret from client (now outputs JSON with derivedSecret)
+			if matches := derivedSecretRegex.FindStringSubmatch(line); len(matches) > 1 {
+				clientDerivedSecret = matches[1]
+				t.Logf("Client derived secret: %s", clientDerivedSecret)
+				clientValidated = true
+			}
+
+			// Also check for HMAC validation message (fallback)
 			if strings.Contains(line, "HMAC SECRET VALIDATES") {
 				clientValidated = true
 				t.Logf("Client HMAC validation successful")
@@ -266,11 +272,20 @@ func TestPumpX2JPAKEAuthenticator_FullFlow(t *testing.T) {
 		t.Error("Client did not validate HMAC (authentication failed)")
 	}
 
-	// Both sides successfully authenticated
+	// Both sides successfully authenticated - verify secrets match
 	if serverDerivedSecret != "" && clientValidated {
 		t.Logf("SUCCESS: JPAKE authentication completed!")
 		t.Logf("Server derived secret: %s", serverDerivedSecret)
-		t.Log("Client HMAC validated successfully")
+		if clientDerivedSecret != "" {
+			t.Logf("Client derived secret: %s", clientDerivedSecret)
+			if serverDerivedSecret == clientDerivedSecret {
+				t.Log("Both sides derived the SAME shared secret!")
+			} else {
+				t.Errorf("MISMATCH: Server and client derived different secrets!")
+			}
+		} else {
+			t.Log("Client HMAC validated (no derivedSecret output)")
+		}
 	}
 }
 
