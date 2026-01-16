@@ -66,3 +66,14 @@ func (b *Ble) IsConnected() bool {
 func (b *Ble) ShutdownConnection() {
 	log.Debug("ShutdownConnection called on non-Linux platform (no-op)")
 }
+
+// SetDiscoverable enables or disables LE General Discoverable mode (stub)
+func (b *Ble) SetDiscoverable(discoverable bool) error {
+	log.Debugf("SetDiscoverable(%v) called on non-Linux platform (no-op)", discoverable)
+	return fmt.Errorf("bluetooth not supported on this platform")
+}
+
+// IsDiscoverable returns the current discoverable state (always false on non-Linux)
+func (b *Ble) IsDiscoverable() bool {
+	return false
+}
