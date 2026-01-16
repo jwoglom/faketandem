@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Pumpx2 Emulator Control Panel</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div>
+      <h1>Pumpx2 Emulator Control Panel</h1>
+      <p class="subtitle">Monitor BLE events, send commands, and manage response settings.</p>
+    </div>
+    <div class="status-group">
+      <div class="status-pill" id="ws-status" aria-live="polite">WebSocket: Disconnected</div>
+      <div class="status-pill" id="pump-status" aria-live="polite">Pump: Unknown</div>
+      <div class="button-row">
+        <button type="button" id="connect-btn">Connect</button>
+        <button type="button" id="disconnect-btn">Disconnect</button>
+        <button type="button" id="get-state-btn">Get State</button>
+      </div>
+      <label class="toggle">
+        <input type="checkbox" id="auto-reconnect" checked />
+        Auto-reconnect
+      </label>
+      <div class="reconnect-status" id="reconnect-status" aria-live="polite"></div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="column">
+      <div class="card">
+        <div class="card-header">
+          <h2>Live Event Log</h2>
+          <button type="button" id="clear-log-btn">Clear</button>
+        </div>
+        <div class="log" id="event-log" aria-live="polite"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h2>WebSocket Commands</h2>
+        </div>
+        <form class="form" id="command-form">
+          <label for="characteristic">Characteristic</label>
+          <select id="characteristic" name="characteristic">
+            <option value="CurrentStatus">CurrentStatus</option>
+            <option value="QualifyingEvents">QualifyingEvents</option>
+            <option value="HistoryLog">HistoryLog</option>
+            <option value="Authorization">Authorization</option>
+            <option value="Control">Control</option>
+            <option value="ControlStream">ControlStream</option>
+          </select>
+
+          <label for="hex-data">Hex Payload</label>
+          <input id="hex-data" name="hex-data" type="text" placeholder="e.g. 01af" autocomplete="off" />
+          <p class="help" id="hex-error" role="alert"></p>
+
+          <div class="button-row">
+            <button type="button" id="notify-btn">Notify</button>
+            <button type="button" id="set-char-btn">Set Characteristic</button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <section class="column">
+      <div class="card">
+        <div class="card-header">
+          <h2>Settings</h2>
+          <button type="button" id="refresh-settings-btn">Refresh</button>
+        </div>
+        <div class="settings-list" id="settings-list" role="list"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h2>Settings Editor</h2>
+          <div class="button-row">
+            <button type="button" id="reload-config-btn">Reload</button>
+            <button type="button" id="reset-config-btn">Reset State</button>
+            <button type="button" id="save-config-btn" class="primary">Save</button>
+          </div>
+        </div>
+        <div class="status-banner" id="config-status" aria-live="polite"></div>
+        <div class="form">
+          <label for="message-type">Message Type</label>
+          <input id="message-type" type="text" readonly />
+
+          <label for="mode-select">Mode</label>
+          <select id="mode-select" name="mode-select">
+            <option value="constant">constant</option>
+            <option value="incremental">incremental</option>
+            <option value="time_based">time_based</option>
+          </select>
+
+          <div class="meta" id="config-meta"></div>
+
+          <div class="editor-section" data-mode="constant">
+            <label for="constant-value">Value (JSON)</label>
+            <textarea id="constant-value" rows="6" spellcheck="false"></textarea>
+          </div>
+
+          <div class="editor-section" data-mode="incremental">
+            <div class="section-header">
+              <h3>Values</h3>
+              <button type="button" id="add-incremental">Add Value</button>
+            </div>
+            <div id="incremental-values" class="list-stack"></div>
+          </div>
+
+          <div class="editor-section" data-mode="time_based">
+            <div class="section-header">
+              <h3>Values + Timing</h3>
+              <button type="button" id="add-time-based">Add Row</button>
+            </div>
+            <div id="time-based-values" class="list-stack"></div>
+          </div>
+
+          <p class="help" id="config-error" role="alert"></p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

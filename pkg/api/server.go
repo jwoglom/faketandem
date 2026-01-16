@@ -137,6 +137,11 @@ func (s *Server) setupRoutes() {
 			log.Warnf("Failed to write response: %v", err)
 		}
 	})
+	uiHandler := http.FileServer(http.Dir("ui"))
+	http.Handle("/ui/", http.StripPrefix("/ui/", uiHandler))
+	http.HandleFunc("/ui", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/ui/", http.StatusMovedPermanently)
+	})
 	http.Handle("/ws", s)
 	http.HandleFunc("/api/settings", s.handleSettingsAPI)
 	http.HandleFunc("/api/settings/", s.handleSettingsAPI)
