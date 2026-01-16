@@ -3,7 +3,6 @@
 package bluetooth
 
 import (
-	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -102,21 +101,19 @@ func New(adapterID string) (*Ble, error) {
 func (b *Ble) setupService(d gatt.Device) {
 	b.addGenericAttributeService(d)
 	b.addGenericAccessService(d)
-	b.addHeartRateService(d)
-	b.addUnknownServiceD15A(d)
-	b.addUnknownServiceAAA0(d)
-	b.addUserDataService(d)
+	b.addDeviceInformationService(d)
+	b.addUnknownServiceFDFA(d)
 
 	serviceUUID := gatt.MustParseUUID(PumpServiceUUID)
 	s := gatt.NewService(serviceUUID)
 
 	// Add all characteristics
-	b.addCharacteristic(s, CurrentStatusCharUUID, CharCurrentStatus)
-	b.addCharacteristic(s, QualifyingEventsCharUUID, CharQualifyingEvents)
-	b.addCharacteristic(s, HistoryLogCharUUID, CharHistoryLog)
-	b.addCharacteristic(s, AuthorizationCharUUID, CharAuthorization)
-	b.addCharacteristic(s, ControlCharUUID, CharControl)
-	b.addCharacteristic(s, ControlStreamCharUUID, CharControlStream)
+	b.addWriteNotifyCharacteristic(s, CurrentStatusCharUUID, CharCurrentStatus)
+	b.addWriteNotifyCharacteristic(s, QualifyingEventsCharUUID, CharQualifyingEvents)
+	b.addNotifyOnlyCharacteristic(s, HistoryLogCharUUID, CharHistoryLog)
+	b.addWriteNotifyCharacteristic(s, AuthorizationCharUUID, CharAuthorization)
+	b.addWriteNotifyCharacteristic(s, ControlCharUUID, CharControl)
+	b.addWriteNotifyCharacteristic(s, ControlStreamCharUUID, CharControlStream)
 
 	err := d.AddService(s)
 	if err != nil {
@@ -148,52 +145,36 @@ func (b *Ble) addGenericAccessService(d gatt.Device) {
 	serviceUUID := gatt.MustParseUUID(GenericAccessServiceUUID)
 	s := gatt.NewService(serviceUUID)
 
-	b.addReadOnlyCharacteristic(s, DeviceNameCharUUID, []byte("Tandem Mobi 123"))
+	b.addReadWriteCharacteristic(s, DeviceNameCharUUID, []byte("Tandem Mobi 123"))
 	b.addReadOnlyCharacteristic(s, AppearanceCharUUID, []byte{0x00, 0x00})
+	b.addReadOnlyCharacteristic(s, PeripheralPreferredConnectionParametersCharUUID, []byte{0x18, 0x00, 0x28, 0x00, 0x00, 0x00, 0xf4, 0x01})
 	b.addReadOnlyCharacteristic(s, CentralAddressResolutionCharUUID, []byte{0x01})
 
 	b.addService(d, s, "Generic Access")
 }
 
-func (b *Ble) addHeartRateService(d gatt.Device) {
-	serviceUUID := gatt.MustParseUUID(HeartRateServiceUUID)
-	s := gatt.NewService(serviceUUID)
-	b.addService(d, s, "Heart Rate")
-}
-
-func (b *Ble) addUnknownServiceD15A(d gatt.Device) {
-	serviceUUID := gatt.MustParseUUID(UnknownServiceD15AUUID)
-	s := gatt.NewService(serviceUUID)
-	b.addService(d, s, "Unknown D15A")
-}
-
-func (b *Ble) addUnknownServiceAAA0(d gatt.Device) {
-	serviceUUID := gatt.MustParseUUID(UnknownServiceAAA0UUID)
+func (b *Ble) addDeviceInformationService(d gatt.Device) {
+	serviceUUID := gatt.MustParseUUID(DeviceInformationServiceUUID)
 	s := gatt.NewService(serviceUUID)
 
-	char := b.addReadNotifyCharacteristic(s, UnknownCharAAA1UUID, []byte{0x1e, 0x00})
-	customDescriptor := char.AddDescriptor(gatt.MustParseUUID(CustomDescriptorAAB0UUID))
-	customDescriptor.SetValue([]byte{0x01, 0x23, 0x34, 0x56, 0x78, 0x9a})
-	userDescription := char.AddDescriptor(gatt.MustParseUUID(CharacteristicUserDescriptionUUID))
-	userDescription.SetValue([]byte("Important value"))
-	presentationFormat := char.AddDescriptor(gatt.MustParseUUID(CharacteristicPresentationFormatUUID))
-	presentationFormat.SetValue(characteristicPresentationFormatValue())
+	b.addReadOnlyCharacteristic(s, ManufacturerNameStringCharUUID, []byte("Tandem Diabetes Care"))
+	b.addReadOnlyCharacteristic(s, ModelNumberStringCharUUID, []byte("Mobi"))
+	b.addReadOnlyCharacteristic(s, SerialNumberStringCharUUID, []byte("11223344"))
+	b.addReadOnlyCharacteristic(s, SoftwareRevisionStringCharUUID, []byte("1.0.0"))
 
-	b.addWriteIndicateCharacteristic(s, UnknownCharAAA2UUID)
-
-	b.addService(d, s, "Unknown AAA0")
+	b.addService(d, s, "Device Information")
 }
 
-func (b *Ble) addUserDataService(d gatt.Device) {
-	serviceUUID := gatt.MustParseUUID(UserDataServiceUUID)
+func (b *Ble) addUnknownServiceFDFA(d gatt.Device) {
+	serviceUUID := gatt.MustParseUUID(UnknownServiceFDFAUUID)
 	s := gatt.NewService(serviceUUID)
 
-	b.addReadWriteCharacteristic(s, FirstNameCharUUID, []byte("Natenczas"))
-	b.addReadWriteCharacteristic(s, LastNameCharUUID, []byte("Wojksi"))
-	b.addReadWriteCharacteristic(s, GenderCharUUID, []byte{0x01})
+	b.addUnknownWriteNotifyCharacteristic(s, UnknownCharFFE8UUID)
+	b.addUnknownWriteOnlyCharacteristic(s, UnknownCharFFE7UUID)
 
-	b.addService(d, s, "User Data")
+	b.addService(d, s, "Unknown FDFA")
 }
+
 
 func (b *Ble) addService(d gatt.Device, s *gatt.Service, name string) {
 	if err := d.AddService(s); err != nil {
@@ -202,15 +183,14 @@ func (b *Ble) addService(d gatt.Device, s *gatt.Service, name string) {
 }
 
 // addCharacteristic adds a characteristic to the service with read, write, and notify capabilities
-func (b *Ble) addCharacteristic(s *gatt.Service, uuidStr string, charType CharacteristicType) {
+
+func (b *Ble) addWriteNotifyCharacteristic(s *gatt.Service, uuidStr string, charType CharacteristicType) {
 	charUUID := gatt.MustParseUUID(uuidStr)
 	char := s.AddCharacteristic(charUUID)
 
-	// Handle writes
 	char.HandleWriteFunc(func(r gatt.Request, data []byte) (status byte) {
 		log.Tracef("pkg bluetooth; received write on %s: %s", charType, hex.EncodeToString(data))
 
-		// Make a copy of the data
 		dataCopy := make([]byte, len(data))
 		copy(dataCopy, data)
 
@@ -220,27 +200,6 @@ func (b *Ble) addCharacteristic(s *gatt.Service, uuidStr string, charType Charac
 		return 0
 	})
 
-	// Handle reads
-	char.HandleReadFunc(func(rsp gatt.ResponseWriter, req *gatt.ReadRequest) {
-		b.charDataMtx.RLock()
-		data := b.charData[charType]
-		b.charDataMtx.RUnlock()
-
-		if b.readHandler != nil {
-			data = b.readHandler(charType)
-		}
-
-		if data == nil {
-			data = []byte{}
-		}
-
-		log.Tracef("pkg bluetooth; read request on %s, responding with: %s", charType, hex.EncodeToString(data))
-		if _, err := rsp.Write(data); err != nil {
-			log.Warnf("Failed to write BLE response: %v", err)
-		}
-	})
-
-	// Handle notifications
 	char.HandleNotifyFunc(func(r gatt.Request, n gatt.Notifier) {
 		b.notifiersMtx.Lock()
 		b.notifiers[charType] = n
@@ -249,7 +208,39 @@ func (b *Ble) addCharacteristic(s *gatt.Service, uuidStr string, charType Charac
 	})
 }
 
-func (b *Ble) addReadOnlyCharacteristic(s *gatt.Service, uuidStr string, initialValue []byte) *gatt.Characteristic {
+func (b *Ble) addNotifyOnlyCharacteristic(s *gatt.Service, uuidStr string, charType CharacteristicType) {
+	charUUID := gatt.MustParseUUID(uuidStr)
+	char := s.AddCharacteristic(charUUID)
+	char.HandleNotifyFunc(func(r gatt.Request, n gatt.Notifier) {
+		b.notifiersMtx.Lock()
+		b.notifiers[charType] = n
+		b.notifiersMtx.Unlock()
+		log.Infof("pkg bluetooth; notifications enabled for %s from %s", charType, r.Central.ID())
+	})
+}
+
+func (b *Ble) addUnknownWriteNotifyCharacteristic(s *gatt.Service, uuidStr string) {
+	charUUID := gatt.MustParseUUID(uuidStr)
+	char := s.AddCharacteristic(charUUID)
+	char.HandleWriteFunc(func(r gatt.Request, data []byte) (status byte) {
+		log.Tracef("pkg bluetooth; received write on %s: %s", uuidStr, hex.EncodeToString(data))
+		return 0
+	})
+	char.HandleNotifyFunc(func(r gatt.Request, n gatt.Notifier) {
+		log.Infof("pkg bluetooth; notifications enabled for %s from %s", uuidStr, r.Central.ID())
+	})
+}
+
+func (b *Ble) addUnknownWriteOnlyCharacteristic(s *gatt.Service, uuidStr string) {
+	charUUID := gatt.MustParseUUID(uuidStr)
+	char := s.AddCharacteristic(charUUID)
+	char.HandleWriteFunc(func(r gatt.Request, data []byte) (status byte) {
+		log.Tracef("pkg bluetooth; received write on %s: %s", uuidStr, hex.EncodeToString(data))
+		return 0
+	})
+}
+
+func (b *Ble) addReadOnlyCharacteristic(s *gatt.Service, uuidStr string, initialValue []byte) {
 	if initialValue != nil {
 		b.setExtraCharacteristicData(uuidStr, initialValue)
 	}
@@ -264,7 +255,6 @@ func (b *Ble) addReadOnlyCharacteristic(s *gatt.Service, uuidStr string, initial
 			log.Warnf("Failed to write BLE response: %v", err)
 		}
 	})
-	return char
 }
 
 func (b *Ble) addReadWriteCharacteristic(s *gatt.Service, uuidStr string, initialValue []byte) {
@@ -291,24 +281,6 @@ func (b *Ble) addReadWriteCharacteristic(s *gatt.Service, uuidStr string, initia
 	})
 }
 
-func (b *Ble) addReadNotifyCharacteristic(s *gatt.Service, uuidStr string, initialValue []byte) *gatt.Characteristic {
-	char := b.addReadOnlyCharacteristic(s, uuidStr, initialValue)
-	char.HandleNotifyFunc(func(r gatt.Request, n gatt.Notifier) {
-		log.Infof("pkg bluetooth; notifications enabled for %s from %s", uuidStr, r.Central.ID())
-	})
-	return char
-}
-
-func (b *Ble) addWriteIndicateCharacteristic(s *gatt.Service, uuidStr string) {
-	char := s.AddCharacteristic(gatt.MustParseUUID(uuidStr))
-	char.HandleWriteFunc(func(r gatt.Request, data []byte) (status byte) {
-		log.Tracef("pkg bluetooth; received write on %s: %s", uuidStr, hex.EncodeToString(data))
-		return 0
-	})
-	char.HandleNotifyFunc(func(r gatt.Request, n gatt.Notifier) {
-		log.Infof("pkg bluetooth; indications enabled for %s from %s", uuidStr, r.Central.ID())
-	})
-}
 
 func (b *Ble) setExtraCharacteristicData(uuidStr string, data []byte) {
 	if data == nil {
@@ -333,16 +305,6 @@ func (b *Ble) getExtraCharacteristicData(uuidStr string) []byte {
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
 	return dataCopy
-}
-
-func characteristicPresentationFormatValue() []byte {
-	value := make([]byte, 7)
-	value[0] = 0x06 // unsigned 16-bit integer
-	value[1] = 0x00 // exponent
-	binary.LittleEndian.PutUint16(value[2:4], 0x2701)
-	value[4] = 0x01 // Bluetooth SIG Assigned Numbers
-	binary.LittleEndian.PutUint16(value[5:7], 0x0100)
-	return value
 }
 
 // SetWriteHandler sets the callback for when data is written to any characteristic
