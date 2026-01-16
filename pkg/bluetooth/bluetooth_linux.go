@@ -225,6 +225,20 @@ func (b *Ble) advertisePump(d gatt.Device, name string) error {
 	return d.Option(gatt.LnxSetAdvertisingEnable(true))
 }
 
+func (b *Ble) updateAdvertising(d gatt.Device, name string) error {
+	// Disable advertising before updating data
+	if err := d.Option(gatt.LnxSetAdvertisingEnable(false)); err != nil {
+		return fmt.Errorf("failed to disable advertising: %w", err)
+	}
+
+	// Update the advertising data
+	if err := b.advertisePump(d, name); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func uint16ToBytes(value uint16) []byte {
 	bytes := make([]byte, 2)
 	binary.LittleEndian.PutUint16(bytes, value)
@@ -428,8 +442,8 @@ func (b *Ble) SetDiscoverable(discoverable bool) error {
 		return fmt.Errorf("device not initialized")
 	}
 
-	// Update the advertising data
-	if err := b.advertisePump(*b.device, b.pumpNameForAdv); err != nil {
+	// Update the advertising data (disables, updates, re-enables)
+	if err := b.updateAdvertising(*b.device, b.pumpNameForAdv); err != nil {
 		return fmt.Errorf("failed to update advertising: %w", err)
 	}
 
