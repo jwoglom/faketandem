@@ -38,6 +38,8 @@ type Ble struct {
 
 	writeNotifyChars map[CharacteristicType]*gatt.Characteristic
 	notifyOnlyChars  map[CharacteristicType]*gatt.Characteristic
+	unknownWriteNotifyChars map[string]*gatt.Characteristic
+	unknownWriteOnlyChars   map[string]*gatt.Characteristic
 
 	// Handlers
 	writeHandler      WriteHandler
@@ -75,8 +77,10 @@ func New(adapterID string) (*Ble, error) {
 		charData:      make(map[CharacteristicType][]byte),
 		extraCharData: make(map[string][]byte),
 		pairingState:  PairingStateNotDiscoverable,
-		writeNotifyChars: make(map[CharacteristicType]*gatt.Characteristic),
-		notifyOnlyChars:  make(map[CharacteristicType]*gatt.Characteristic),
+		writeNotifyChars:       make(map[CharacteristicType]*gatt.Characteristic),
+		notifyOnlyChars:        make(map[CharacteristicType]*gatt.Characteristic),
+		unknownWriteNotifyChars: make(map[string]*gatt.Characteristic),
+		unknownWriteOnlyChars:   make(map[string]*gatt.Characteristic),
 	}
 
 	d.Handle(
@@ -97,6 +101,7 @@ func New(adapterID string) (*Ble, error) {
 			}
 			
 			b.central = &c
+			b.reenableCharacteristicHandlers()
 			if b.connectionHandler != nil {
 				b.connectionHandler(true)
 			}
@@ -310,22 +315,15 @@ func (b *Ble) addNotifyOnlyCharacteristic(s *gatt.Service, uuidStr string, charT
 func (b *Ble) addUnknownWriteNotifyCharacteristic(s *gatt.Service, uuidStr string) {
 	charUUID := gatt.MustParseUUID(uuidStr)
 	char := s.AddCharacteristic(charUUID)
-	char.HandleWriteFunc(func(r gatt.Request, data []byte) (status byte) {
-		log.Tracef("pkg bluetooth; received write on %s: %s", uuidStr, hex.EncodeToString(data))
-		return 0
-	})
-	char.HandleNotifyFunc(func(r gatt.Request, n gatt.Notifier) {
-		log.Infof("pkg bluetooth; notifications enabled for %s from %s", uuidStr, r.Central.ID())
-	})
+	b.unknownWriteNotifyChars[strings.ToLower(uuidStr)] = char
+	b.bindUnknownWriteNotifyHandlers(char, uuidStr)
 }
 
 func (b *Ble) addUnknownWriteOnlyCharacteristic(s *gatt.Service, uuidStr string) {
 	charUUID := gatt.MustParseUUID(uuidStr)
 	char := s.AddCharacteristic(charUUID)
-	char.HandleWriteFunc(func(r gatt.Request, data []byte) (status byte) {
-		log.Tracef("pkg bluetooth; received write on %s: %s", uuidStr, hex.EncodeToString(data))
-		return 0
-	})
+	b.unknownWriteOnlyChars[strings.ToLower(uuidStr)] = char
+	b.bindUnknownWriteOnlyHandlers(char, uuidStr)
 }
 
 func (b *Ble) addReadOnlyCharacteristic(s *gatt.Service, uuidStr string, initialValue []byte) {
@@ -394,6 +392,23 @@ func (b *Ble) bindNotifyHandlers(char *gatt.Characteristic, charType Characteris
 	})
 }
 
+func (b *Ble) bindUnknownWriteNotifyHandlers(char *gatt.Characteristic, uuidStr string) {
+	char.HandleWriteFunc(func(r gatt.Request, data []byte) (status byte) {
+		log.Tracef("pkg bluetooth; received write on %s: %s", uuidStr, hex.EncodeToString(data))
+		return 0
+	})
+	char.HandleNotifyFunc(func(r gatt.Request, n gatt.Notifier) {
+		log.Infof("pkg bluetooth; notifications enabled for %s from %s", uuidStr, r.Central.ID())
+	})
+}
+
+func (b *Ble) bindUnknownWriteOnlyHandlers(char *gatt.Characteristic, uuidStr string) {
+	char.HandleWriteFunc(func(r gatt.Request, data []byte) (status byte) {
+		log.Tracef("pkg bluetooth; received write on %s: %s", uuidStr, hex.EncodeToString(data))
+		return 0
+	})
+}
+
 func (b *Ble) reenableCharacteristicHandlers() {
 	for charType, char := range b.writeNotifyChars {
 		if char == nil {
@@ -407,6 +422,20 @@ func (b *Ble) reenableCharacteristicHandlers() {
 			continue
 		}
 		b.bindNotifyHandlers(char, charType)
+	}
+
+	for uuidStr, char := range b.unknownWriteNotifyChars {
+		if char == nil {
+			continue
+		}
+		b.bindUnknownWriteNotifyHandlers(char, uuidStr)
+	}
+
+	for uuidStr, char := range b.unknownWriteOnlyChars {
+		if char == nil {
+			continue
+		}
+		b.bindUnknownWriteOnlyHandlers(char, uuidStr)
 	}
 }
 
