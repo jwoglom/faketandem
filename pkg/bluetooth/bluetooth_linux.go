@@ -3,6 +3,7 @@
 package bluetooth
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -11,6 +12,12 @@ import (
 	"github.com/paypal/gatt"
 	"github.com/paypal/gatt/linux/cmd"
 	log "github.com/sirupsen/logrus"
+)
+
+const (
+	advTypeSomeUUID16 = 0x02
+	advTypeTxPower    = 0x0A
+	pumpName          = "Tandem Mobi 123"
 )
 
 // Ble represents the Bluetooth Low Energy device
@@ -120,8 +127,7 @@ func (b *Ble) setupService(d gatt.Device) {
 		log.Fatalf("pkg bluetooth; could not add service: %s", err)
 	}
 
-	// Advertise the service
-	err = d.AdvertiseNameAndServices("Tandem Mobi 123", []gatt.UUID{serviceUUID})
+	err = b.advertisePump(d, pumpName)
 	if err != nil {
 		log.Fatalf("pkg bluetooth; could not advertise: %s", err)
 	}
@@ -145,7 +151,7 @@ func (b *Ble) addGenericAccessService(d gatt.Device) {
 	serviceUUID := gatt.MustParseUUID(GenericAccessServiceUUID)
 	s := gatt.NewService(serviceUUID)
 
-	b.addReadWriteCharacteristic(s, DeviceNameCharUUID, []byte("Tandem Mobi 123"))
+	b.addReadWriteCharacteristic(s, DeviceNameCharUUID, []byte(pumpName))
 	b.addReadOnlyCharacteristic(s, AppearanceCharUUID, []byte{0x00, 0x00})
 	b.addReadOnlyCharacteristic(s, PeripheralPreferredConnectionParametersCharUUID, []byte{0x18, 0x00, 0x28, 0x00, 0x00, 0x00, 0xf4, 0x01})
 	b.addReadOnlyCharacteristic(s, CentralAddressResolutionCharUUID, []byte{0x01})
@@ -158,9 +164,9 @@ func (b *Ble) addDeviceInformationService(d gatt.Device) {
 	s := gatt.NewService(serviceUUID)
 
 	b.addReadOnlyCharacteristic(s, ManufacturerNameStringCharUUID, []byte("Tandem Diabetes Care"))
-	b.addReadOnlyCharacteristic(s, ModelNumberStringCharUUID, []byte("Mobi"))
-	b.addReadOnlyCharacteristic(s, SerialNumberStringCharUUID, []byte("11223344"))
-	b.addReadOnlyCharacteristic(s, SoftwareRevisionStringCharUUID, []byte("1.0.0"))
+	b.addReadOnlyCharacteristic(s, ModelNumberStringCharUUID, []byte("X2")) // Always "X2" even for Mobi
+	b.addReadOnlyCharacteristic(s, SerialNumberStringCharUUID, []byte("bi 123"))
+	b.addReadOnlyCharacteristic(s, SoftwareRevisionStringCharUUID, []byte("3553172181"))
 
 	b.addService(d, s, "Device Information")
 }
@@ -173,6 +179,41 @@ func (b *Ble) addUnknownServiceFDFA(d gatt.Device) {
 	b.addUnknownWriteOnlyCharacteristic(s, UnknownCharFFE7UUID)
 
 	b.addService(d, s, "Unknown FDFA")
+}
+
+func (b *Ble) advertisePump(d gatt.Device, name string) error {
+	advPacket := &gatt.AdvPacket{}
+	advPacket.AppendFlags(0x04)
+	advPacket.AppendField(advTypeSomeUUID16, uint16ToBytes(0xFDFB))
+	advPacket.AppendField(advTypeTxPower, []byte{0x04})
+	advPacket.AppendManufacturerData(0x059D, []byte{0x00, 0x01, 0x11})
+
+	scanPacket := &gatt.AdvPacket{}
+	scanPacket.AppendName(name)
+
+	advData := &cmd.LESetAdvertisingData{
+		AdvertisingDataLength: uint8(advPacket.Len()),
+		AdvertisingData:       advPacket.Bytes(),
+	}
+	scanData := &cmd.LESetScanResponseData{
+		ScanResponseDataLength: uint8(scanPacket.Len()),
+		ScanResponseData:       scanPacket.Bytes(),
+	}
+
+	if err := d.Option(
+		gatt.LnxSetAdvertisingData(advData),
+		gatt.LnxSetScanResponseData(scanData),
+	); err != nil {
+		return err
+	}
+
+	return d.Option(gatt.LnxSetAdvertisingEnable(true))
+}
+
+func uint16ToBytes(value uint16) []byte {
+	bytes := make([]byte, 2)
+	binary.LittleEndian.PutUint16(bytes, value)
+	return bytes
 }
 
 
