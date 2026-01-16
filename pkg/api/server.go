@@ -150,7 +150,7 @@ func (s *Server) SendPumpState() {
 
 func (s *Server) setupRoutes() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if _, err := fmt.Fprintf(w, "Pump Emulator API - Connect via WebSocket at /ws\n\nSettings API:\n  GET    /api/settings\n  GET    /api/settings/{messageType}\n  PUT    /api/settings/{messageType}\n  POST   /api/settings/{messageType}/reset\n\nBluetooth API:\n  GET    /api/bluetooth/discoverable\n  POST   /api/bluetooth/discoverable\n  GET    /api/bluetooth/allowpairing\n  POST   /api/bluetooth/allowpairing"); err != nil {
+		if _, err := fmt.Fprintf(w, "Pump Emulator API - Connect via WebSocket at /ws\n\nSettings API:\n  GET    /api/settings\n  GET    /api/settings/{messageType}\n  PUT    /api/settings/{messageType}\n  POST   /api/settings/{messageType}/reset\n\nBluetooth Pairing API:\n  GET    /api/bluetooth/pairingstate\n  POST   /api/bluetooth/pairingstate\n  States: NotDiscoverable, DiscoverableOnly, PairStep1, PairStep2"); err != nil {
 			log.Warnf("Failed to write response: %v", err)
 		}
 	})
@@ -162,8 +162,7 @@ func (s *Server) setupRoutes() {
 	http.Handle("/ws", s)
 	http.HandleFunc("/api/settings", s.handleSettingsAPI)
 	http.HandleFunc("/api/settings/", s.handleSettingsAPI)
-	http.HandleFunc("/api/bluetooth/discoverable", s.handleDiscoverableAPI)
-	http.HandleFunc("/api/bluetooth/allowpairing", s.handleAllowPairingAPI)
+	http.HandleFunc("/api/bluetooth/pairingstate", s.handlePairingStateAPI)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -451,23 +450,23 @@ func (s *Server) handleResetSetting(w http.ResponseWriter, _ *http.Request, mess
 	}
 }
 
-// handleDiscoverableAPI handles the Bluetooth discoverable API
-func (s *Server) handleDiscoverableAPI(w http.ResponseWriter, r *http.Request) {
+// handlePairingStateAPI handles the Bluetooth pairing state API
+func (s *Server) handlePairingStateAPI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	switch r.Method {
 	case http.MethodGet:
-		// GET /api/bluetooth/discoverable - get current discoverable state
-		discoverable := s.ble.IsDiscoverable()
+		// GET /api/bluetooth/pairingstate - get current pairing state
+		state := s.ble.GetPairingState()
 		if err := json.NewEncoder(w).Encode(map[string]interface{}{
-			"discoverable": discoverable,
+			"pairingState": state,
 		}); err != nil {
-			log.Errorf("Failed to encode discoverable state: %v", err)
+			log.Errorf("Failed to encode pairing state: %v", err)
 			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
 		}
 
 	case http.MethodPost:
-		// POST /api/bluetooth/discoverable - set discoverable state
+		// POST /api/bluetooth/pairingstate - set pairing state
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
 			http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusBadRequest)
@@ -480,80 +479,37 @@ func (s *Server) handleDiscoverableAPI(w http.ResponseWriter, r *http.Request) {
 		}()
 
 		var req struct {
-			Discoverable bool `json:"discoverable"`
+			PairingState bluetooth.PairingState `json:"pairingState"`
 		}
 		if err := json.Unmarshal(body, &req); err != nil {
 			http.Error(w, fmt.Sprintf("Failed to parse request: %v", err), http.StatusBadRequest)
 			return
 		}
 
-		if err := s.ble.SetDiscoverable(req.Discoverable); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to set discoverable mode: %v", err), http.StatusInternalServerError)
+		// Validate the pairing state
+		validStates := map[bluetooth.PairingState]bool{
+			bluetooth.PairingStateNotDiscoverable:  true,
+			bluetooth.PairingStateDiscoverableOnly: true,
+			bluetooth.PairingStatePairStep1:        true,
+			bluetooth.PairingStatePairStep2:        true,
+		}
+		if !validStates[req.PairingState] {
+			http.Error(w, fmt.Sprintf("Invalid pairing state: %v. Valid states: NotDiscoverable, DiscoverableOnly, PairStep1, PairStep2", req.PairingState), http.StatusBadRequest)
+			return
+		}
+
+		if err := s.ble.SetPairingState(req.PairingState); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to set pairing state: %v", err), http.StatusInternalServerError)
 			return
 		}
 
 		w.WriteHeader(http.StatusOK)
 		if err := json.NewEncoder(w).Encode(map[string]interface{}{
 			"status":       "success",
-			"discoverable": req.Discoverable,
-			"message":      fmt.Sprintf("Discoverable mode set to %v", req.Discoverable),
+			"pairingState": req.PairingState,
+			"message":      fmt.Sprintf("Pairing state set to %v", req.PairingState),
 		}); err != nil {
-			log.Errorf("Failed to encode discoverable response: %v", err)
-		}
-
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
-// handleAllowPairingAPI handles the Bluetooth allow pairing API
-func (s *Server) handleAllowPairingAPI(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-
-	switch r.Method {
-	case http.MethodGet:
-		// GET /api/bluetooth/allowpairing - get current allow pairing state
-		allowPairing := s.ble.IsAllowPairing()
-		if err := json.NewEncoder(w).Encode(map[string]interface{}{
-			"allowPairing": allowPairing,
-		}); err != nil {
-			log.Errorf("Failed to encode allow pairing state: %v", err)
-			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
-		}
-
-	case http.MethodPost:
-		// POST /api/bluetooth/allowpairing - set allow pairing state
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusBadRequest)
-			return
-		}
-		defer func() {
-			if err := r.Body.Close(); err != nil {
-				log.Debugf("Error closing request body: %v", err)
-			}
-		}()
-
-		var req struct {
-			AllowPairing bool `json:"allowPairing"`
-		}
-		if err := json.Unmarshal(body, &req); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to parse request: %v", err), http.StatusBadRequest)
-			return
-		}
-
-		if err := s.ble.SetAllowPairing(req.AllowPairing); err != nil {
-			http.Error(w, fmt.Sprintf("Failed to set allow pairing mode: %v", err), http.StatusInternalServerError)
-			return
-		}
-
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(map[string]interface{}{
-			"status":       "success",
-			"allowPairing": req.AllowPairing,
-			"message":      fmt.Sprintf("Allow pairing mode set to %v", req.AllowPairing),
-		}); err != nil {
-			log.Errorf("Failed to encode allow pairing response: %v", err)
+			log.Errorf("Failed to encode pairing state response: %v", err)
 		}
 
 	default:

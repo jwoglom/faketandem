@@ -76,32 +76,31 @@
 
       <div class="card">
         <div class="card-header">
-          <h2>Bluetooth Discoverable</h2>
-          <button type="button" id="refresh-discoverable-btn">Refresh</button>
+          <h2>Pairing State</h2>
+          <button type="button" id="refresh-pairing-state-btn">Refresh</button>
         </div>
         <div class="pairing-status">
-          <div class="status-pill" id="discoverable-status" aria-live="polite">Discoverable: Unknown</div>
+          <div class="status-pill" id="pairing-state-status" aria-live="polite">State: Unknown</div>
         </div>
-        <div class="button-row">
-          <button type="button" id="enable-discoverable-btn" class="primary">Enable Discoverable</button>
-          <button type="button" id="disable-discoverable-btn">Disable Discoverable</button>
-        </div>
-        <p class="note">Enable discoverable mode to allow new devices to find and connect to the pump.</p>
-      </div>
-
-      <div class="card">
-        <div class="card-header">
-          <h2>Allow Pairing</h2>
-          <button type="button" id="refresh-allow-pairing-btn">Refresh</button>
-        </div>
-        <div class="pairing-status">
-          <div class="status-pill" id="allow-pairing-status" aria-live="polite">Allow Pairing: Unknown</div>
-        </div>
-        <div class="button-row">
-          <button type="button" id="enable-allow-pairing-btn" class="primary">Enable Pairing</button>
-          <button type="button" id="disable-allow-pairing-btn">Disable Pairing</button>
-        </div>
-        <p class="note">Enable allow pairing mode to advertise pairing availability (changes manufacturer data 0x10 → 0x11).</p>
+        <form class="form" id="pairing-state-form">
+          <label>
+            <input type="radio" name="pairing-state" value="NotDiscoverable" />
+            <strong>NotDiscoverable</strong> - Not discoverable, mfg data 0x10
+          </label>
+          <label>
+            <input type="radio" name="pairing-state" value="DiscoverableOnly" />
+            <strong>DiscoverableOnly</strong> - Discoverable, mfg data 0x10
+          </label>
+          <label>
+            <input type="radio" name="pairing-state" value="PairStep1" />
+            <strong>PairStep1</strong> - Discoverable, mfg data 0x11
+          </label>
+          <label>
+            <input type="radio" name="pairing-state" value="PairStep2" />
+            <strong>PairStep2</strong> - Discoverable, mfg data 0x12
+          </label>
+          <button type="button" id="set-pairing-state-btn" class="primary">Apply State</button>
+        </form>
       </div>
 
       <div class="card">

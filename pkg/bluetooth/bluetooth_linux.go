@@ -41,14 +41,10 @@ type Ble struct {
 	readHandler       ReadHandler
 	connectionHandler ConnectionHandler
 
-	// Discoverable state
-	discoverable     bool
-	discoverableMtx  sync.RWMutex
-	pumpNameForAdv   string
-	
-	// Allow pairing state
-	allowPairing    bool
-	allowPairingMtx sync.RWMutex
+	// Pairing state
+	pairingState    PairingState
+	pairingStateMtx sync.RWMutex
+	pumpNameForAdv  string
 }
 
 // DefaultServerOptions contains the default options for the BLE server on Linux
@@ -82,11 +78,11 @@ func New(adapterID string) (*Ble, error) {
 			fmt.Println("pkg bluetooth; ** New connection from:", c.ID())
 			
 			// Reject connection if not discoverable
-			b.discoverableMtx.RLock()
-			isDiscoverable := b.discoverable
-			b.discoverableMtx.RUnlock()
+			b.pairingStateMtx.RLock()
+			state := b.pairingState
+			b.pairingStateMtx.RUnlock()
 			
-			if !isDiscoverable {
+			if state == PairingStateNotDiscoverable {
 				log.Warnf("pkg bluetooth; rejecting connection from %s - not discoverable", c.ID())
 				if err := c.Close(); err != nil {
 					log.Debugf("Error closing rejected connection: %v", err)
@@ -207,32 +203,34 @@ func (b *Ble) addUnknownServiceFDFA(d gatt.Device) {
 }
 
 func (b *Ble) advertisePump(d gatt.Device, name string) error {
-	b.discoverableMtx.RLock()
-	isDiscoverable := b.discoverable
-	b.discoverableMtx.RUnlock()
-
-	b.allowPairingMtx.RLock()
-	isPairingAllowed := b.allowPairing
-	b.allowPairingMtx.RUnlock()
+	b.pairingStateMtx.RLock()
+	state := b.pairingState
+	b.pairingStateMtx.RUnlock()
 
 	advPacket := &gatt.AdvPacket{}
-	if isDiscoverable {
-		advPacket.AppendFlags(0x06) // LE General Discoverable + BR/EDR Not Supported
-	} else {
+	
+	// Set flags based on discoverable state
+	if state == PairingStateNotDiscoverable {
 		advPacket.AppendFlags(0x04) // BR/EDR Not Supported (not discoverable)
+	} else {
+		advPacket.AppendFlags(0x06) // LE General Discoverable + BR/EDR Not Supported
 	}
+	
 	advPacket.AppendField(advTypeSomeUUID16, uint16ToBytes(0xFDFB))
 	advPacket.AppendField(advTypeTxPower, []byte{0x04})
 	
-	// Set manufacturer data based on discoverable and pairing states
-	// Last byte: 0x10 (base), 0x11 (allow pairing), 0x12 (discoverable)
-	// Discoverable takes precedence over allow pairing
+	// Set manufacturer data based on pairing state
 	var lastByte byte
-	if isDiscoverable {
-		lastByte = 0x12
-	} else if isPairingAllowed {
-		lastByte = 0x11
-	} else {
+	switch state {
+	case PairingStateNotDiscoverable:
+		lastByte = 0x10 // Not discoverable
+	case PairingStateDiscoverableOnly:
+		lastByte = 0x10 // Discoverable but no pairing step
+	case PairingStatePairStep1:
+		lastByte = 0x11 // Discoverable with PairStep1
+	case PairingStatePairStep2:
+		lastByte = 0x12 // Discoverable with PairStep2
+	default:
 		lastByte = 0x10
 	}
 	mfgData := []byte{0x00, 0x01, lastByte}
@@ -467,18 +465,18 @@ func (b *Ble) ShutdownConnection() {
 	}
 }
 
-// SetDiscoverable enables or disables LE General Discoverable mode
-func (b *Ble) SetDiscoverable(discoverable bool) error {
-	b.discoverableMtx.Lock()
-	b.discoverable = discoverable
-	b.discoverableMtx.Unlock()
+// SetPairingState sets the pairing/discoverable state
+func (b *Ble) SetPairingState(state PairingState) error {
+	b.pairingStateMtx.Lock()
+	b.pairingState = state
+	b.pairingStateMtx.Unlock()
 
 	if b.device == nil {
 		return fmt.Errorf("device not initialized")
 	}
 
-	// If disabling discoverable mode, disconnect any existing connection
-	if !discoverable && b.central != nil {
+	// If setting to not discoverable, disconnect any existing connection
+	if state == PairingStateNotDiscoverable && b.central != nil {
 		log.Info("pkg bluetooth; disconnecting existing connection due to non-discoverable mode")
 		b.ShutdownConnection()
 	}
@@ -488,39 +486,13 @@ func (b *Ble) SetDiscoverable(discoverable bool) error {
 		return fmt.Errorf("failed to update advertising: %w", err)
 	}
 
-	log.Infof("Discoverable mode set to: %v", discoverable)
+	log.Infof("Pairing state set to: %v", state)
 	return nil
 }
 
-// IsDiscoverable returns the current discoverable state
-func (b *Ble) IsDiscoverable() bool {
-	b.discoverableMtx.RLock()
-	defer b.discoverableMtx.RUnlock()
-	return b.discoverable
-}
-
-// SetAllowPairing enables or disables pairing mode
-func (b *Ble) SetAllowPairing(allowPairing bool) error {
-	b.allowPairingMtx.Lock()
-	b.allowPairing = allowPairing
-	b.allowPairingMtx.Unlock()
-
-	if b.device == nil {
-		return fmt.Errorf("device not initialized")
-	}
-
-	// Update the advertising data (disables, updates, re-enables)
-	if err := b.updateAdvertising(*b.device, b.pumpNameForAdv); err != nil {
-		return fmt.Errorf("failed to update advertising: %w", err)
-	}
-
-	log.Infof("Allow pairing mode set to: %v", allowPairing)
-	return nil
-}
-
-// IsAllowPairing returns the current allow pairing state
-func (b *Ble) IsAllowPairing() bool {
-	b.allowPairingMtx.RLock()
-	defer b.allowPairingMtx.RUnlock()
-	return b.allowPairing
+// GetPairingState returns the current pairing state
+func (b *Ble) GetPairingState() PairingState {
+	b.pairingStateMtx.RLock()
+	defer b.pairingStateMtx.RUnlock()
+	return b.pairingState
 }

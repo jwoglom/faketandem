@@ -67,24 +67,13 @@ func (b *Ble) ShutdownConnection() {
 	log.Debug("ShutdownConnection called on non-Linux platform (no-op)")
 }
 
-// SetDiscoverable enables or disables LE General Discoverable mode (stub)
-func (b *Ble) SetDiscoverable(discoverable bool) error {
-	log.Debugf("SetDiscoverable(%v) called on non-Linux platform (no-op)", discoverable)
+// SetPairingState sets the pairing/discoverable state (stub)
+func (b *Ble) SetPairingState(state PairingState) error {
+	log.Debugf("SetPairingState(%v) called on non-Linux platform (no-op)", state)
 	return fmt.Errorf("bluetooth not supported on this platform")
 }
 
-// IsDiscoverable returns the current discoverable state (always false on non-Linux)
-func (b *Ble) IsDiscoverable() bool {
-	return false
-}
-
-// SetAllowPairing enables or disables pairing mode (stub)
-func (b *Ble) SetAllowPairing(allowPairing bool) error {
-	log.Debugf("SetAllowPairing(%v) called on non-Linux platform (no-op)", allowPairing)
-	return fmt.Errorf("bluetooth not supported on this platform")
-}
-
-// IsAllowPairing returns the current allow pairing state (always false on non-Linux)
-func (b *Ble) IsAllowPairing() bool {
-	return false
+// GetPairingState returns the current pairing state (always NotDiscoverable on non-Linux)
+func (b *Ble) GetPairingState() PairingState {
+	return PairingStateNotDiscoverable
 }

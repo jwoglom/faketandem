@@ -15,14 +15,10 @@ const elements = {
   setCharBtn: document.getElementById("set-char-btn"),
   refreshSettingsBtn: document.getElementById("refresh-settings-btn"),
   settingsList: document.getElementById("settings-list"),
-  refreshDiscoverableBtn: document.getElementById("refresh-discoverable-btn"),
-  discoverableStatus: document.getElementById("discoverable-status"),
-  enableDiscoverableBtn: document.getElementById("enable-discoverable-btn"),
-  disableDiscoverableBtn: document.getElementById("disable-discoverable-btn"),
-  refreshAllowPairingBtn: document.getElementById("refresh-allow-pairing-btn"),
-  allowPairingStatus: document.getElementById("allow-pairing-status"),
-  enableAllowPairingBtn: document.getElementById("enable-allow-pairing-btn"),
-  disableAllowPairingBtn: document.getElementById("disable-allow-pairing-btn"),
+  refreshPairingStateBtn: document.getElementById("refresh-pairing-state-btn"),
+  pairingStateStatus: document.getElementById("pairing-state-status"),
+  pairingStateForm: document.getElementById("pairing-state-form"),
+  setPairingStateBtn: document.getElementById("set-pairing-state-btn"),
   refreshPairingBtn: document.getElementById("refresh-pairing-btn"),
   pairingAuthStatus: document.getElementById("pairing-auth-status"),
   pairingConnectionStatus: document.getElementById("pairing-connection-status"),
@@ -91,29 +87,27 @@ const updatePumpStatus = (connected) => {
   elements.pairingConnectionStatus.textContent = "App Connection: Unknown";
 };
 
-const updateDiscoverableStatus = (discoverable) => {
-  resetStatusClasses(elements.discoverableStatus);
-  if (discoverable === true) {
-    elements.discoverableStatus.classList.add("connected");
-    elements.discoverableStatus.textContent = "Discoverable: Enabled";
-  } else if (discoverable === false) {
-    elements.discoverableStatus.classList.add("disconnected");
-    elements.discoverableStatus.textContent = "Discoverable: Disabled";
+const updatePairingStateStatus = (pairingState) => {
+  resetStatusClasses(elements.pairingStateStatus);
+  
+  // Update status display
+  const stateDescriptions = {
+    "NotDiscoverable": { text: "NotDiscoverable (0x10)", class: "disconnected" },
+    "DiscoverableOnly": { text: "DiscoverableOnly (0x10)", class: "connected" },
+    "PairStep1": { text: "PairStep1 (0x11)", class: "connected" },
+    "PairStep2": { text: "PairStep2 (0x12)", class: "connected" }
+  };
+  
+  if (pairingState && stateDescriptions[pairingState]) {
+    const desc = stateDescriptions[pairingState];
+    elements.pairingStateStatus.classList.add(desc.class);
+    elements.pairingStateStatus.textContent = `State: ${desc.text}`;
+    
+    // Update radio button selection
+    const radio = elements.pairingStateForm.querySelector(`input[value="${pairingState}"]`);
+    if (radio) radio.checked = true;
   } else {
-    elements.discoverableStatus.textContent = "Discoverable: Unknown";
-  }
-};
-
-const updateAllowPairingStatus = (allowPairing) => {
-  resetStatusClasses(elements.allowPairingStatus);
-  if (allowPairing === true) {
-    elements.allowPairingStatus.classList.add("connected");
-    elements.allowPairingStatus.textContent = "Allow Pairing: Enabled";
-  } else if (allowPairing === false) {
-    elements.allowPairingStatus.classList.add("disconnected");
-    elements.allowPairingStatus.textContent = "Allow Pairing: Disabled";
-  } else {
-    elements.allowPairingStatus.textContent = "Allow Pairing: Unknown";
+    elements.pairingStateStatus.textContent = "State: Unknown";
   }
 };
 
@@ -392,69 +386,36 @@ const renderSettingsList = () => {
   });
 };
 
-const fetchDiscoverableState = async () => {
+const fetchPairingState = async () => {
   try {
-    const response = await fetch("/api/bluetooth/discoverable");
+    const response = await fetch("/api/bluetooth/pairingstate");
     if (!response.ok) {
-      throw new Error(`Failed to load discoverable state (${response.status}).`);
+      throw new Error(`Failed to load pairing state (${response.status}).`);
     }
     const data = await response.json();
-    updateDiscoverableStatus(data.discoverable);
-    logEvent(`Discoverable state: ${data.discoverable ? "enabled" : "disabled"}.`);
+    updatePairingStateStatus(data.pairingState);
+    logEvent(`Pairing state: ${data.pairingState}.`);
   } catch (error) {
-    logEvent(`Failed to fetch discoverable state: ${error.message}`, "error");
+    logEvent(`Failed to fetch pairing state: ${error.message}`, "error");
   }
 };
 
-const setDiscoverableState = async (discoverable) => {
+const setPairingState = async (pairingState) => {
   try {
-    const response = await fetch("/api/bluetooth/discoverable", {
+    const response = await fetch("/api/bluetooth/pairingstate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ discoverable }),
+      body: JSON.stringify({ pairingState }),
     });
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(text || `Failed to set discoverable state (${response.status}).`);
+      throw new Error(text || `Failed to set pairing state (${response.status}).`);
     }
     const data = await response.json();
-    updateDiscoverableStatus(data.discoverable);
-    logEvent(`Discoverable mode ${data.discoverable ? "enabled" : "disabled"}.`);
+    updatePairingStateStatus(data.pairingState);
+    logEvent(`Pairing state set to: ${data.pairingState}.`);
   } catch (error) {
-    logEvent(`Failed to set discoverable state: ${error.message}`, "error");
-  }
-};
-
-const fetchAllowPairingState = async () => {
-  try {
-    const response = await fetch("/api/bluetooth/allowpairing");
-    if (!response.ok) {
-      throw new Error(`Failed to load allow pairing state (${response.status}).`);
-    }
-    const data = await response.json();
-    updateAllowPairingStatus(data.allowPairing);
-    logEvent(`Allow pairing state: ${data.allowPairing ? "enabled" : "disabled"}.`);
-  } catch (error) {
-    logEvent(`Failed to fetch allow pairing state: ${error.message}`, "error");
-  }
-};
-
-const setAllowPairingState = async (allowPairing) => {
-  try {
-    const response = await fetch("/api/bluetooth/allowpairing", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ allowPairing }),
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(text || `Failed to set allow pairing state (${response.status}).`);
-    }
-    const data = await response.json();
-    updateAllowPairingStatus(data.allowPairing);
-    logEvent(`Allow pairing mode ${data.allowPairing ? "enabled" : "disabled"}.`);
-  } catch (error) {
-    logEvent(`Failed to set allow pairing state: ${error.message}`, "error");
+    logEvent(`Failed to set pairing state: ${error.message}`, "error");
   }
 };
 
@@ -642,8 +603,7 @@ const init = () => {
   updatePairingValidation();
   updateEditorVisibility();
   fetchSettings();
-  fetchDiscoverableState();
-  fetchAllowPairingState();
+  fetchPairingState();
 
   elements.connectBtn.addEventListener("click", connectWebSocket);
   elements.disconnectBtn.addEventListener("click", disconnectWebSocket);
@@ -677,19 +637,14 @@ const init = () => {
       data,
     });
   });
-  elements.refreshDiscoverableBtn.addEventListener("click", fetchDiscoverableState);
-  elements.enableDiscoverableBtn.addEventListener("click", () => {
-    setDiscoverableState(true);
-  });
-  elements.disableDiscoverableBtn.addEventListener("click", () => {
-    setDiscoverableState(false);
-  });
-  elements.refreshAllowPairingBtn.addEventListener("click", fetchAllowPairingState);
-  elements.enableAllowPairingBtn.addEventListener("click", () => {
-    setAllowPairingState(true);
-  });
-  elements.disableAllowPairingBtn.addEventListener("click", () => {
-    setAllowPairingState(false);
+  elements.refreshPairingStateBtn.addEventListener("click", fetchPairingState);
+  elements.setPairingStateBtn.addEventListener("click", () => {
+    const selectedRadio = elements.pairingStateForm.querySelector('input[name="pairing-state"]:checked');
+    if (selectedRadio) {
+      setPairingState(selectedRadio.value);
+    } else {
+      logEvent("Please select a pairing state.", "error");
+    }
   });
   elements.refreshPairingBtn.addEventListener("click", requestPairingState);
   elements.setPairingBtn.addEventListener("click", () => {
