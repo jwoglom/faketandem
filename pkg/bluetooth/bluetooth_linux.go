@@ -40,6 +40,11 @@ type Ble struct {
 	writeHandler      WriteHandler
 	readHandler       ReadHandler
 	connectionHandler ConnectionHandler
+
+	// Discoverable state
+	discoverable     bool
+	discoverableMtx  sync.RWMutex
+	pumpNameForAdv   string
 }
 
 // DefaultServerOptions contains the default options for the BLE server on Linux
@@ -106,6 +111,8 @@ func New(adapterID string) (*Ble, error) {
 
 // setupService creates the pump service and all characteristics
 func (b *Ble) setupService(d gatt.Device) {
+	b.pumpNameForAdv = pumpName
+
 	b.addGenericAttributeService(d)
 	b.addGenericAccessService(d)
 	b.addDeviceInformationService(d)
@@ -134,7 +141,7 @@ func (b *Ble) setupService(d gatt.Device) {
 
 	log.Info("pkg bluetooth; Pump service is now advertising")
 	log.Info("pkg bluetooth; Service UUID:", PumpServiceUUID)
-	log.Info("pkg bluetooth; Ready for connections")
+	log.Info("pkg bluetooth; Ready for connections (discoverable: false)")
 }
 
 func (b *Ble) addGenericAttributeService(d gatt.Device) {
@@ -182,11 +189,19 @@ func (b *Ble) addUnknownServiceFDFA(d gatt.Device) {
 }
 
 func (b *Ble) advertisePump(d gatt.Device, name string) error {
+	b.discoverableMtx.RLock()
+	isDiscoverable := b.discoverable
+	b.discoverableMtx.RUnlock()
+
 	advPacket := &gatt.AdvPacket{}
-	advPacket.AppendFlags(0x04)
+	if isDiscoverable {
+		advPacket.AppendFlags(0x06) // LE General Discoverable + BR/EDR Not Supported
+	} else {
+		advPacket.AppendFlags(0x04) // BR/EDR Not Supported (not discoverable)
+	}
 	advPacket.AppendField(advTypeSomeUUID16, uint16ToBytes(0xFDFB))
 	advPacket.AppendField(advTypeTxPower, []byte{0x04})
-	advPacket.AppendManufacturerData(0x059D, []byte{0x00, 0x01, 0x11})
+	advPacket.AppendManufacturerData(0x059D, []byte{0x00, 0x01, 0x10})
 
 	scanPacket := &gatt.AdvPacket{}
 	scanPacket.AppendName(name)
@@ -401,4 +416,30 @@ func (b *Ble) ShutdownConnection() {
 			log.Debugf("Error closing central connection: %v", err)
 		}
 	}
+}
+
+// SetDiscoverable enables or disables LE General Discoverable mode
+func (b *Ble) SetDiscoverable(discoverable bool) error {
+	b.discoverableMtx.Lock()
+	b.discoverable = discoverable
+	b.discoverableMtx.Unlock()
+
+	if b.device == nil {
+		return fmt.Errorf("device not initialized")
+	}
+
+	// Update the advertising data
+	if err := b.advertisePump(*b.device, b.pumpNameForAdv); err != nil {
+		return fmt.Errorf("failed to update advertising: %w", err)
+	}
+
+	log.Infof("Discoverable mode set to: %v", discoverable)
+	return nil
+}
+
+// IsDiscoverable returns the current discoverable state
+func (b *Ble) IsDiscoverable() bool {
+	b.discoverableMtx.RLock()
+	defer b.discoverableMtx.RUnlock()
+	return b.discoverable
 }

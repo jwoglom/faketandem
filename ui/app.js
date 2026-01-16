@@ -15,6 +15,10 @@ const elements = {
   setCharBtn: document.getElementById("set-char-btn"),
   refreshSettingsBtn: document.getElementById("refresh-settings-btn"),
   settingsList: document.getElementById("settings-list"),
+  refreshDiscoverableBtn: document.getElementById("refresh-discoverable-btn"),
+  discoverableStatus: document.getElementById("discoverable-status"),
+  enableDiscoverableBtn: document.getElementById("enable-discoverable-btn"),
+  disableDiscoverableBtn: document.getElementById("disable-discoverable-btn"),
   refreshPairingBtn: document.getElementById("refresh-pairing-btn"),
   pairingAuthStatus: document.getElementById("pairing-auth-status"),
   pairingConnectionStatus: document.getElementById("pairing-connection-status"),
@@ -81,6 +85,19 @@ const updatePumpStatus = (connected) => {
   }
   elements.pumpStatus.textContent = "Pump: Unknown";
   elements.pairingConnectionStatus.textContent = "App Connection: Unknown";
+};
+
+const updateDiscoverableStatus = (discoverable) => {
+  resetStatusClasses(elements.discoverableStatus);
+  if (discoverable === true) {
+    elements.discoverableStatus.classList.add("connected");
+    elements.discoverableStatus.textContent = "Discoverable: Enabled";
+  } else if (discoverable === false) {
+    elements.discoverableStatus.classList.add("disconnected");
+    elements.discoverableStatus.textContent = "Discoverable: Disabled";
+  } else {
+    elements.discoverableStatus.textContent = "Discoverable: Unknown";
+  }
 };
 
 const updatePairingStatus = (pairingCode, authenticated) => {
@@ -358,6 +375,39 @@ const renderSettingsList = () => {
   });
 };
 
+const fetchDiscoverableState = async () => {
+  try {
+    const response = await fetch("/api/bluetooth/discoverable");
+    if (!response.ok) {
+      throw new Error(`Failed to load discoverable state (${response.status}).`);
+    }
+    const data = await response.json();
+    updateDiscoverableStatus(data.discoverable);
+    logEvent(`Discoverable state: ${data.discoverable ? "enabled" : "disabled"}.`);
+  } catch (error) {
+    logEvent(`Failed to fetch discoverable state: ${error.message}`, "error");
+  }
+};
+
+const setDiscoverableState = async (discoverable) => {
+  try {
+    const response = await fetch("/api/bluetooth/discoverable", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ discoverable }),
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || `Failed to set discoverable state (${response.status}).`);
+    }
+    const data = await response.json();
+    updateDiscoverableStatus(data.discoverable);
+    logEvent(`Discoverable mode ${data.discoverable ? "enabled" : "disabled"}.`);
+  } catch (error) {
+    logEvent(`Failed to set discoverable state: ${error.message}`, "error");
+  }
+};
+
 const fetchSettings = async () => {
   clearConfigStatus();
   try {
@@ -542,6 +592,7 @@ const init = () => {
   updatePairingValidation();
   updateEditorVisibility();
   fetchSettings();
+  fetchDiscoverableState();
 
   elements.connectBtn.addEventListener("click", connectWebSocket);
   elements.disconnectBtn.addEventListener("click", disconnectWebSocket);
@@ -574,6 +625,13 @@ const init = () => {
       characteristic: elements.characteristicSelect.value,
       data,
     });
+  });
+  elements.refreshDiscoverableBtn.addEventListener("click", fetchDiscoverableState);
+  elements.enableDiscoverableBtn.addEventListener("click", () => {
+    setDiscoverableState(true);
+  });
+  elements.disableDiscoverableBtn.addEventListener("click", () => {
+    setDiscoverableState(false);
   });
   elements.refreshPairingBtn.addEventListener("click", requestPairingState);
   elements.setPairingBtn.addEventListener("click", () => {

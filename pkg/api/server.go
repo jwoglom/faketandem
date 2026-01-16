@@ -150,7 +150,7 @@ func (s *Server) SendPumpState() {
 
 func (s *Server) setupRoutes() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if _, err := fmt.Fprintf(w, "Pump Emulator API - Connect via WebSocket at /ws\n\nSettings API:\n  GET    /api/settings\n  GET    /api/settings/{messageType}\n  PUT    /api/settings/{messageType}\n  POST   /api/settings/{messageType}/reset"); err != nil {
+		if _, err := fmt.Fprintf(w, "Pump Emulator API - Connect via WebSocket at /ws\n\nSettings API:\n  GET    /api/settings\n  GET    /api/settings/{messageType}\n  PUT    /api/settings/{messageType}\n  POST   /api/settings/{messageType}/reset\n\nBluetooth API:\n  GET    /api/bluetooth/discoverable\n  POST   /api/bluetooth/discoverable"); err != nil {
 			log.Warnf("Failed to write response: %v", err)
 		}
 	})
@@ -162,6 +162,7 @@ func (s *Server) setupRoutes() {
 	http.Handle("/ws", s)
 	http.HandleFunc("/api/settings", s.handleSettingsAPI)
 	http.HandleFunc("/api/settings/", s.handleSettingsAPI)
+	http.HandleFunc("/api/bluetooth/discoverable", s.handleDiscoverableAPI)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -446,6 +447,61 @@ func (s *Server) handleResetSetting(w http.ResponseWriter, _ *http.Request, mess
 		"message": fmt.Sprintf("State reset for %s", messageType),
 	}); err != nil {
 		log.Errorf("Failed to encode reset response: %v", err)
+	}
+}
+
+// handleDiscoverableAPI handles the Bluetooth discoverable API
+func (s *Server) handleDiscoverableAPI(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		// GET /api/bluetooth/discoverable - get current discoverable state
+		discoverable := s.ble.IsDiscoverable()
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"discoverable": discoverable,
+		}); err != nil {
+			log.Errorf("Failed to encode discoverable state: %v", err)
+			http.Error(w, "Failed to encode response", http.StatusInternalServerError)
+		}
+
+	case http.MethodPost:
+		// POST /api/bluetooth/discoverable - set discoverable state
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, fmt.Sprintf("Failed to read request body: %v", err), http.StatusBadRequest)
+			return
+		}
+		defer func() {
+			if err := r.Body.Close(); err != nil {
+				log.Debugf("Error closing request body: %v", err)
+			}
+		}()
+
+		var req struct {
+			Discoverable bool `json:"discoverable"`
+		}
+		if err := json.Unmarshal(body, &req); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to parse request: %v", err), http.StatusBadRequest)
+			return
+		}
+
+		if err := s.ble.SetDiscoverable(req.Discoverable); err != nil {
+			http.Error(w, fmt.Sprintf("Failed to set discoverable mode: %v", err), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusOK)
+		if err := json.NewEncoder(w).Encode(map[string]interface{}{
+			"status":       "success",
+			"discoverable": req.Discoverable,
+			"message":      fmt.Sprintf("Discoverable mode set to %v", req.Discoverable),
+		}); err != nil {
+			log.Errorf("Failed to encode discoverable response: %v", err)
+		}
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
