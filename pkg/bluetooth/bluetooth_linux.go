@@ -76,6 +76,20 @@ func New(adapterID string) (*Ble, error) {
 	d.Handle(
 		gatt.CentralConnected(func(c gatt.Central) {
 			fmt.Println("pkg bluetooth; ** New connection from:", c.ID())
+			
+			// Reject connection if not discoverable
+			b.discoverableMtx.RLock()
+			isDiscoverable := b.discoverable
+			b.discoverableMtx.RUnlock()
+			
+			if !isDiscoverable {
+				log.Warnf("pkg bluetooth; rejecting connection from %s - not discoverable", c.ID())
+				if err := c.Close(); err != nil {
+					log.Debugf("Error closing rejected connection: %v", err)
+				}
+				return
+			}
+			
 			b.central = &c
 			if b.connectionHandler != nil {
 				b.connectionHandler(true)
@@ -440,6 +454,12 @@ func (b *Ble) SetDiscoverable(discoverable bool) error {
 
 	if b.device == nil {
 		return fmt.Errorf("device not initialized")
+	}
+
+	// If disabling discoverable mode, disconnect any existing connection
+	if !discoverable && b.central != nil {
+		log.Info("pkg bluetooth; disconnecting existing connection due to non-discoverable mode")
+		b.ShutdownConnection()
 	}
 
 	// Update the advertising data (disables, updates, re-enables)
