@@ -91,6 +91,21 @@
 
       <div class="card">
         <div class="card-header">
+          <h2>Allow Pairing</h2>
+          <button type="button" id="refresh-allow-pairing-btn">Refresh</button>
+        </div>
+        <div class="pairing-status">
+          <div class="status-pill" id="allow-pairing-status" aria-live="polite">Allow Pairing: Unknown</div>
+        </div>
+        <div class="button-row">
+          <button type="button" id="enable-allow-pairing-btn" class="primary">Enable Pairing</button>
+          <button type="button" id="disable-allow-pairing-btn">Disable Pairing</button>
+        </div>
+        <p class="note">Enable allow pairing mode to advertise pairing availability (changes manufacturer data 0x10 → 0x11).</p>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
           <h2>Device Pairing</h2>
           <button type="button" id="refresh-pairing-btn">Refresh</button>
         </div>

@@ -45,6 +45,10 @@ type Ble struct {
 	discoverable     bool
 	discoverableMtx  sync.RWMutex
 	pumpNameForAdv   string
+	
+	// Allow pairing state
+	allowPairing    bool
+	allowPairingMtx sync.RWMutex
 }
 
 // DefaultServerOptions contains the default options for the BLE server on Linux
@@ -207,6 +211,10 @@ func (b *Ble) advertisePump(d gatt.Device, name string) error {
 	isDiscoverable := b.discoverable
 	b.discoverableMtx.RUnlock()
 
+	b.allowPairingMtx.RLock()
+	isPairingAllowed := b.allowPairing
+	b.allowPairingMtx.RUnlock()
+
 	advPacket := &gatt.AdvPacket{}
 	if isDiscoverable {
 		advPacket.AppendFlags(0x06) // LE General Discoverable + BR/EDR Not Supported
@@ -215,7 +223,20 @@ func (b *Ble) advertisePump(d gatt.Device, name string) error {
 	}
 	advPacket.AppendField(advTypeSomeUUID16, uint16ToBytes(0xFDFB))
 	advPacket.AppendField(advTypeTxPower, []byte{0x04})
-	advPacket.AppendManufacturerData(0x059D, []byte{0x00, 0x01, 0x10})
+	
+	// Set manufacturer data based on discoverable and pairing states
+	// Last byte: 0x10 (base), 0x11 (allow pairing), 0x12 (discoverable)
+	// Discoverable takes precedence over allow pairing
+	var lastByte byte
+	if isDiscoverable {
+		lastByte = 0x12
+	} else if isPairingAllowed {
+		lastByte = 0x11
+	} else {
+		lastByte = 0x10
+	}
+	mfgData := []byte{0x00, 0x01, lastByte}
+	advPacket.AppendManufacturerData(0x059D, mfgData)
 
 	scanPacket := &gatt.AdvPacket{}
 	scanPacket.AppendName(name)
@@ -476,4 +497,30 @@ func (b *Ble) IsDiscoverable() bool {
 	b.discoverableMtx.RLock()
 	defer b.discoverableMtx.RUnlock()
 	return b.discoverable
+}
+
+// SetAllowPairing enables or disables pairing mode
+func (b *Ble) SetAllowPairing(allowPairing bool) error {
+	b.allowPairingMtx.Lock()
+	b.allowPairing = allowPairing
+	b.allowPairingMtx.Unlock()
+
+	if b.device == nil {
+		return fmt.Errorf("device not initialized")
+	}
+
+	// Update the advertising data (disables, updates, re-enables)
+	if err := b.updateAdvertising(*b.device, b.pumpNameForAdv); err != nil {
+		return fmt.Errorf("failed to update advertising: %w", err)
+	}
+
+	log.Infof("Allow pairing mode set to: %v", allowPairing)
+	return nil
+}
+
+// IsAllowPairing returns the current allow pairing state
+func (b *Ble) IsAllowPairing() bool {
+	b.allowPairingMtx.RLock()
+	defer b.allowPairingMtx.RUnlock()
+	return b.allowPairing
 }

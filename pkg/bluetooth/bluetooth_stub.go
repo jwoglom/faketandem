@@ -77,3 +77,14 @@ func (b *Ble) SetDiscoverable(discoverable bool) error {
 func (b *Ble) IsDiscoverable() bool {
 	return false
 }
+
+// SetAllowPairing enables or disables pairing mode (stub)
+func (b *Ble) SetAllowPairing(allowPairing bool) error {
+	log.Debugf("SetAllowPairing(%v) called on non-Linux platform (no-op)", allowPairing)
+	return fmt.Errorf("bluetooth not supported on this platform")
+}
+
+// IsAllowPairing returns the current allow pairing state (always false on non-Linux)
+func (b *Ble) IsAllowPairing() bool {
+	return false
+}
