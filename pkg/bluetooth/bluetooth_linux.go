@@ -104,7 +104,7 @@ func (b *Ble) setupService(d gatt.Device) {
 	}
 
 	// Advertise the service
-	err = d.AdvertiseNameAndServices("TandemPump", []gatt.UUID{serviceUUID})
+	err = d.AdvertiseNameAndServices("Tandem Mobi 123", []gatt.UUID{serviceUUID})
 	if err != nil {
 		log.Fatalf("pkg bluetooth; could not advertise: %s", err)
 	}
