@@ -45,6 +45,8 @@ type BleEvent struct {
 	Characteristic string `json:"characteristic,omitempty"`
 	Data           string `json:"data,omitempty"`
 	Message        string `json:"message,omitempty"`
+	PairingCode    string `json:"pairing_code,omitempty"`
+	Authenticated  *bool  `json:"authenticated,omitempty"`
 }
 
 // New creates a new API server
@@ -129,6 +131,21 @@ func (s *Server) SendConnectionEvent(connected bool) {
 	s.SendEvent(BleEvent{
 		Type: eventType,
 	})
+}
+
+// SendPairingState sends pairing code and authentication status to websocket clients
+func (s *Server) SendPairingState(pairingCode string, authenticated bool) {
+	authValue := authenticated
+	s.SendEvent(BleEvent{
+		Type:          "pairing_state",
+		PairingCode:   pairingCode,
+		Authenticated: &authValue,
+	})
+}
+
+// SendPumpState sends the latest pump connection status to websocket clients
+func (s *Server) SendPumpState() {
+	s.sendState()
 }
 
 func (s *Server) setupRoutes() {

@@ -186,6 +186,25 @@ func (ps *PumpState) SetAuthenticated(authKey []byte) {
 	log.Info("Pump authenticated")
 }
 
+// ResetAuthentication clears authentication state
+func (ps *PumpState) ResetAuthentication() {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+
+	ps.IsAuthenticated = false
+	ps.AuthKey = nil
+
+	log.Info("Pump authentication reset")
+}
+
+// SetPairingCode updates the pairing code
+func (ps *PumpState) SetPairingCode(code string) {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+
+	ps.PairingCode = code
+}
+
 // GetAuthKey returns the authentication key
 func (ps *PumpState) GetAuthKey() []byte {
 	ps.mutex.RLock()

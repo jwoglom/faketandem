@@ -15,6 +15,14 @@ const elements = {
   setCharBtn: document.getElementById("set-char-btn"),
   refreshSettingsBtn: document.getElementById("refresh-settings-btn"),
   settingsList: document.getElementById("settings-list"),
+  refreshPairingBtn: document.getElementById("refresh-pairing-btn"),
+  pairingAuthStatus: document.getElementById("pairing-auth-status"),
+  pairingConnectionStatus: document.getElementById("pairing-connection-status"),
+  pairingCodeInput: document.getElementById("pairing-code"),
+  pairingError: document.getElementById("pairing-error"),
+  setPairingBtn: document.getElementById("set-pairing-btn"),
+  resetPairingBtn: document.getElementById("reset-pairing-btn"),
+  disconnectPumpBtn: document.getElementById("disconnect-pump-btn"),
   messageTypeInput: document.getElementById("message-type"),
   modeSelect: document.getElementById("mode-select"),
   configMeta: document.getElementById("config-meta"),
@@ -56,17 +64,40 @@ const updateWsStatus = (status, detail = "") => {
 
 const updatePumpStatus = (connected) => {
   resetStatusClasses(elements.pumpStatus);
+  resetStatusClasses(elements.pairingConnectionStatus);
   if (connected === true) {
     elements.pumpStatus.classList.add("connected");
     elements.pumpStatus.textContent = "Pump: Connected";
+    elements.pairingConnectionStatus.classList.add("connected");
+    elements.pairingConnectionStatus.textContent = "App Connection: Connected";
     return;
   }
   if (connected === false) {
     elements.pumpStatus.classList.add("disconnected");
     elements.pumpStatus.textContent = "Pump: Disconnected";
+    elements.pairingConnectionStatus.classList.add("disconnected");
+    elements.pairingConnectionStatus.textContent = "App Connection: Disconnected";
     return;
   }
   elements.pumpStatus.textContent = "Pump: Unknown";
+  elements.pairingConnectionStatus.textContent = "App Connection: Unknown";
+};
+
+const updatePairingStatus = (pairingCode, authenticated) => {
+  resetStatusClasses(elements.pairingAuthStatus);
+  if (authenticated === true) {
+    elements.pairingAuthStatus.classList.add("connected");
+    elements.pairingAuthStatus.textContent = "Pairing: Authenticated";
+  } else if (authenticated === false) {
+    elements.pairingAuthStatus.classList.add("disconnected");
+    elements.pairingAuthStatus.textContent = "Pairing: Not Authenticated";
+  } else {
+    elements.pairingAuthStatus.textContent = "Pairing: Unknown";
+  }
+  if (typeof pairingCode === "string" && pairingCode.length > 0) {
+    elements.pairingCodeInput.value = pairingCode;
+  }
+  updatePairingValidation();
 };
 
 const logEvent = (message, type = "info") => {
@@ -118,6 +149,7 @@ const connectWebSocket = () => {
     updateWsStatus("connected");
     logEvent("WebSocket connected.");
     sendCommand({ command: "getState" });
+    requestPairingState();
   });
 
   ws.addEventListener("message", (event) => {
@@ -126,6 +158,16 @@ const connectWebSocket = () => {
       if (typeof payload.connected === "boolean") {
         updatePumpStatus(payload.connected);
         logEvent(`Pump connection state: ${payload.connected ? "connected" : "disconnected"}.`);
+        return;
+      }
+      if (payload.type === "pairing_state") {
+        updatePairingStatus(payload.pairing_code, payload.authenticated);
+        logEvent("Pairing state updated.");
+        return;
+      }
+      if (payload.type === "connected" || payload.type === "disconnected") {
+        updatePumpStatus(payload.type === "connected");
+        logEvent(`Pump connection state: ${payload.type}.`);
         return;
       }
       const type = payload.type ?? "event";
@@ -169,6 +211,10 @@ const sendCommand = (payload) => {
   state.ws.send(JSON.stringify(payload));
 };
 
+const requestPairingState = () => {
+  sendCommand({ command: "getPairingState" });
+};
+
 const validateHex = (value) => {
   if (!value) {
     return { valid: true };
@@ -188,6 +234,29 @@ const updateHexValidation = () => {
   elements.hexError.textContent = valid ? "" : message;
   elements.notifyBtn.disabled = !valid;
   elements.setCharBtn.disabled = !valid;
+};
+
+const validatePairingCode = (value) => {
+  if (!value) {
+    return { valid: false, message: "Pairing code is required." };
+  }
+  const normalized = value.trim();
+  if (!/^\d{6}$/.test(normalized)) {
+    return { valid: false, message: "Pairing code must be 6 digits." };
+  }
+  return { valid: true };
+};
+
+const updatePairingValidation = () => {
+  const value = elements.pairingCodeInput.value.trim();
+  if (!value) {
+    elements.pairingError.textContent = "";
+    elements.setPairingBtn.disabled = true;
+    return;
+  }
+  const { valid, message } = validatePairingCode(value);
+  elements.pairingError.textContent = valid ? "" : message;
+  elements.setPairingBtn.disabled = !valid;
 };
 
 const clearConfigStatus = () => {
@@ -470,6 +539,7 @@ const init = () => {
   updateWsStatus("disconnected");
   updatePumpStatus(null);
   updateHexValidation();
+  updatePairingValidation();
   updateEditorVisibility();
   fetchSettings();
 
@@ -488,6 +558,7 @@ const init = () => {
     }
   });
   elements.hexInput.addEventListener("input", updateHexValidation);
+  elements.pairingCodeInput.addEventListener("input", updatePairingValidation);
   elements.notifyBtn.addEventListener("click", () => {
     const data = elements.hexInput.value.trim();
     sendCommand({
@@ -503,6 +574,22 @@ const init = () => {
       characteristic: elements.characteristicSelect.value,
       data,
     });
+  });
+  elements.refreshPairingBtn.addEventListener("click", requestPairingState);
+  elements.setPairingBtn.addEventListener("click", () => {
+    const { valid, message } = validatePairingCode(elements.pairingCodeInput.value);
+    if (!valid) {
+      elements.pairingError.textContent = message;
+      return;
+    }
+    elements.pairingError.textContent = "";
+    sendCommand({ command: "setPairingCode", pairingCode: elements.pairingCodeInput.value.trim() });
+  });
+  elements.resetPairingBtn.addEventListener("click", () => {
+    sendCommand({ command: "resetPairing" });
+  });
+  elements.disconnectPumpBtn.addEventListener("click", () => {
+    sendCommand({ command: "disconnectPump" });
   });
   elements.refreshSettingsBtn.addEventListener("click", fetchSettings);
   elements.modeSelect.addEventListener("change", updateEditorVisibility);

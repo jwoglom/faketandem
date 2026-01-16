@@ -16,8 +16,9 @@ type Ble struct {
 	charDataMtx sync.RWMutex
 
 	// Handlers
-	writeHandler WriteHandler
-	readHandler  ReadHandler
+	writeHandler      WriteHandler
+	readHandler       ReadHandler
+	connectionHandler ConnectionHandler
 }
 
 // New creates a new BLE device (stub for non-Linux platforms)
@@ -36,6 +37,11 @@ func (b *Ble) SetWriteHandler(handler WriteHandler) {
 // SetReadHandler sets the callback for when data is read from any characteristic
 func (b *Ble) SetReadHandler(handler ReadHandler) {
 	b.readHandler = handler
+}
+
+// SetConnectionHandler sets the callback for when a central connects or disconnects (no-op on non-Linux)
+func (b *Ble) SetConnectionHandler(handler ConnectionHandler) {
+	b.connectionHandler = handler
 }
 
 // SetCharacteristicData sets the data that will be returned when a characteristic is read

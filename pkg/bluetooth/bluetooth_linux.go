@@ -31,8 +31,9 @@ type Ble struct {
 	extraCharDataMtx sync.RWMutex
 
 	// Handlers
-	writeHandler WriteHandler
-	readHandler  ReadHandler
+	writeHandler      WriteHandler
+	readHandler       ReadHandler
+	connectionHandler ConnectionHandler
 }
 
 // DefaultServerOptions contains the default options for the BLE server on Linux
@@ -65,10 +66,16 @@ func New(adapterID string) (*Ble, error) {
 		gatt.CentralConnected(func(c gatt.Central) {
 			fmt.Println("pkg bluetooth; ** New connection from:", c.ID())
 			b.central = &c
+			if b.connectionHandler != nil {
+				b.connectionHandler(true)
+			}
 		}),
 		gatt.CentralDisconnected(func(c gatt.Central) {
 			log.Tracef("pkg bluetooth; ** disconnect: %s", c.ID())
 			b.central = nil
+			if b.connectionHandler != nil {
+				b.connectionHandler(false)
+			}
 		}),
 	)
 
@@ -346,6 +353,11 @@ func (b *Ble) SetWriteHandler(handler WriteHandler) {
 // SetReadHandler sets the callback for when data is read from any characteristic
 func (b *Ble) SetReadHandler(handler ReadHandler) {
 	b.readHandler = handler
+}
+
+// SetConnectionHandler sets the callback for when a central connects or disconnects
+func (b *Ble) SetConnectionHandler(handler ConnectionHandler) {
+	b.connectionHandler = handler
 }
 
 // SetCharacteristicData sets the data that will be returned when a characteristic is read

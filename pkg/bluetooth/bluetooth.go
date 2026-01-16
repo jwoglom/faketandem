@@ -110,3 +110,6 @@ type WriteHandler func(charType CharacteristicType, data []byte)
 
 // ReadHandler is called when data is read from a characteristic
 type ReadHandler func(charType CharacteristicType) []byte
+
+// ConnectionHandler is called when a central device connects or disconnects
+type ConnectionHandler func(connected bool)

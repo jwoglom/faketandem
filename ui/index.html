@@ -76,6 +76,29 @@
 
       <div class="card">
         <div class="card-header">
+          <h2>Device Pairing</h2>
+          <button type="button" id="refresh-pairing-btn">Refresh</button>
+        </div>
+        <div class="pairing-status">
+          <div class="status-pill" id="pairing-auth-status" aria-live="polite">Pairing: Unknown</div>
+          <div class="status-pill" id="pairing-connection-status" aria-live="polite">App Connection: Unknown</div>
+        </div>
+        <form class="form" id="pairing-form">
+          <label for="pairing-code">Pairing Code</label>
+          <input id="pairing-code" name="pairing-code" type="text" placeholder="123456" autocomplete="off" />
+          <p class="help" id="pairing-error" role="alert"></p>
+
+          <div class="button-row">
+            <button type="button" id="set-pairing-btn" class="primary">Set Pairing Code</button>
+            <button type="button" id="reset-pairing-btn">Reset Auth</button>
+            <button type="button" id="disconnect-pump-btn">Disconnect App</button>
+          </div>
+          <p class="note" id="pairing-help">Use the same 6-digit code in the client app during pairing.</p>
+        </form>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
           <h2>Settings Editor</h2>
           <div class="button-row">
             <button type="button" id="reload-config-btn">Reload</button>

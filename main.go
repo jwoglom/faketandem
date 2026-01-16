@@ -114,6 +114,7 @@ func main() {
 	// Create API server
 	server := api.New(ble)
 	server.SetSettingsManager(router.GetSettingsManager())
+	configureConnectionHandlers(ble, server)
 
 	// Set up write handler to log incoming data and notify websocket clients
 	ble.SetWriteHandler(func(charType bluetooth.CharacteristicType, data []byte) {
@@ -160,10 +161,7 @@ func main() {
 	})
 
 	// Set up custom command handler for websocket commands
-	server.SetCommandHandler(func(command string, params map[string]interface{}) {
-		log.Infof("Received command from websocket: %s, params: %v", command, params)
-		// TODO: Handle custom commands
-	})
+	configureWebsocketCommands(server, ble, bridge, pumpState)
 
 	log.Info("Bluetooth device initialized, waiting for connections...")
 	log.Info("Starting API server on :8080")
@@ -175,4 +173,43 @@ func main() {
 	for {
 		time.Sleep(time.Hour)
 	}
+}
+
+func configureConnectionHandlers(ble *bluetooth.Ble, server *api.Server) {
+	ble.SetConnectionHandler(func(connected bool) {
+		server.SendPumpState()
+		if connected {
+			log.Info("BLE central connected; updated websocket clients.")
+			return
+		}
+		log.Info("BLE central disconnected; updated websocket clients.")
+	})
+}
+
+func configureWebsocketCommands(server *api.Server, ble *bluetooth.Ble, bridge *pumpx2.Bridge, pumpState *state.PumpState) {
+	server.SetCommandHandler(func(command string, params map[string]interface{}) {
+		log.Infof("Received command from websocket: %s, params: %v", command, params)
+		switch command {
+		case "getPairingState":
+			server.SendPairingState(pumpState.GetPairingCode(), pumpState.IsAuthenticated)
+		case "setPairingCode":
+			pairingCode, _ := params["pairingCode"].(string)
+			if pairingCode == "" {
+				log.Warn("Pairing code missing from setPairingCode command")
+				return
+			}
+			pumpState.SetPairingCode(pairingCode)
+			pumpState.ResetAuthentication()
+			bridge.SetPairingCode(pairingCode)
+			server.SendPairingState(pumpState.GetPairingCode(), pumpState.IsAuthenticated)
+		case "resetPairing":
+			pumpState.ResetAuthentication()
+			server.SendPairingState(pumpState.GetPairingCode(), pumpState.IsAuthenticated)
+		case "disconnectPump":
+			ble.ShutdownConnection()
+			server.SendPumpState()
+		default:
+			log.Warnf("Unhandled websocket command: %s", command)
+		}
+	})
 }
