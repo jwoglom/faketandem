@@ -77,6 +77,8 @@ func (r *Router) registerHandlers() {
 	// Status and data handlers
 	r.RegisterHandler(NewCurrentStatusHandler(r.bridge))
 	r.RegisterHandler(NewHistoryLogHandler(r.bridge))
+	r.RegisterHandler(NewCreateHistoryLogHandler(r.bridge))
+	r.RegisterHandler(NewHistoryLogStatusHandler(r.bridge))
 
 	// Bolus handlers
 	r.RegisterHandler(NewBolusPermissionHandler(r.bridge))
@@ -93,6 +95,34 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "PumpGlobalsRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "TherapySettingsGlobalsRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ControlIQGlobalsRequest", true))
+
+	// Polling status handlers (controlX2 polls every 5 min)
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CurrentBatteryV2Request", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ControlIQIOBRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "InsulinStatusRequest", true))
+
+	// Qualifying event status handlers
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CurrentBasalStatusRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CurrentBolusStatusRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CurrentEGVGuiDataRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "HomeScreenMirrorRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMStatusRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "AlertStatusRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "AlarmStatusRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "LoadStatusRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ProfileStatusRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "LastBolusStatusV2Request", true))
+
+	// Pump info handlers
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "PumpFeaturesV2Request", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "PumpVersionRequest", false))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "BleSoftwareInfoRequest", false))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CommonSoftwareInfoRequest", false))
+
+	// Control handlers
+	r.RegisterHandler(NewSetSensorTypeHandler(r.bridge))
+	r.RegisterHandler(NewStreamDataReadinessHandler(r.bridge))
+	r.RegisterHandler(NewFactoryResetBHandler(r.bridge))
 
 	// Keep ProfileBasalHandler as custom since it uses pump state
 	r.RegisterHandler(NewProfileBasalHandler(r.bridge))

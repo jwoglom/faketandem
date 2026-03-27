@@ -142,6 +142,13 @@ func (s *Simulator) updateBolusDelivery() {
 		s.pumpState.IOB += s.pumpState.Bolus.UnitsTotal
 		s.pumpState.TDD += s.pumpState.Bolus.UnitsTotal
 
+		// Record history log entry
+		s.addHistoryEntry("BolusCompleted", map[string]interface{}{
+			"bolusId":        bolusID,
+			"unitsDelivered": unitsDelivered,
+			"unitsTotal":     unitsTotal,
+		})
+
 		// Notify qualifying event
 		if s.eventNotifier != nil {
 			if err := s.eventNotifier.NotifyBolusComplete(bolusID, unitsDelivered, unitsTotal); err != nil {
@@ -301,6 +308,11 @@ func (s *Simulator) addAlert(alertType AlertType, priority AlertPriority, messag
 	}
 	s.pumpState.ActiveAlerts = append(s.pumpState.ActiveAlerts, alert)
 	return alert
+}
+
+// addHistoryEntry adds a history log entry (must NOT hold pumpState mutex)
+func (s *Simulator) addHistoryEntry(entryType string, data map[string]interface{}) {
+	s.pumpState.AddHistoryLogEntry(entryType, data)
 }
 
 // GetStats returns simulator statistics

@@ -82,8 +82,8 @@ func main() {
 
 	// Initialize pump state
 	pumpState := state.NewPumpState()
-	log.Infof("Pump state initialized: serial=%s, model=%s, API version=%d",
-		pumpState.GetSerialNumber(), pumpState.Model, pumpState.GetAPIVersion())
+	log.Infof("Pump state initialized: serial=%s, model=%s, API version=%d.%d",
+		pumpState.GetSerialNumber(), pumpState.Model, pumpState.GetAPIVersionMajor(), pumpState.GetAPIVersionMinor())
 	log.Infof("Initial state: reservoir=%.1f units, battery=%d%%, basal rate=%.2f U/hr",
 		pumpState.GetReservoirLevel(), pumpState.GetBatteryLevel(), pumpState.GetBasalRate())
 
