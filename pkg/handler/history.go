@@ -49,15 +49,35 @@ func (h *HistoryLogHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *
 
 	log.Debugf("History log requested: start=%d, end=%d", startSeq, endSeq)
 
-	// For now, return an empty history log
-	// TODO: Implement actual history log storage and retrieval
+	// Get entries from pump state
+	entries := pumpState.GetHistoryLogEntries(startSeq, endSeq)
+
+	// Build entry data for response
+	entryData := make([]interface{}, 0, len(entries))
+	for _, entry := range entries {
+		entryMap := map[string]interface{}{
+			"sequence":  entry.Sequence,
+			"type":      entry.Type,
+			"timestamp": entry.Timestamp.Unix(),
+		}
+		for k, v := range entry.Data {
+			entryMap[k] = v
+		}
+		entryData = append(entryData, entryMap)
+	}
+
+	actualEndSeq := startSeq
+	if len(entries) > 0 {
+		actualEndSeq = entries[len(entries)-1].Sequence
+	}
+
 	response, err := h.bridge.EncodeMessage(
 		msg.TxID,
 		"HistoryLogResponse",
 		map[string]interface{}{
 			"startSequence": startSeq,
-			"endSequence":   startSeq, // Empty - no entries
-			"entries":       []interface{}{},
+			"endSequence":   actualEndSeq,
+			"entries":       entryData,
 		},
 	)
 
@@ -65,11 +85,114 @@ func (h *HistoryLogHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *
 		return nil, fmt.Errorf("failed to encode HistoryLogResponse: %w", err)
 	}
 
-	log.Debug("Sent empty history log response")
+	log.Debugf("Sent history log response with %d entries", len(entries))
 
 	return &Response{
 		ResponseMessage: response,
 		Characteristic:  bluetooth.CharHistoryLog,
+		Immediate:       true,
+	}, nil
+}
+
+// CreateHistoryLogHandler handles CreateHistoryLogRequest messages
+type CreateHistoryLogHandler struct {
+	bridge *pumpx2.Bridge
+}
+
+// NewCreateHistoryLogHandler creates a new create history log handler
+func NewCreateHistoryLogHandler(bridge *pumpx2.Bridge) *CreateHistoryLogHandler {
+	return &CreateHistoryLogHandler{
+		bridge: bridge,
+	}
+}
+
+// MessageType returns the message type this handler processes
+func (h *CreateHistoryLogHandler) MessageType() string {
+	return "CreateHistoryLogRequest"
+}
+
+// RequiresAuth returns true if this message requires authentication
+func (h *CreateHistoryLogHandler) RequiresAuth() bool {
+	return true
+}
+
+// HandleMessage processes a CreateHistoryLogRequest
+func (h *CreateHistoryLogHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
+	log.Infof("Handling CreateHistoryLogRequest: txID=%d", msg.TxID)
+
+	numberOfLogs := uint32(0)
+	if val, ok := msg.Cargo["numberOfLogs"].(float64); ok {
+		numberOfLogs = uint32(val)
+	}
+
+	log.Debugf("Create history log requested: numberOfLogs=%d", numberOfLogs)
+
+	response, err := h.bridge.EncodeMessage(
+		msg.TxID,
+		"CreateHistoryLogResponse",
+		map[string]interface{}{
+			"status": 0, // 0 = success
+		},
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode CreateHistoryLogResponse: %w", err)
+	}
+
+	return &Response{
+		ResponseMessage: response,
+		Characteristic:  bluetooth.CharHistoryLog,
+		Immediate:       true,
+	}, nil
+}
+
+// HistoryLogStatusHandler handles HistoryLogStatusRequest messages
+type HistoryLogStatusHandler struct {
+	bridge *pumpx2.Bridge
+}
+
+// NewHistoryLogStatusHandler creates a new history log status handler
+func NewHistoryLogStatusHandler(bridge *pumpx2.Bridge) *HistoryLogStatusHandler {
+	return &HistoryLogStatusHandler{
+		bridge: bridge,
+	}
+}
+
+// MessageType returns the message type this handler processes
+func (h *HistoryLogStatusHandler) MessageType() string {
+	return "HistoryLogStatusRequest"
+}
+
+// RequiresAuth returns true if this message requires authentication
+func (h *HistoryLogStatusHandler) RequiresAuth() bool {
+	return true
+}
+
+// HandleMessage processes a HistoryLogStatusRequest
+func (h *HistoryLogStatusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
+	log.Infof("Handling HistoryLogStatusRequest: txID=%d", msg.TxID)
+
+	numEntries := pumpState.GetHistoryLogCount()
+
+	log.Debugf("History log status: numEntries=%d", numEntries)
+
+	response, err := h.bridge.EncodeMessage(
+		msg.TxID,
+		"HistoryLogStatusResponse",
+		map[string]interface{}{
+			"numEntries":    numEntries,
+			"firstSequence": 0,
+			"lastSequence":  numEntries,
+		},
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode HistoryLogStatusResponse: %w", err)
+	}
+
+	return &Response{
+		ResponseMessage: response,
+		Characteristic:  bluetooth.CharCurrentStatus,
 		Immediate:       true,
 	}, nil
 }

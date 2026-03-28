@@ -13,7 +13,8 @@ type PumpState struct {
 	SerialNumber    string
 	Model           string
 	FirmwareVersion string
-	APIVersion      int
+	APIVersionMajor int
+	APIVersionMinor int
 
 	// Time
 	TimeSinceReset uint32 // seconds since pump was turned on
@@ -35,6 +36,12 @@ type PumpState struct {
 	Reservoir *ReservoirState
 	Battery   *BatteryState
 	Cartridge *CartridgeState
+
+	// CGM
+	CGM *CGMState
+
+	// History Log
+	HistoryLog *HistoryLogState
 
 	// Alerts/Alarms
 	ActiveAlerts []Alert
@@ -78,6 +85,29 @@ type CartridgeState struct {
 	LastPrime       time.Time
 }
 
+// CGMState represents CGM sensor state
+type CGMState struct {
+	SensorType    int    // CGM sensor type ordinal
+	SessionActive bool   // Whether a CGM session is active
+	CurrentEGV    int    // Current estimated glucose value (mg/dL)
+	TransmitterID string // CGM transmitter ID
+}
+
+// HistoryLogEntry represents a single history log entry
+type HistoryLogEntry struct {
+	Sequence  uint32
+	Type      string // e.g., "BasalDelivery", "BolusCompleted", "NewDay"
+	Timestamp time.Time
+	Data      map[string]interface{}
+}
+
+// HistoryLogState represents history log storage
+type HistoryLogState struct {
+	NextSequence uint32
+	Entries      []HistoryLogEntry
+	mutex        sync.Mutex
+}
+
 // Alert represents an alert or alarm
 type Alert struct {
 	ID           uint32
@@ -116,7 +146,8 @@ func NewPumpState() *PumpState {
 		SerialNumber:    "11223344",
 		Model:           "t:slim X2",
 		FirmwareVersion: "7.6.0.0",
-		APIVersion:      5,
+		APIVersionMajor: 2,
+		APIVersionMinor: 5,
 
 		TimeSinceReset: 0,
 		CurrentTime:    now,
@@ -151,6 +182,18 @@ func NewPumpState() *PumpState {
 		Cartridge: &CartridgeState{
 			DaysSinceChange: 0,
 			LastPrime:       now,
+		},
+
+		CGM: &CGMState{
+			SensorType:    1, // Dexcom G6
+			SessionActive: true,
+			CurrentEGV:    120,
+			TransmitterID: "80AB12",
+		},
+
+		HistoryLog: &HistoryLogState{
+			NextSequence: 1,
+			Entries:      make([]HistoryLogEntry, 0),
 		},
 
 		ActiveAlerts: make([]Alert, 0),
@@ -221,12 +264,20 @@ func (ps *PumpState) GetPairingCode() string {
 	return ps.PairingCode
 }
 
-// GetAPIVersion returns the API version
-func (ps *PumpState) GetAPIVersion() int {
+// GetAPIVersionMajor returns the API major version
+func (ps *PumpState) GetAPIVersionMajor() int {
 	ps.mutex.RLock()
 	defer ps.mutex.RUnlock()
 
-	return ps.APIVersion
+	return ps.APIVersionMajor
+}
+
+// GetAPIVersionMinor returns the API minor version
+func (ps *PumpState) GetAPIVersionMinor() int {
+	ps.mutex.RLock()
+	defer ps.mutex.RUnlock()
+
+	return ps.APIVersionMinor
 }
 
 // GetSerialNumber returns the serial number
@@ -319,4 +370,67 @@ func (ps *PumpState) IsBolusActive() bool {
 	defer ps.mutex.RUnlock()
 
 	return ps.Bolus.Active
+}
+
+// GetCGMSensorType returns the CGM sensor type
+func (ps *PumpState) GetCGMSensorType() int {
+	ps.mutex.RLock()
+	defer ps.mutex.RUnlock()
+
+	return ps.CGM.SensorType
+}
+
+// SetCGMSensorType sets the CGM sensor type
+func (ps *PumpState) SetCGMSensorType(sensorType int) {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+
+	ps.CGM.SensorType = sensorType
+	log.Infof("CGM sensor type set to %d", sensorType)
+}
+
+// GetCurrentEGV returns the current estimated glucose value
+func (ps *PumpState) GetCurrentEGV() int {
+	ps.mutex.RLock()
+	defer ps.mutex.RUnlock()
+
+	return ps.CGM.CurrentEGV
+}
+
+// GetHistoryLogCount returns the number of history log entries
+func (ps *PumpState) GetHistoryLogCount() int {
+	ps.HistoryLog.mutex.Lock()
+	defer ps.HistoryLog.mutex.Unlock()
+
+	return len(ps.HistoryLog.Entries)
+}
+
+// AddHistoryLogEntry adds a new history log entry.
+// Uses its own mutex so it can be called while pumpState mutex is held.
+func (ps *PumpState) AddHistoryLogEntry(entryType string, data map[string]interface{}) {
+	ps.HistoryLog.mutex.Lock()
+	defer ps.HistoryLog.mutex.Unlock()
+
+	entry := HistoryLogEntry{
+		Sequence:  ps.HistoryLog.NextSequence,
+		Type:      entryType,
+		Timestamp: time.Now(),
+		Data:      data,
+	}
+	ps.HistoryLog.Entries = append(ps.HistoryLog.Entries, entry)
+	ps.HistoryLog.NextSequence++
+}
+
+// GetHistoryLogEntries returns history log entries in a sequence range
+func (ps *PumpState) GetHistoryLogEntries(startSeq, endSeq uint32) []HistoryLogEntry {
+	ps.HistoryLog.mutex.Lock()
+	defer ps.HistoryLog.mutex.Unlock()
+
+	var entries []HistoryLogEntry
+	for _, entry := range ps.HistoryLog.Entries {
+		if entry.Sequence >= startSeq && entry.Sequence <= endSeq {
+			entries = append(entries, entry)
+		}
+	}
+	return entries
 }
