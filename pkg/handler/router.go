@@ -154,6 +154,38 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewStreamDataReadinessHandler(r.bridge))
 	r.RegisterHandler(NewFactoryResetBHandler(r.bridge))
 
+	// Bolus cancel handler (used by controlX2 instead of BolusTermination)
+	r.RegisterHandler(NewCancelBolusHandler(r.bridge))
+
+	// Pump suspend/resume handlers
+	r.RegisterHandler(NewSuspendPumpingHandler(r.bridge))
+	r.RegisterHandler(NewResumePumpingHandler(r.bridge))
+
+	// Temp rate control handlers
+	r.RegisterHandler(NewSetTempRateHandler(r.bridge))
+	r.RegisterHandler(NewStopTempRateHandler(r.bridge))
+
+	// Cartridge change flow handlers
+	r.RegisterHandler(NewCartridgeHandler(r.bridge, "EnterChangeCartridgeModeRequest"))
+	r.RegisterHandler(NewCartridgeHandler(r.bridge, "ExitChangeCartridgeModeRequest"))
+	r.RegisterHandler(NewCartridgeHandler(r.bridge, "EnterFillTubingModeRequest"))
+	r.RegisterHandler(NewCartridgeHandler(r.bridge, "ExitFillTubingModeRequest"))
+	r.RegisterHandler(NewCartridgeHandler(r.bridge, "FillCannulaRequest"))
+
+	// Simple control handlers (log and return success)
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "DismissNotificationRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "PlaySoundRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "ChangeTimeDateRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "DisconnectPumpRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "UserInteractionRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "StreamDataPreflightRequest"))
+
+	// Additional status handlers used by controlX2
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "IDPSegmentRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "IDPSettingsRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "GetSavedG7PairingCodeRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CurrentActiveIdpValuesRequest", true))
+
 	// Keep ProfileBasalHandler as custom since it uses pump state
 	r.RegisterHandler(NewProfileBasalHandler(r.bridge))
 

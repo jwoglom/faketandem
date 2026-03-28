@@ -43,6 +43,9 @@ type PumpState struct {
 	// History Log
 	HistoryLog *HistoryLogState
 
+	// Pump mode
+	PumpingSuspended bool
+
 	// Alerts/Alarms
 	ActiveAlerts []Alert
 
@@ -433,4 +436,18 @@ func (ps *PumpState) GetHistoryLogEntries(startSeq, endSeq uint32) []HistoryLogE
 		}
 	}
 	return entries
+}
+
+// SetPumpingSuspended sets the pumping suspended state
+func (ps *PumpState) SetPumpingSuspended(suspended bool) {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+	ps.PumpingSuspended = suspended
+}
+
+// IsPumpingSuspended returns whether pumping is suspended
+func (ps *PumpState) IsPumpingSuspended() bool {
+	ps.mutex.RLock()
+	defer ps.mutex.RUnlock()
+	return ps.PumpingSuspended
 }

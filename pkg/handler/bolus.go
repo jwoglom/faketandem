@@ -412,3 +412,63 @@ func (h *BolusPermissionReleaseHandler) HandleMessage(msg *pumpx2.ParsedMessage,
 		Immediate:       true,
 	}, nil
 }
+
+// CancelBolusHandler handles CancelBolusRequest messages (used by controlX2)
+type CancelBolusHandler struct {
+	bridge *pumpx2.Bridge
+}
+
+// NewCancelBolusHandler creates a new cancel bolus handler
+func NewCancelBolusHandler(bridge *pumpx2.Bridge) *CancelBolusHandler {
+	return &CancelBolusHandler{
+		bridge: bridge,
+	}
+}
+
+// MessageType returns the message type this handler processes
+func (h *CancelBolusHandler) MessageType() string {
+	return "CancelBolusRequest"
+}
+
+// RequiresAuth returns true if this message requires authentication
+func (h *CancelBolusHandler) RequiresAuth() bool {
+	return true
+}
+
+// HandleMessage processes a CancelBolusRequest
+func (h *CancelBolusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
+	log.Infof("Handling CancelBolusRequest: txID=%d", msg.TxID)
+
+	if !pumpState.Bolus.Active {
+		log.Warn("No active bolus to cancel")
+	} else {
+		log.Infof("Canceling bolus: delivered %.2f of %.2f units",
+			pumpState.Bolus.UnitsDelivered, pumpState.Bolus.UnitsTotal)
+	}
+
+	stateChanges := []StateChange{
+		{
+			Type: StateChangeBolus,
+			Data: &state.BolusState{
+				Active: false,
+			},
+		},
+	}
+
+	response, err := h.bridge.EncodeMessage(
+		msg.TxID,
+		"CancelBolusResponse",
+		map[string]interface{}{
+			"status": 0,
+		},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode CancelBolusResponse: %w", err)
+	}
+
+	return &Response{
+		ResponseMessage: response,
+		Immediate:       true,
+		StateChanges:    stateChanges,
+	}, nil
+}

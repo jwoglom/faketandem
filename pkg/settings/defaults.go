@@ -23,6 +23,7 @@ func RegisterDefaults(manager *Manager) {
 	registerGlobalSettingsDefaults(manager)
 	registerPumpInfoDefaults(manager)
 	registerExampleDefaults(manager)
+	registerAdditionalStatusDefaults(manager)
 
 	log.Info("Registered default settings configurations")
 }
@@ -286,6 +287,42 @@ func registerGlobalSettingsDefaults(manager *Manager) {
 	// SendTipsControlGenericTestRequest — control message
 	registerConstant(manager, "SendTipsControlGenericTestRequest", map[string]interface{}{
 		"status": 0,
+	})
+}
+
+// registerAdditionalStatusDefaults registers defaults for additional status handlers
+func registerAdditionalStatusDefaults(manager *Manager) {
+	registerConstant(manager, "IDPSegmentRequest", map[string]interface{}{
+		"status":     0,
+		"idpId":      1,
+		"segmentId":  0,
+		"startTime":  0,
+		"basalRate":  850,
+		"carbRatio":  10000,
+		"correction": 50,
+		"targetBG":   110,
+	})
+
+	registerConstant(manager, "IDPSettingsRequest", map[string]interface{}{
+		"status":       0,
+		"name":         "Profile 1",
+		"idpId":        1,
+		"numSegments":  1,
+		"maxBolus":     25000,
+		"insulinDuration": 300,
+	})
+
+	registerConstant(manager, "GetSavedG7PairingCodeRequest", map[string]interface{}{
+		"pairingCode": "",
+	})
+
+	registerConstant(manager, "CurrentActiveIdpValuesRequest", map[string]interface{}{
+		"status":    0,
+		"idpId":     1,
+		"basalRate": 850,
+		"carbRatio": 10000,
+		"isf":       50,
+		"targetBG":  110,
 	})
 }
 
