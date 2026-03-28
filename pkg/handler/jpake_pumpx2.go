@@ -352,7 +352,11 @@ func (j *PumpX2JPAKEAuthenticator) processRound3(requestData map[string]interfac
 	j.round = 3
 
 	// Extract server nonce from round3 response
-	if serverNonceHex, ok := j.round3Response["deviceKeyNonce"].(string); ok {
+	// pumpX2 v1.8.0+ renamed "deviceKeyNonce" to "nonce"
+	if serverNonceHex, ok := j.round3Response["nonce"].(string); ok {
+		j.serverNonce = []byte(serverNonceHex)
+	} else if serverNonceHex, ok := j.round3Response["deviceKeyNonce"].(string); ok {
+		// Fallback for older pumpX2 versions
 		j.serverNonce = []byte(serverNonceHex)
 	}
 

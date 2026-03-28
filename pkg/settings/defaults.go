@@ -17,6 +17,10 @@ func RegisterDefaults(manager *Manager) {
 	registerSettingsDefaults(manager)
 	registerPollingDefaults(manager)
 	registerQualifyingEventDefaults(manager)
+	registerNotificationDefaults(manager)
+	registerControlIQDefaults(manager)
+	registerBolusAndBasalDefaults(manager)
+	registerGlobalSettingsDefaults(manager)
 	registerPumpInfoDefaults(manager)
 	registerExampleDefaults(manager)
 
@@ -148,6 +152,140 @@ func registerPumpInfoDefaults(manager *Manager) {
 
 	registerConstant(manager, "CommonSoftwareInfoRequest", map[string]interface{}{
 		"commonSwVer": "1.0.0.0",
+	})
+}
+
+// registerNotificationDefaults registers defaults for notification bundle / alarm / malfunction handlers
+func registerNotificationDefaults(manager *Manager) {
+	// HighestAamRequest (opcode 120) — from ALARM qualifying event
+	registerConstant(manager, "HighestAamRequest", map[string]interface{}{
+		"highestAam": 0, // no active alarms
+	})
+
+	// ActiveAamBitsRequest — from ALARM qualifying event (two variants with different params)
+	registerConstant(manager, "ActiveAamBitsRequest", map[string]interface{}{
+		"activeBitmask": 0, // no active alarm/alert bits
+	})
+
+	// MalfunctionStatusRequest (opcode 118) — from MALFUNCTION qualifying event
+	registerConstant(manager, "MalfunctionStatusRequest", map[string]interface{}{
+		"malfunctionBitmask": 0, // no malfunctions
+	})
+
+	// ReminderStatusRequest — from REMINDER qualifying event
+	registerConstant(manager, "ReminderStatusRequest", map[string]interface{}{
+		"reminderBitmask": 0, // no active reminders
+	})
+
+	// CGMAlertStatusRequest — from CGM_ALERT qualifying event
+	registerConstant(manager, "CGMAlertStatusRequest", map[string]interface{}{
+		"cgmAlertBitmask": 0, // no CGM alerts
+	})
+}
+
+// registerControlIQDefaults registers defaults for ControlIQ info and sleep schedule
+func registerControlIQDefaults(manager *Manager) {
+	// ControlIQInfoV1Request — from HOME_SCREEN_CHANGE, CONTROL_IQ_INFO qualifying events
+	registerConstant(manager, "ControlIQInfoV1Request", map[string]interface{}{
+		"controlIQEnabled": true,
+		"currentUserMode":  0, // normal mode
+		"weight":           70,
+		"totalDailyInsulin": 40,
+	})
+
+	// ControlIQInfoV2Request — newer variant
+	registerConstant(manager, "ControlIQInfoV2Request", map[string]interface{}{
+		"controlIQEnabled": true,
+		"currentUserMode":  0,
+		"weight":           70,
+		"totalDailyInsulin": 40,
+	})
+
+	// ControlIQSleepScheduleRequest — from CONTROL_IQ_INFO, CONTROL_IQ_SLEEP qualifying events
+	registerConstant(manager, "ControlIQSleepScheduleRequest", map[string]interface{}{
+		"enabled":   false,
+		"startTime": 0,
+		"endTime":   0,
+	})
+
+	// BasalIQStatusRequest — from BASAL_IQ_STATUS qualifying event
+	registerConstant(manager, "BasalIQStatusRequest", map[string]interface{}{
+		"enabled": true,
+		"status":  0,
+	})
+
+	// NonControlIQIOBRequest — IOB for non-ControlIQ pumps
+	registerConstant(manager, "NonControlIQIOBRequest", map[string]interface{}{
+		"pumpDisplayedIOB": 250,
+	})
+}
+
+// registerBolusAndBasalDefaults registers defaults for extended bolus and temp rate handlers
+func registerBolusAndBasalDefaults(manager *Manager) {
+	// ExtendedBolusStatusRequest — from BOLUS_CHANGE qualifying event
+	registerConstant(manager, "ExtendedBolusStatusRequest", map[string]interface{}{
+		"status": 0, // no extended bolus active
+	})
+
+	// ExtendedBolusStatusV2Request — V2 variant
+	registerConstant(manager, "ExtendedBolusStatusV2Request", map[string]interface{}{
+		"status": 0,
+	})
+
+	// LastBolusStatusV3Request — V3 variant (renamed from LAST_BOLUS_STATUS_C)
+	registerConstant(manager, "LastBolusStatusV3Request", map[string]interface{}{
+		"lastBolusStatus": 0,
+	})
+
+	// TempRateRequest — from BASAL_CHANGE qualifying event
+	registerConstant(manager, "TempRateRequest", map[string]interface{}{
+		"tempRateActive": false,
+	})
+
+	// TempRateStatusRequest — temp rate status
+	registerConstant(manager, "TempRateStatusRequest", map[string]interface{}{
+		"tempRateActive": false,
+	})
+
+	// LastBGRequest — from BG qualifying event
+	registerConstant(manager, "LastBGRequest", map[string]interface{}{
+		"bgValue":   0,
+		"timestamp": 0,
+	})
+
+	// BolusPermissionChangeReasonRequest — from BOLUS_PERMISSION_REVOKED qualifying event
+	registerConstant(manager, "BolusPermissionChangeReasonRequest", map[string]interface{}{
+		"reason": 0,
+	})
+}
+
+// registerGlobalSettingsDefaults registers defaults for global pump settings messages
+func registerGlobalSettingsDefaults(manager *Manager) {
+	// GlobalMaxBolusSettingsRequest — from GLOBAL_PUMP_SETTINGS qualifying event
+	registerConstant(manager, "GlobalMaxBolusSettingsRequest", map[string]interface{}{
+		"maxBolus": 2500, // 25.0 units * 100
+	})
+
+	// BasalLimitSettingsRequest — from GLOBAL_PUMP_SETTINGS qualifying event
+	registerConstant(manager, "BasalLimitSettingsRequest", map[string]interface{}{
+		"maxBasalRate": 500, // 5.0 U/hr * 100
+	})
+
+	// LocalizationRequest — from GLOBAL_PUMP_SETTINGS qualifying event
+	registerConstant(manager, "LocalizationRequest", map[string]interface{}{
+		"language": 0, // English
+		"units":    0, // mg/dL
+	})
+
+	// PumpSettingsRequest — from GLOBAL_PUMP_SETTINGS qualifying event
+	registerConstant(manager, "PumpSettingsRequest", map[string]interface{}{
+		"lowInsulinThreshold": 20,
+		"autoOff":             false,
+	})
+
+	// SendTipsControlGenericTestRequest — control message
+	registerConstant(manager, "SendTipsControlGenericTestRequest", map[string]interface{}{
+		"status": 0,
 	})
 }
 

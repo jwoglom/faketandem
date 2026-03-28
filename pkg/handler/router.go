@@ -113,6 +113,36 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ProfileStatusRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "LastBolusStatusV2Request", true))
 
+	// Notification/alarm/malfunction handlers
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "HighestAamRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ActiveAamBitsRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "MalfunctionStatusRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ReminderStatusRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMAlertStatusRequest", true))
+
+	// ControlIQ info and sleep schedule handlers
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ControlIQInfoV1Request", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ControlIQInfoV2Request", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ControlIQSleepScheduleRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "BasalIQStatusRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "NonControlIQIOBRequest", true))
+
+	// Bolus and basal handlers
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ExtendedBolusStatusRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ExtendedBolusStatusV2Request", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "LastBolusStatusV3Request", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "TempRateRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "TempRateStatusRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "LastBGRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "BolusPermissionChangeReasonRequest", true))
+
+	// Global pump settings handlers
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "GlobalMaxBolusSettingsRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "BasalLimitSettingsRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "LocalizationRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "PumpSettingsRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "SendTipsControlGenericTestRequest", true))
+
 	// Pump info handlers
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "PumpFeaturesV2Request", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "PumpVersionRequest", false))
