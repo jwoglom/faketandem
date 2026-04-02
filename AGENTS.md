@@ -371,3 +371,32 @@ golangci-lint run && go vet ./... && go test -race ./...
 5. Commit and push
 
 The pre-push hook will catch any missed issues!
+
+## Cursor Cloud specific instructions
+
+### Project overview
+faketandem is a Tandem insulin pump BLE emulator written in Go. It has a single binary entry point at the repo root (`main.go`), an HTTP/WebSocket API on `:8080`, and a static web UI in `ui/`.
+
+### External dependency: pumpX2
+The application requires the external [pumpX2](https://github.com/jwoglom/pumpX2) Java repository for protocol message parsing. The update script clones it to `/workspace/pumpX2` (branch `dev`). Pass it via `PUMPX2_PATH=/workspace/pumpX2` or `-pumpx2-path /workspace/pumpX2`.
+
+### BLE hardware limitation
+The binary calls `log.Fatalf` when BLE adapter initialization fails (`bluetooth_linux.go`). In the Cloud Agent VM there is no Bluetooth adapter, so the app exits after initializing all non-hardware components (config, pumpX2 bridge, pump state, protocol). This is expected — the app is designed for Raspberry Pi 3+. All unit tests and linting still work fully without BLE hardware.
+
+### Key commands
+| Task | Command |
+|---|---|
+| Build | `go build -o faketandem .` |
+| Lint | `golangci-lint run --timeout=5m` |
+| Lint fix | `golangci-lint run --fix --timeout=5m` |
+| All tests (unit + integration) | `PUMPX2_PATH=/workspace/pumpX2 go test -v -race -timeout 5m ./...` |
+| Run app | `PUMPX2_PATH=/workspace/pumpX2 ./faketandem -q` |
+
+### Go dependencies
+All Go dependencies are vendored in `vendor/`. No `go mod download` is needed.
+
+### Important: always set PUMPX2_PATH
+Always run tests with `PUMPX2_PATH=/workspace/pumpX2` to avoid skipping integration tests. Without this env var, `TestPumpX2JPAKEAuthenticator_FullFlow` is silently skipped.
+
+### Pre-push hook
+`scripts/pre-push.sh` runs `golangci-lint --fix` then verifies no issues remain. It exits gracefully if `golangci-lint` is not installed. When pushing with `--no-verify`, the hook is skipped.
