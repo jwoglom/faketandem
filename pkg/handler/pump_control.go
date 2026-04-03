@@ -34,8 +34,6 @@ func (h *SuspendPumpingHandler) RequiresAuth() bool {
 func (h *SuspendPumpingHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling SuspendPumpingRequest: txID=%d", msg.TxID)
 
-	pumpState.SetPumpingSuspended(true)
-
 	response, err := h.bridge.EncodeMessage(
 		msg.TxID,
 		"SuspendPumpingResponse",
@@ -50,6 +48,9 @@ func (h *SuspendPumpingHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpSta
 	return &Response{
 		ResponseMessage: response,
 		Immediate:       true,
+		StateChanges: []StateChange{
+			{Type: StateChangeSuspend, Data: true},
+		},
 	}, nil
 }
 
@@ -77,8 +78,6 @@ func (h *ResumePumpingHandler) RequiresAuth() bool {
 func (h *ResumePumpingHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling ResumePumpingRequest: txID=%d", msg.TxID)
 
-	pumpState.SetPumpingSuspended(false)
-
 	response, err := h.bridge.EncodeMessage(
 		msg.TxID,
 		"ResumePumpingResponse",
@@ -93,6 +92,9 @@ func (h *ResumePumpingHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpStat
 	return &Response{
 		ResponseMessage: response,
 		Immediate:       true,
+		StateChanges: []StateChange{
+			{Type: StateChangeSuspend, Data: false},
+		},
 	}, nil
 }
 

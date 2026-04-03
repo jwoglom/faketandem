@@ -67,4 +67,6 @@ const (
 	StateChangeAlert
 	// StateChangeTime indicates time since reset changed
 	StateChangeTime
+	// StateChangeSuspend indicates pump suspend/resume
+	StateChangeSuspend
 )

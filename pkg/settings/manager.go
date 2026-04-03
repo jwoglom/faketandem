@@ -207,6 +207,30 @@ func (m *Manager) GetAllConfigs() map[string]*ResponseConfig {
 	return result
 }
 
+// UpdateConstant updates the constant value for a message type.
+// Used by settings write handlers to update read-back values.
+func (m *Manager) UpdateConstant(messageType string, values map[string]interface{}) error {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	config, exists := m.configs[messageType]
+	if !exists {
+		return fmt.Errorf("no configuration for message type: %s", messageType)
+	}
+
+	if config.Mode != ModeConstant {
+		return fmt.Errorf("cannot update non-constant config for %s", messageType)
+	}
+
+	// Merge new values into existing
+	for k, v := range values {
+		config.Value[k] = v
+	}
+
+	log.Infof("Updated constant values for %s", messageType)
+	return nil
+}
+
 // ResetState resets the state (current index, start time) for a message type
 func (m *Manager) ResetState(messageType string) error {
 	m.mutex.Lock()

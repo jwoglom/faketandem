@@ -45,6 +45,7 @@ type PumpState struct {
 
 	// Pump mode
 	PumpingSuspended bool
+	ControlIQMode    int // 0=Normal, 1=Sleep, 2=Exercise
 
 	// Alerts/Alarms
 	ActiveAlerts []Alert
@@ -450,4 +451,57 @@ func (ps *PumpState) IsPumpingSuspended() bool {
 	ps.mutex.RLock()
 	defer ps.mutex.RUnlock()
 	return ps.PumpingSuspended
+}
+
+// RLock acquires a read lock on the pump state
+func (ps *PumpState) RLock() {
+	ps.mutex.RLock()
+}
+
+// RUnlock releases the read lock on the pump state
+func (ps *PumpState) RUnlock() {
+	ps.mutex.RUnlock()
+}
+
+// SetBasalState updates the basal state
+func (ps *PumpState) SetBasalState(basal *BasalState) {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+	ps.Basal = basal
+}
+
+// SetReservoirLevel updates the reservoir level
+func (ps *PumpState) SetReservoirLevel(units float64) {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+	ps.Reservoir.CurrentUnits = units
+}
+
+// SetBatteryLevel updates the battery percentage
+func (ps *PumpState) SetBatteryLevel(pct int) {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+	ps.Battery.Percentage = pct
+}
+
+// AddAlert adds an alert to the active alerts list
+func (ps *PumpState) AddAlert(alert Alert) {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+	ps.ActiveAlerts = append(ps.ActiveAlerts, alert)
+}
+
+// SetControlIQMode sets the ControlIQ mode
+func (ps *PumpState) SetControlIQMode(mode int) {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+	ps.ControlIQMode = mode
+	log.Infof("ControlIQ mode set to %d", mode)
+}
+
+// GetControlIQMode returns the ControlIQ mode
+func (ps *PumpState) GetControlIQMode() int {
+	ps.mutex.RLock()
+	defer ps.mutex.RUnlock()
+	return ps.ControlIQMode
 }
