@@ -400,6 +400,9 @@ func (r *Router) applyBolusChange(change StateChange) {
 	}
 	if bolusState.Active {
 		r.pumpState.StartBolus(bolusState.UnitsTotal, bolusState.BolusID)
+		r.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryBolusActivated, "BolusActivated", map[string]interface{}{
+			"bolusId": bolusState.BolusID, "units": bolusState.UnitsTotal,
+		})
 		if r.qeNotifier != nil {
 			if err := r.qeNotifier.NotifyBolusStart(bolusState.BolusID, bolusState.UnitsTotal); err != nil {
 				log.Warnf("Failed to notify bolus start: %v", err)
@@ -426,6 +429,11 @@ func (r *Router) applyBasalChange(change StateChange) {
 	oldRate := r.pumpState.GetBasalRate()
 	r.pumpState.SetBasalState(basalState)
 	newRate := r.pumpState.GetBasalRate()
+	if basalState.TempBasalActive {
+		r.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryTempRateActivated, "TempRateActivated", map[string]interface{}{
+			"tempRate": basalState.TempBasalRate, "normalRate": basalState.CurrentRate,
+		})
+	}
 	if r.qeNotifier != nil {
 		if err := r.qeNotifier.NotifyBasalRateChange(oldRate, newRate, basalState.TempBasalActive); err != nil {
 			log.Warnf("Failed to notify basal rate change: %v", err)
@@ -450,6 +458,11 @@ func (r *Router) applySuspendChange(change StateChange) {
 		return
 	}
 	r.pumpState.SetPumpingSuspended(suspended)
+	if suspended {
+		r.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryPumpingSuspended, "PumpingSuspended", nil)
+	} else {
+		r.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryPumpingResumed, "PumpingResumed", nil)
+	}
 	if r.qeNotifier == nil {
 		return
 	}

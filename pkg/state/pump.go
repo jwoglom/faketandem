@@ -100,7 +100,8 @@ type CGMState struct {
 // HistoryLogEntry represents a single history log entry
 type HistoryLogEntry struct {
 	Sequence  uint32
-	Type      string // e.g., "BasalDelivery", "BolusCompleted", "NewDay"
+	TypeID    int    // Numeric type ID matching pumpX2 history log types
+	Type      string // Human-readable type name
 	Timestamp time.Time
 	Data      map[string]interface{}
 }
@@ -412,11 +413,17 @@ func (ps *PumpState) GetHistoryLogCount() int {
 // AddHistoryLogEntry adds a new history log entry.
 // Uses its own mutex so it can be called while pumpState mutex is held.
 func (ps *PumpState) AddHistoryLogEntry(entryType string, data map[string]interface{}) {
+	ps.AddHistoryLogEntryWithTypeID(0, entryType, data)
+}
+
+// AddHistoryLogEntryWithTypeID adds a history log entry with a specific type ID.
+func (ps *PumpState) AddHistoryLogEntryWithTypeID(typeID int, entryType string, data map[string]interface{}) {
 	ps.HistoryLog.mutex.Lock()
 	defer ps.HistoryLog.mutex.Unlock()
 
 	entry := HistoryLogEntry{
 		Sequence:  ps.HistoryLog.NextSequence,
+		TypeID:    typeID,
 		Type:      entryType,
 		Timestamp: time.Now(),
 		Data:      data,
