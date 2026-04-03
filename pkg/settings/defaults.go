@@ -23,6 +23,7 @@ func RegisterDefaults(manager *Manager) {
 	registerGlobalSettingsDefaults(manager)
 	registerPumpInfoDefaults(manager)
 	registerExampleDefaults(manager)
+	registerAdditionalStatusDefaults(manager)
 
 	log.Info("Registered default settings configurations")
 }
@@ -285,6 +286,106 @@ func registerGlobalSettingsDefaults(manager *Manager) {
 
 	// SendTipsControlGenericTestRequest — control message
 	registerConstant(manager, "SendTipsControlGenericTestRequest", map[string]interface{}{
+		"status": 0,
+	})
+}
+
+// registerAdditionalStatusDefaults registers defaults for additional status handlers
+func registerAdditionalStatusDefaults(manager *Manager) {
+	registerConstant(manager, "IDPSegmentRequest", map[string]interface{}{
+		"status":     0,
+		"idpId":      1,
+		"segmentId":  0,
+		"startTime":  0,
+		"basalRate":  850,
+		"carbRatio":  10000,
+		"correction": 50,
+		"targetBG":   110,
+	})
+
+	registerConstant(manager, "IDPSettingsRequest", map[string]interface{}{
+		"status":       0,
+		"name":         "Profile 1",
+		"idpId":        1,
+		"numSegments":  1,
+		"maxBolus":     25000,
+		"insulinDuration": 300,
+	})
+
+	registerConstant(manager, "GetSavedG7PairingCodeRequest", map[string]interface{}{
+		"pairingCode": "",
+	})
+
+	registerConstant(manager, "CurrentActiveIdpValuesRequest", map[string]interface{}{
+		"status":    0,
+		"idpId":     1,
+		"basalRate": 850,
+		"carbRatio": 10000,
+		"isf":       50,
+		"targetBG":  110,
+	})
+
+	// Phase 5: Missing status query variants
+	registerConstant(manager, "PumpFeaturesV1Request", map[string]interface{}{
+		"features": 0,
+	})
+	registerConstant(manager, "PumpVersionBRequest", map[string]interface{}{
+		"armSoftwareVersion":   "3553172181",
+		"mspsoftwareVersion":   "0",
+		"configVersion":        "0",
+		"bleHardwareVersion":   "0",
+		"bleFirmwareVersion":   "0",
+		"bleModelNumber":       "0",
+		"bsoftwareVersion":     "0",
+		"motorModuleVersion":   "0",
+	})
+	registerConstant(manager, "CgmStatusV2Request", map[string]interface{}{
+		"cgmSensorType":      1,
+		"sessionActive":      true,
+		"transmitterBattery": 100,
+		"sessionState":       1,
+	})
+	registerConstant(manager, "CurrentEgvGuiDataV2Request", map[string]interface{}{
+		"egv":           120,
+		"trendRate":     0,
+		"trendArrow":    4,
+		"status":        0,
+		"timeSinceReset": 0,
+	})
+	registerConstant(manager, "LastBolusStatusRequest", map[string]interface{}{
+		"lastBolusStatus": 0,
+		"bolusId":         0,
+		"deliveredVolume": 0,
+		"totalVolume":     0,
+	})
+	registerConstant(manager, "CGMHardwareInfoRequest", map[string]interface{}{
+		"transmitterBattery": 100,
+		"transmitterId":      "80AB12",
+	})
+	registerConstant(manager, "CGMGlucoseAlertSettingsRequest", map[string]interface{}{
+		"highAlertEnabled": false,
+		"highAlertValue":   250,
+		"lowAlertEnabled":  false,
+		"lowAlertValue":    70,
+	})
+	registerConstant(manager, "CGMOORAlertSettingsRequest", map[string]interface{}{
+		"enabled": false,
+	})
+	registerConstant(manager, "CGMRateAlertSettingsRequest", map[string]interface{}{
+		"riseEnabled": false,
+		"fallEnabled": false,
+	})
+	registerConstant(manager, "BasalIQAlertInfoRequest", map[string]interface{}{
+		"alertActive": false,
+	})
+	registerConstant(manager, "RemindersRequest", map[string]interface{}{
+		"reminders": []interface{}{},
+	})
+	registerConstant(manager, "QuickBolusSettingsRequest", map[string]interface{}{
+		"enabled":   false,
+		"increment": 500,
+	})
+	registerConstant(manager, "CgmSupportPackageStatusRequest", map[string]interface{}{
 		"status": 0,
 	})
 }

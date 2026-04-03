@@ -96,14 +96,15 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "TherapySettingsGlobalsRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ControlIQGlobalsRequest", true))
 
-	// Polling status handlers (controlX2 polls every 5 min)
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CurrentBatteryV2Request", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ControlIQIOBRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "InsulinStatusRequest", true))
+	// Dynamic polling status handlers (controlX2 polls every 5 min)
+	r.RegisterHandler(NewCurrentBatteryHandler(r.bridge, "V2"))
+	r.RegisterHandler(NewCurrentBatteryHandler(r.bridge, "V1"))
+	r.RegisterHandler(NewControlIQIOBHandler(r.bridge, "ControlIQIOBRequest"))
+	r.RegisterHandler(NewInsulinStatusHandler(r.bridge))
 
-	// Qualifying event status handlers
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CurrentBasalStatusRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CurrentBolusStatusRequest", true))
+	// Dynamic qualifying event status handlers
+	r.RegisterHandler(NewCurrentBasalStatusHandler(r.bridge))
+	r.RegisterHandler(NewCurrentBolusStatusHandler(r.bridge))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CurrentEGVGuiDataRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "HomeScreenMirrorRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMStatusRequest", true))
@@ -125,14 +126,14 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ControlIQInfoV2Request", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ControlIQSleepScheduleRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "BasalIQStatusRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "NonControlIQIOBRequest", true))
+	r.RegisterHandler(NewControlIQIOBHandler(r.bridge, "NonControlIQIOBRequest"))
 
 	// Bolus and basal handlers
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ExtendedBolusStatusRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ExtendedBolusStatusV2Request", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "LastBolusStatusV3Request", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "TempRateRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "TempRateStatusRequest", true))
+	r.RegisterHandler(NewTempRateStatusHandler(r.bridge))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "LastBGRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "BolusPermissionChangeReasonRequest", true))
 
@@ -153,6 +154,89 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewSetSensorTypeHandler(r.bridge))
 	r.RegisterHandler(NewStreamDataReadinessHandler(r.bridge))
 	r.RegisterHandler(NewFactoryResetBHandler(r.bridge))
+
+	// Bolus cancel handler (used by controlX2 instead of BolusTermination)
+	r.RegisterHandler(NewCancelBolusHandler(r.bridge))
+
+	// Pump suspend/resume handlers
+	r.RegisterHandler(NewSuspendPumpingHandler(r.bridge))
+	r.RegisterHandler(NewResumePumpingHandler(r.bridge))
+
+	// Temp rate control handlers
+	r.RegisterHandler(NewSetTempRateHandler(r.bridge))
+	r.RegisterHandler(NewStopTempRateHandler(r.bridge))
+
+	// Cartridge change flow handlers
+	r.RegisterHandler(NewCartridgeHandler(r.bridge, "EnterChangeCartridgeModeRequest"))
+	r.RegisterHandler(NewCartridgeHandler(r.bridge, "ExitChangeCartridgeModeRequest"))
+	r.RegisterHandler(NewCartridgeHandler(r.bridge, "EnterFillTubingModeRequest"))
+	r.RegisterHandler(NewCartridgeHandler(r.bridge, "ExitFillTubingModeRequest"))
+	r.RegisterHandler(NewCartridgeHandler(r.bridge, "FillCannulaRequest"))
+
+	// Simple control handlers (log and return success)
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "DismissNotificationRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "PlaySoundRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "ChangeTimeDateRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "DisconnectPumpRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "UserInteractionRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "StreamDataPreflightRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "ActivateShelfModeRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "PrimeTubingSuspendRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "FactoryResetRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "AdditionalBolusRequest"))
+
+	// Settings write handlers (write value, update readback)
+	r.RegisterHandler(NewSetModesHandler(r.bridge))
+	r.RegisterHandler(NewSettingsWriteHandler(r.bridge, r.settingsManager, "ChangeControlIQSettingsRequest", "ControlIQSettingsRequest"))
+	r.RegisterHandler(NewSettingsWriteHandler(r.bridge, r.settingsManager, "SetMaxBolusLimitRequest", "GlobalMaxBolusSettingsRequest"))
+	r.RegisterHandler(NewSettingsWriteHandler(r.bridge, r.settingsManager, "SetMaxBasalLimitRequest", "BasalLimitSettingsRequest"))
+	r.RegisterHandler(NewSettingsWriteHandler(r.bridge, r.settingsManager, "SetSleepScheduleRequest", "ControlIQSleepScheduleRequest"))
+	r.RegisterHandler(NewSettingsWriteHandler(r.bridge, r.settingsManager, "SetQuickBolusSettingsRequest", ""))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetPumpSoundsRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetPumpAlertSnoozeRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetAutoOffAlertRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetBgReminderRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetSiteChangeReminderRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetMissedMealBolusReminderRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetLowInsulinAlertRequest"))
+
+	// IDP management handlers
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "CreateIDPRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetIDPSettingsRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetIDPSegmentRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetActiveIDPRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "DeleteIDPRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "RenameIDPRequest"))
+
+	// CGM configuration handlers
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetDexcomG7PairingCodeRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetG6TransmitterIdRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "StartDexcomG6SensorSessionRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "StopDexcomCGMSensorSessionRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "CgmHighLowAlertRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "CgmRiseFallAlertRequest"))
+	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "CgmOutOfRangeAlertRequest"))
+
+	// Additional status handlers used by controlX2
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "IDPSegmentRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "IDPSettingsRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "GetSavedG7PairingCodeRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CurrentActiveIdpValuesRequest", true))
+
+	// Phase 5: Missing status query variants
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "PumpFeaturesV1Request", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "PumpVersionBRequest", false))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CgmStatusV2Request", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CurrentEgvGuiDataV2Request", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "LastBolusStatusRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMHardwareInfoRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMGlucoseAlertSettingsRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMOORAlertSettingsRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMRateAlertSettingsRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "BasalIQAlertInfoRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "RemindersRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "QuickBolusSettingsRequest", true))
+	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CgmSupportPackageStatusRequest", true))
 
 	// Keep ProfileBasalHandler as custom since it uses pump state
 	r.RegisterHandler(NewProfileBasalHandler(r.bridge))
@@ -278,45 +362,118 @@ func (r *Router) applyStateChange(change StateChange) {
 
 	switch change.Type {
 	case StateChangeAuth:
-		if authKey, ok := change.Data.([]byte); ok {
-			r.pumpState.SetAuthenticated(authKey)
-			// Update bridge with auth key
-			r.bridge.SetAuthenticationKey(hex.EncodeToString(authKey))
-		}
-
+		r.applyAuthChange(change)
 	case StateChangeTime:
 		r.pumpState.UpdateTimeSinceReset()
-
 	case StateChangeBolus:
-		if bolusState, ok := change.Data.(*state.BolusState); ok {
-			if bolusState.Active {
-				r.pumpState.StartBolus(bolusState.UnitsTotal, bolusState.BolusID)
-				// Notify bolus start
-				if r.qeNotifier != nil {
-					if err := r.qeNotifier.NotifyBolusStart(bolusState.BolusID, bolusState.UnitsTotal); err != nil {
-						log.Warnf("Failed to notify bolus start: %v", err)
-					}
-				}
-			} else {
-				// Get current bolus info before stopping
-				currentBolus := r.pumpState.Bolus
-				r.pumpState.StopBolus()
-				// Notify bolus canceled
-				if r.qeNotifier != nil && currentBolus.Active {
-					if err := r.qeNotifier.NotifyBolusCanceled(
-						currentBolus.BolusID,
-						currentBolus.UnitsDelivered,
-						currentBolus.UnitsTotal,
-					); err != nil {
-						log.Warnf("Failed to notify bolus canceled: %v", err)
-					}
-				}
-			}
+		r.applyBolusChange(change)
+	case StateChangeBasal:
+		r.applyBasalChange(change)
+	case StateChangeReservoir:
+		if level, ok := change.Data.(float64); ok {
+			r.pumpState.SetReservoirLevel(level)
 		}
-
-	// TODO: Implement other state changes (basal, reservoir, battery, alerts)
+	case StateChangeBattery:
+		if pct, ok := change.Data.(int); ok {
+			r.pumpState.SetBatteryLevel(pct)
+		}
+	case StateChangeAlert:
+		r.applyAlertChange(change)
+	case StateChangeSuspend:
+		r.applySuspendChange(change)
 	default:
 		log.Warnf("Unknown state change type: %d", change.Type)
+	}
+}
+
+func (r *Router) applyAuthChange(change StateChange) {
+	if authKey, ok := change.Data.([]byte); ok {
+		r.pumpState.SetAuthenticated(authKey)
+		r.bridge.SetAuthenticationKey(hex.EncodeToString(authKey))
+	}
+}
+
+func (r *Router) applyBolusChange(change StateChange) {
+	bolusState, ok := change.Data.(*state.BolusState)
+	if !ok {
+		return
+	}
+	if bolusState.Active {
+		r.pumpState.StartBolus(bolusState.UnitsTotal, bolusState.BolusID)
+		r.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryBolusActivated, "BolusActivated", map[string]interface{}{
+			"bolusId": bolusState.BolusID, "units": bolusState.UnitsTotal,
+		})
+		if r.qeNotifier != nil {
+			if err := r.qeNotifier.NotifyBolusStart(bolusState.BolusID, bolusState.UnitsTotal); err != nil {
+				log.Warnf("Failed to notify bolus start: %v", err)
+			}
+		}
+		return
+	}
+	currentBolus := r.pumpState.Bolus
+	r.pumpState.StopBolus()
+	if r.qeNotifier != nil && currentBolus.Active {
+		if err := r.qeNotifier.NotifyBolusCanceled(
+			currentBolus.BolusID, currentBolus.UnitsDelivered, currentBolus.UnitsTotal,
+		); err != nil {
+			log.Warnf("Failed to notify bolus canceled: %v", err)
+		}
+	}
+}
+
+func (r *Router) applyBasalChange(change StateChange) {
+	basalState, ok := change.Data.(*state.BasalState)
+	if !ok {
+		return
+	}
+	oldRate := r.pumpState.GetBasalRate()
+	r.pumpState.SetBasalState(basalState)
+	newRate := r.pumpState.GetBasalRate()
+	if basalState.TempBasalActive {
+		r.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryTempRateActivated, "TempRateActivated", map[string]interface{}{
+			"tempRate": basalState.TempBasalRate, "normalRate": basalState.CurrentRate,
+		})
+	}
+	if r.qeNotifier != nil {
+		if err := r.qeNotifier.NotifyBasalRateChange(oldRate, newRate, basalState.TempBasalActive); err != nil {
+			log.Warnf("Failed to notify basal rate change: %v", err)
+		}
+	}
+}
+
+func (r *Router) applyAlertChange(change StateChange) {
+	if alert, ok := change.Data.(state.Alert); ok {
+		r.pumpState.AddAlert(alert)
+		if r.qeNotifier != nil {
+			if err := r.qeNotifier.NotifyAlert(alert); err != nil {
+				log.Warnf("Failed to notify alert: %v", err)
+			}
+		}
+	}
+}
+
+func (r *Router) applySuspendChange(change StateChange) {
+	suspended, ok := change.Data.(bool)
+	if !ok {
+		return
+	}
+	r.pumpState.SetPumpingSuspended(suspended)
+	if suspended {
+		r.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryPumpingSuspended, "PumpingSuspended", nil)
+	} else {
+		r.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryPumpingResumed, "PumpingResumed", nil)
+	}
+	if r.qeNotifier == nil {
+		return
+	}
+	if suspended {
+		if err := r.qeNotifier.NotifyPumpSuspended("user"); err != nil {
+			log.Warnf("Failed to notify pump suspended: %v", err)
+		}
+	} else {
+		if err := r.qeNotifier.NotifyPumpResumed(); err != nil {
+			log.Warnf("Failed to notify pump resumed: %v", err)
+		}
 	}
 }
 

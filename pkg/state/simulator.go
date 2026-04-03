@@ -143,7 +143,7 @@ func (s *Simulator) updateBolusDelivery() {
 		s.pumpState.TDD += s.pumpState.Bolus.UnitsTotal
 
 		// Record history log entry
-		s.addHistoryEntry("BolusCompleted", map[string]interface{}{
+		s.addHistoryEntryWithTypeID(HistoryBolusCompleted, "BolusCompleted", map[string]interface{}{
 			"bolusId":        bolusID,
 			"unitsDelivered": unitsDelivered,
 			"unitsTotal":     unitsTotal,
@@ -171,8 +171,20 @@ func (s *Simulator) updateBasalDelivery() {
 		// Check if temp basal has expired
 		if time.Now().After(s.pumpState.Basal.TempBasalEnd) {
 			log.Info("Temp basal expired, returning to normal basal rate")
+			oldRate := s.pumpState.Basal.TempBasalRate
 			s.pumpState.Basal.TempBasalActive = false
 			basalRate = s.pumpState.Basal.CurrentRate
+
+			s.pumpState.AddHistoryLogEntryWithTypeID(HistoryTempRateCompleted, "TempRateCompleted", map[string]interface{}{
+				"tempRate":   oldRate,
+				"normalRate": basalRate,
+			})
+
+			if s.eventNotifier != nil {
+				if err := s.eventNotifier.NotifyBasalRateChange(oldRate, basalRate, false); err != nil {
+					log.Warnf("Failed to notify temp rate expired: %v", err)
+				}
+			}
 		}
 	}
 
@@ -310,9 +322,9 @@ func (s *Simulator) addAlert(alertType AlertType, priority AlertPriority, messag
 	return alert
 }
 
-// addHistoryEntry adds a history log entry (must NOT hold pumpState mutex)
-func (s *Simulator) addHistoryEntry(entryType string, data map[string]interface{}) {
-	s.pumpState.AddHistoryLogEntry(entryType, data)
+// addHistoryEntryWithTypeID adds a typed history log entry (must NOT hold pumpState mutex)
+func (s *Simulator) addHistoryEntryWithTypeID(typeID int, entryType string, data map[string]interface{}) {
+	s.pumpState.AddHistoryLogEntryWithTypeID(typeID, entryType, data)
 }
 
 // GetStats returns simulator statistics

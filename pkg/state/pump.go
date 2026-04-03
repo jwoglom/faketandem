@@ -43,6 +43,10 @@ type PumpState struct {
 	// History Log
 	HistoryLog *HistoryLogState
 
+	// Pump mode
+	PumpingSuspended bool
+	ControlIQMode    int // 0=Normal, 1=Sleep, 2=Exercise
+
 	// Alerts/Alarms
 	ActiveAlerts []Alert
 
@@ -96,7 +100,8 @@ type CGMState struct {
 // HistoryLogEntry represents a single history log entry
 type HistoryLogEntry struct {
 	Sequence  uint32
-	Type      string // e.g., "BasalDelivery", "BolusCompleted", "NewDay"
+	TypeID    int    // Numeric type ID matching pumpX2 history log types
+	Type      string // Human-readable type name
 	Timestamp time.Time
 	Data      map[string]interface{}
 }
@@ -408,11 +413,17 @@ func (ps *PumpState) GetHistoryLogCount() int {
 // AddHistoryLogEntry adds a new history log entry.
 // Uses its own mutex so it can be called while pumpState mutex is held.
 func (ps *PumpState) AddHistoryLogEntry(entryType string, data map[string]interface{}) {
+	ps.AddHistoryLogEntryWithTypeID(0, entryType, data)
+}
+
+// AddHistoryLogEntryWithTypeID adds a history log entry with a specific type ID.
+func (ps *PumpState) AddHistoryLogEntryWithTypeID(typeID int, entryType string, data map[string]interface{}) {
 	ps.HistoryLog.mutex.Lock()
 	defer ps.HistoryLog.mutex.Unlock()
 
 	entry := HistoryLogEntry{
 		Sequence:  ps.HistoryLog.NextSequence,
+		TypeID:    typeID,
 		Type:      entryType,
 		Timestamp: time.Now(),
 		Data:      data,
@@ -433,4 +444,71 @@ func (ps *PumpState) GetHistoryLogEntries(startSeq, endSeq uint32) []HistoryLogE
 		}
 	}
 	return entries
+}
+
+// SetPumpingSuspended sets the pumping suspended state
+func (ps *PumpState) SetPumpingSuspended(suspended bool) {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+	ps.PumpingSuspended = suspended
+}
+
+// IsPumpingSuspended returns whether pumping is suspended
+func (ps *PumpState) IsPumpingSuspended() bool {
+	ps.mutex.RLock()
+	defer ps.mutex.RUnlock()
+	return ps.PumpingSuspended
+}
+
+// RLock acquires a read lock on the pump state
+func (ps *PumpState) RLock() {
+	ps.mutex.RLock()
+}
+
+// RUnlock releases the read lock on the pump state
+func (ps *PumpState) RUnlock() {
+	ps.mutex.RUnlock()
+}
+
+// SetBasalState updates the basal state
+func (ps *PumpState) SetBasalState(basal *BasalState) {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+	ps.Basal = basal
+}
+
+// SetReservoirLevel updates the reservoir level
+func (ps *PumpState) SetReservoirLevel(units float64) {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+	ps.Reservoir.CurrentUnits = units
+}
+
+// SetBatteryLevel updates the battery percentage
+func (ps *PumpState) SetBatteryLevel(pct int) {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+	ps.Battery.Percentage = pct
+}
+
+// AddAlert adds an alert to the active alerts list
+func (ps *PumpState) AddAlert(alert Alert) {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+	ps.ActiveAlerts = append(ps.ActiveAlerts, alert)
+}
+
+// SetControlIQMode sets the ControlIQ mode
+func (ps *PumpState) SetControlIQMode(mode int) {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+	ps.ControlIQMode = mode
+	log.Infof("ControlIQ mode set to %d", mode)
+}
+
+// GetControlIQMode returns the ControlIQ mode
+func (ps *PumpState) GetControlIQMode() int {
+	ps.mutex.RLock()
+	defer ps.mutex.RUnlock()
+	return ps.ControlIQMode
 }
