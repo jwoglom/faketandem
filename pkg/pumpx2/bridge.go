@@ -82,12 +82,13 @@ func (b *Bridge) ParseMessage(charType bluetooth.CharacteristicType, rawPacketsH
 	messageName, cargo := parseCliparserOutput(output)
 
 	msg := &ParsedMessage{
-		Opcode:      opcode,
-		MessageType: messageName,
-		TxID:        txID,
-		Cargo:       cargo,
-		Raw:         strings.Join(rawPacketsHex, ""),
-		IsValid:     messageName != "",
+		Opcode:        opcode,
+		MessageType:   messageName,
+		TxID:          txID,
+		Cargo:         cargo,
+		Raw:           strings.Join(rawPacketsHex, ""),
+		IsValid:       messageName != "",
+		RawPacketsHex: rawPacketsHex,
 	}
 
 	return msg, nil

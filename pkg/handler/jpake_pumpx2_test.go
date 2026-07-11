@@ -270,20 +270,25 @@ func TestPumpX2JPAKEAuthenticator_FullFlowViaJar(t *testing.T) {
 			t.Fatalf("expected parsed message type %s, got %s", expectedRequestType, parsed.MessageType)
 		}
 
-		requestData := make(map[string]interface{}, len(parsed.Cargo)+1)
+		requestData := make(map[string]interface{}, len(parsed.Cargo)+2)
 		for k, v := range parsed.Cargo {
 			requestData[k] = v
 		}
 		requestData["messageName"] = parsed.MessageType
+		requestData["rawPacketsHex"] = parsed.RawPacketsHex
 
 		round := jpakeRoundForTest(parsed.MessageType)
+		roundStart := time.Now()
 		responseParams, err := auth.ProcessRound(round, requestData)
+		t.Logf("ProcessRound(%d) for %s took %s", round, expectedRequestType, time.Since(roundStart))
 		if err != nil {
 			t.Fatalf("ProcessRound(%d) failed for %s: %v", round, expectedRequestType, err)
 		}
 
 		responseType := jpakeResponseTypeForTest(parsed.MessageType)
+		encodeStart := time.Now()
 		encoded, err := bridge.EncodeMessage(parsed.TxID, responseType, responseParams)
+		t.Logf("EncodeMessage for %s took %s", responseType, time.Since(encodeStart))
 		if err != nil {
 			t.Fatalf("EncodeMessage failed for %s: %v", responseType, err)
 		}
