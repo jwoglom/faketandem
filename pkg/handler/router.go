@@ -31,7 +31,7 @@ type Router struct {
 }
 
 // NewRouter creates a new message router
-func NewRouter(bridge *pumpx2.Bridge, pumpState *state.PumpState, ble *bluetooth.Ble, txManager *protocol.TransactionManager, jpakeMode, pumpX2Path, pumpX2Mode, gradleCmd, javaCmd string) *Router {
+func NewRouter(bridge *pumpx2.Bridge, pumpState *state.PumpState, ble *bluetooth.Ble, txManager *protocol.TransactionManager, jpakeMode, pumpX2Path, pumpX2Mode, gradleCmd, javaCmd, pumpX2JarPath string) *Router {
 	// Create and initialize settings manager
 	settingsManager := settings.NewManager()
 	settings.RegisterDefaults(settingsManager)
@@ -43,7 +43,7 @@ func NewRouter(bridge *pumpx2.Bridge, pumpState *state.PumpState, ble *bluetooth
 		ble:             ble,
 		txManager:       txManager,
 		settingsManager: settingsManager,
-		jpakeManager:    NewJPAKESessionManager(jpakeMode, pumpX2Path, pumpX2Mode, gradleCmd, javaCmd),
+		jpakeManager:    NewJPAKESessionManager(jpakeMode, pumpX2Path, pumpX2Mode, gradleCmd, javaCmd, pumpX2JarPath),
 		qeNotifier:      NewQualifyingEventsNotifier(bridge, ble, pumpState),
 	}
 

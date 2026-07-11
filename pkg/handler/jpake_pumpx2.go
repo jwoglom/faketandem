@@ -21,10 +21,11 @@ import (
 type PumpX2JPAKEAuthenticator struct {
 	pairingCode string
 	bridge      *pumpx2.Bridge
-	pumpX2Path  string
-	pumpX2Mode  string
-	gradleCmd   string
-	javaCmd     string
+	pumpX2Path    string
+	pumpX2Mode    string
+	gradleCmd     string
+	javaCmd       string
+	pumpX2JarPath string
 
 	// JPAKE state
 	round        int
@@ -43,15 +44,16 @@ type PumpX2JPAKEAuthenticator struct {
 }
 
 // NewPumpX2JPAKEAuthenticator creates a new pumpX2-based JPAKE authenticator
-func NewPumpX2JPAKEAuthenticator(pairingCode string, bridge *pumpx2.Bridge, pumpX2Path, pumpX2Mode, gradleCmd, javaCmd string) *PumpX2JPAKEAuthenticator {
+func NewPumpX2JPAKEAuthenticator(pairingCode string, bridge *pumpx2.Bridge, pumpX2Path, pumpX2Mode, gradleCmd, javaCmd, pumpX2JarPath string) *PumpX2JPAKEAuthenticator {
 	return &PumpX2JPAKEAuthenticator{
-		pairingCode: pairingCode,
-		bridge:      bridge,
-		pumpX2Path:  pumpX2Path,
-		pumpX2Mode:  pumpX2Mode,
-		gradleCmd:   gradleCmd,
-		javaCmd:     javaCmd,
-		round:       0,
+		pairingCode:   pairingCode,
+		bridge:        bridge,
+		pumpX2Path:    pumpX2Path,
+		pumpX2Mode:    pumpX2Mode,
+		gradleCmd:     gradleCmd,
+		javaCmd:       javaCmd,
+		pumpX2JarPath: pumpX2JarPath,
+		round:         0,
 	}
 }
 
@@ -123,7 +125,10 @@ func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 		}
 	} else {
 		// JAR mode - run java directly
-		jarPath := filepath.Join(j.pumpX2Path, "cliparser/build/libs/cliparser.jar")
+		jarPath := j.pumpX2JarPath
+		if jarPath == "" {
+			jarPath = filepath.Join(j.pumpX2Path, "cliparser/build/libs/cliparser.jar")
+		}
 		scriptPath = j.javaCmd
 		args = []string{
 			"-jar",

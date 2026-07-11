@@ -20,8 +20,9 @@ func main() {
 	// if both verbose and quiet are chosen, e.g., -v -q, the verbose dominates
 	var traceLevel = flag.Bool("v", false, "verbose off by default, TraceLevel")
 	var infoLevel = flag.Bool("q", false, "quiet off by default, InfoLevel")
-	var pumpX2Path = flag.String("pumpx2-path", "", "path to pumpX2 repository (required)")
+	var pumpX2Path = flag.String("pumpx2-path", "", "path to pumpX2 repository (required unless -pumpx2-jar-path is set)")
 	var pumpX2Mode = flag.String("pumpx2-mode", "gradle", "mode to run cliparser: 'gradle' or 'jar'")
+	var pumpX2JarPath = flag.String("pumpx2-jar-path", "", "path to a prebuilt cliparser jar; skips gradle entirely and implies -pumpx2-mode=jar")
 	var jpakeMode = flag.String("jpake-mode", "go", "JPAKE mode: 'go' (simplified) or 'pumpx2' (use pumpX2's JPAKE)")
 	var gradleCmd = flag.String("gradle-cmd", "./gradlew", "gradle command to use")
 	var javaCmd = flag.String("java-cmd", "java", "java command to use")
@@ -46,7 +47,7 @@ func main() {
 	})
 
 	// Initialize configuration
-	cfg, err := config.New(*pumpX2Path, *pumpX2Mode, *jpakeMode, *gradleCmd, *javaCmd, logLevel)
+	cfg, err := config.New(*pumpX2Path, *pumpX2Mode, *jpakeMode, *gradleCmd, *javaCmd, logLevel, *pumpX2JarPath)
 	if err != nil {
 		log.Fatalf("Configuration error: %s", err)
 	}
@@ -66,7 +67,7 @@ func main() {
 
 	// Initialize pumpX2 bridge
 	log.Info("Initializing pumpX2 bridge...")
-	bridge, err := pumpx2.NewBridge(cfg.PumpX2Path, cfg.PumpX2Mode, cfg.GradleCmd, cfg.JavaCmd)
+	bridge, err := pumpx2.NewBridge(cfg.PumpX2Path, cfg.PumpX2Mode, cfg.GradleCmd, cfg.JavaCmd, cfg.PumpX2JarPath)
 	if err != nil {
 		log.Fatalf("Failed to initialize pumpX2 bridge: %s", err)
 	}
@@ -100,7 +101,7 @@ func main() {
 	}
 
 	// Create message router
-	router := handler.NewRouter(bridge, pumpState, ble, txManager, cfg.JPAKEMode, cfg.PumpX2Path, cfg.PumpX2Mode, cfg.GradleCmd, cfg.JavaCmd)
+	router := handler.NewRouter(bridge, pumpState, ble, txManager, cfg.JPAKEMode, cfg.PumpX2Path, cfg.PumpX2Mode, cfg.GradleCmd, cfg.JavaCmd, cfg.PumpX2JarPath)
 	log.Info("Message router initialized")
 
 	// Connect simulator with qualifying events notifier
