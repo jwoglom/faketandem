@@ -198,6 +198,10 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewSettingsWriteHandler(r.bridge, r.settingsManager, "ChangeControlIQSettingsRequest", "ControlIQSettingsRequest"))
 	r.RegisterHandler(NewSettingsWriteHandler(r.bridge, r.settingsManager, "SetMaxBolusLimitRequest", "GlobalMaxBolusSettingsRequest"))
 	r.RegisterHandler(NewSettingsWriteHandler(r.bridge, r.settingsManager, "SetMaxBasalLimitRequest", "BasalLimitSettingsRequest"))
+	// NOTE: SetSleepScheduleResponse has both an (int status) and a (byte[]
+	// raw) single-arg constructor of the same arity; cliparser currently
+	// resolves this to the int ctor via JVM reflection order, but that
+	// ordering isn't JLS-guaranteed, so this is fragile.
 	r.RegisterHandler(NewSettingsWriteHandler(r.bridge, r.settingsManager, "SetSleepScheduleRequest", "ControlIQSleepScheduleRequest"))
 	r.RegisterHandler(NewSettingsWriteHandler(r.bridge, r.settingsManager, "SetQuickBolusSettingsRequest", ""))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetPumpSoundsRequest"))
@@ -246,8 +250,9 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "QuickBolusSettingsRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CgmSupportPackageStatusRequest", true))
 
-	// Keep ProfileBasalHandler as custom since it uses pump state
-	r.RegisterHandler(NewProfileBasalHandler(r.bridge))
+	// ProfileBasalRequest/Response has no corresponding class anywhere in
+	// pumpX2 -- not part of the real protocol, so no handler is registered.
+	// (Basal profile data is exposed via the real ProfileStatusRequest, above.)
 
 	// Set default handler for unknown messages
 	r.SetDefaultHandler(NewDefaultHandler(r.bridge))
