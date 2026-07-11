@@ -85,7 +85,8 @@ func (r *Router) registerHandlers() {
 	// Status and data handlers
 	r.RegisterHandler(NewCurrentStatusHandler(r.bridge))
 	r.RegisterHandler(NewHistoryLogHandler(r.bridge))
-	r.RegisterHandler(NewCreateHistoryLogHandler(r.bridge))
+	// CreateHistoryLogRequest/Response has no corresponding class anywhere in
+	// pumpX2 -- not part of the real protocol, so no handler is registered.
 	r.RegisterHandler(NewHistoryLogStatusHandler(r.bridge))
 
 	// Bolus handlers
