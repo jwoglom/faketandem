@@ -44,7 +44,7 @@ func NewRouter(bridge *pumpx2.Bridge, pumpState *state.PumpState, ble *bluetooth
 		txManager:       txManager,
 		settingsManager: settingsManager,
 		jpakeManager:    NewJPAKESessionManager(jpakeMode, pumpX2Path, pumpX2Mode, gradleCmd, javaCmd, pumpX2JarPath),
-		qeNotifier:      NewQualifyingEventsNotifier(bridge, ble, pumpState),
+		qeNotifier:      NewQualifyingEventsNotifier(ble, pumpState),
 	}
 
 	// Register handlers
