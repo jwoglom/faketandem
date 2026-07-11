@@ -118,8 +118,18 @@ func (h *JPAKEHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state
 
 	auth := h.sessionManager.GetOrCreate(sessionID, pairingCode, h.bridge)
 
+	// PumpX2JPAKEAuthenticator.encodeClientRequest needs the message name to
+	// re-encode the client's request for pumpX2's real jpake-server subprocess;
+	// the Go-based authenticator ignores unrecognized keys, so this is harmless
+	// there.
+	requestData := make(map[string]interface{}, len(msg.Cargo)+1)
+	for k, v := range msg.Cargo {
+		requestData[k] = v
+	}
+	requestData["messageName"] = h.messageType
+
 	// Process this round
-	responseParams, err := auth.ProcessRound(h.round, msg.Cargo)
+	responseParams, err := auth.ProcessRound(h.round, requestData)
 	if err != nil {
 		return nil, fmt.Errorf("JPAKE round %d failed: %w", h.round, err)
 	}
@@ -166,16 +176,18 @@ func (h *JPAKEHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state
 
 // getResponseType returns the response message type for this request
 func (h *JPAKEHandler) getResponseType() string {
-	// Map request to response
+	// Map request to response using the real protocol's message names
 	switch h.messageType {
-	case "JPAKERound1Request":
-		return "JPAKERound1Response"
-	case "JPAKERound2Request":
-		return "JPAKERound2Response"
-	case "JPAKERound3Request":
-		return "JPAKERound3Response"
-	case "JPAKERound4Request":
-		return "JPAKERound4Response"
+	case "Jpake1aRequest":
+		return "Jpake1aResponse"
+	case "Jpake1bRequest":
+		return "Jpake1bResponse"
+	case "Jpake2Request":
+		return "Jpake2Response"
+	case "Jpake3SessionKeyRequest":
+		return "Jpake3SessionKeyResponse"
+	case "Jpake4KeyConfirmationRequest":
+		return "Jpake4KeyConfirmationResponse"
 	default:
 		return h.messageType + "Response"
 	}

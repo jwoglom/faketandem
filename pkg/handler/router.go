@@ -68,11 +68,19 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewCentralChallengeHandler(r.bridge))
 	r.RegisterHandler(NewPumpChallengeHandler(r.bridge))
 
-	// JPAKE authentication handlers (rounds 1-4)
-	r.RegisterHandler(NewJPAKEHandler(r.bridge, r.jpakeManager, "JPAKERound1Request", 1))
-	r.RegisterHandler(NewJPAKEHandler(r.bridge, r.jpakeManager, "JPAKERound2Request", 2))
-	r.RegisterHandler(NewJPAKEHandler(r.bridge, r.jpakeManager, "JPAKERound3Request", 3))
-	r.RegisterHandler(NewJPAKEHandler(r.bridge, r.jpakeManager, "JPAKERound4Request", 4))
+	// JPAKE authentication handlers. Message names/opcodes match the real protocol
+	// (pumpX2's request.authentication.Jpake1aRequest etc, opcodes 32/34/36/38/40),
+	// which has 5 client messages, not 4. The "round" number passed here matches
+	// PumpX2JPAKEAuthenticator.ProcessRound's dispatch (pkg/handler/jpake_pumpx2.go):
+	// Jpake1aRequest and Jpake1bRequest both map to round 1 because
+	// processRound1 handles both internally via its own state (the first call
+	// sends Jpake1a and reads JPAKE_1B, the second sends Jpake1b and reads
+	// JPAKE_2) -- they are two separate wire messages, not two rounds.
+	r.RegisterHandler(NewJPAKEHandler(r.bridge, r.jpakeManager, "Jpake1aRequest", 1))
+	r.RegisterHandler(NewJPAKEHandler(r.bridge, r.jpakeManager, "Jpake1bRequest", 1))
+	r.RegisterHandler(NewJPAKEHandler(r.bridge, r.jpakeManager, "Jpake2Request", 2))
+	r.RegisterHandler(NewJPAKEHandler(r.bridge, r.jpakeManager, "Jpake3SessionKeyRequest", 3))
+	r.RegisterHandler(NewJPAKEHandler(r.bridge, r.jpakeManager, "Jpake4KeyConfirmationRequest", 4))
 
 	// Status and data handlers
 	r.RegisterHandler(NewCurrentStatusHandler(r.bridge))

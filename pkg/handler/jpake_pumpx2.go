@@ -127,7 +127,7 @@ func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 		// JAR mode - run java directly
 		jarPath := j.pumpX2JarPath
 		if jarPath == "" {
-			jarPath = filepath.Join(j.pumpX2Path, "cliparser/build/libs/cliparser.jar")
+			jarPath = filepath.Join(j.pumpX2Path, "cliparser/build/libs/pumpx2-cliparser-all.jar")
 		}
 		scriptPath = j.javaCmd
 		args = []string{
@@ -454,8 +454,11 @@ func (j *PumpX2JPAKEAuthenticator) encodeClientRequest(requestData map[string]in
 		// Use txID 0 for simplicity - pumpX2 jpake-server doesn't validate txID
 		encoded, err := j.bridge.EncodeMessage(0, messageName, params)
 		if err == nil && len(encoded.Packets) > 0 {
-			// Successfully encoded - join all packets into a single hex string
-			result := strings.Join(encoded.Packets, "")
+			// jpake-server reads one line from stdin and hands it directly to
+			// cliparser's "parse" command, which expects each raw BLE fragment as
+			// its own whitespace-delimited token (see Main.splitRawHexPackets) --
+			// NOT one concatenated blob.
+			result := strings.Join(encoded.Packets, " ")
 			log.Debugf("Encoded client request via bridge: %s -> %s", messageName, result)
 			return result
 		}
