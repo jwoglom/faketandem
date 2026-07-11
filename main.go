@@ -23,7 +23,7 @@ func main() {
 	var pumpX2Path = flag.String("pumpx2-path", "", "path to pumpX2 repository (required unless -pumpx2-jar-path is set)")
 	var pumpX2Mode = flag.String("pumpx2-mode", "gradle", "mode to run cliparser: 'gradle' or 'jar'")
 	var pumpX2JarPath = flag.String("pumpx2-jar-path", "", "path to a prebuilt cliparser jar; skips gradle entirely and implies -pumpx2-mode=jar")
-	var jpakeMode = flag.String("jpake-mode", "go", "JPAKE mode: 'go' (simplified) or 'pumpx2' (use pumpX2's JPAKE)")
+	var jpakeMode = flag.String("jpake-mode", "pumpx2", "JPAKE mode: 'pumpx2' (real EC-JPAKE via pumpX2's jpake-server, required for real hardware/apps) or 'go' (simplified, cryptographically incompatible with real devices)")
 	var gradleCmd = flag.String("gradle-cmd", "./gradlew", "gradle command to use")
 	var javaCmd = flag.String("java-cmd", "java", "java command to use")
 

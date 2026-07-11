@@ -186,6 +186,8 @@ func (h *JPAKEHandler) getResponseType() string {
 		return "Jpake2Response"
 	case "Jpake3SessionKeyRequest":
 		return "Jpake3SessionKeyResponse"
+	case "Jpake4KeyConfirmationRequest":
+		return "Jpake4KeyConfirmationResponse"
 	default:
 		return h.messageType + "Response"
 	}
