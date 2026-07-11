@@ -18,7 +18,11 @@ type JPAKEResponseProvider func(step string, requestHex string) (responseHex str
 
 // Runner is an interface for executing cliparser commands
 type Runner interface {
-	Parse(btChar, hexValue string) (string, error)
+	// Parse decodes a message from its raw BLE fragments. rawPacketsHex must be the
+	// original, unstripped fragment bytes (including framing) in receive order --
+	// see PacketBuffer.RawPacketsHex for why the stripped/concatenated payload
+	// alone isn't enough.
+	Parse(btChar string, rawPacketsHex []string) (string, error)
 	Encode(txID int, messageName string, params map[string]interface{}) (string, error)
 	ExecuteJPAKE(pairingCode string, responseProvider JPAKEResponseProvider) (string, error)
 	ListAllCommands() (string, error)
@@ -38,35 +42,26 @@ func NewGradleRunner(pumpX2Path, gradleCmd string) *GradleRunner {
 	}
 }
 
-// Parse parses a message using gradle cliparser
-func (r *GradleRunner) Parse(btChar, hexValue string) (string, error) {
-	// Build the JSON input
-	input := map[string]interface{}{
-		"type":   "ReadResp",
-		"btChar": btChar,
-		"value":  hexValue,
-		"ts":     "",
-	}
+// Parse parses a message using gradle cliparser. btChar is currently unused --
+// the cliparser "parse" command determines the characteristic from the opcode
+// itself (see CharacteristicGuesser in pumpX2) -- but is kept for interface
+// symmetry with other Runner implementations that may need it.
+func (r *GradleRunner) Parse(btChar string, rawPacketsHex []string) (string, error) {
+	// The cliparser "parse" command expects each raw BLE fragment (including its
+	// framing bytes) as its own whitespace-delimited token; see
+	// Main.splitRawHexPackets in pumpX2's cliparser module.
+	hexValue := strings.Join(rawPacketsHex, " ")
 
-	inputJSON, err := json.Marshal(input)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal input JSON: %w", err)
-	}
-
-	// Execute: ./gradlew cliparser -q --console=plain --args='json'
+	// Execute: ./gradlew cliparser -q --console=plain --args="parse <fragments>"
 	gradlePath := filepath.Join(r.pumpX2Path, r.gradleCmd)
-	cmd := exec.Command(gradlePath, "cliparser", "-q", "--console=plain", "--args=json")
+	cmd := exec.Command(gradlePath, "cliparser", "-q", "--console=plain", "--args=parse "+hexValue)
 	cmd.Dir = r.pumpX2Path
-
-	// Provide JSON as stdin
-	cmd.Stdin = bytes.NewReader(inputJSON)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
-	log.Tracef("Executing gradle parse: btChar=%s, value=%s", btChar, hexValue)
-	log.Tracef("Input JSON: %s", string(inputJSON))
+	log.Tracef("Executing gradle parse: btChar=%s, fragments=%s", btChar, hexValue)
 
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("gradle parse failed: %w\nStderr: %s", err, stderr.String())
@@ -246,10 +241,13 @@ func NewJarRunner(jarPath, javaCmd string) *JarRunner {
 	}
 }
 
-// Parse parses a message using JAR cliparser
-func (r *JarRunner) Parse(btChar, hexValue string) (string, error) {
-	// For JAR mode, use the old 'parse' command format
-	// Convert btChar to the appropriate characteristic name
+// Parse parses a message using JAR cliparser. btChar is currently unused -- see
+// GradleRunner.Parse.
+func (r *JarRunner) Parse(btChar string, rawPacketsHex []string) (string, error) {
+	// The cliparser "parse" command expects each raw BLE fragment (including its
+	// framing bytes) as its own whitespace-delimited token; see
+	// Main.splitRawHexPackets in pumpX2's cliparser module.
+	hexValue := strings.Join(rawPacketsHex, " ")
 	args := []string{"-jar", r.jarPath, "parse", hexValue}
 
 	cmd := exec.Command(r.javaCmd, args...)
@@ -270,14 +268,23 @@ func (r *JarRunner) Parse(btChar, hexValue string) (string, error) {
 	return output, nil
 }
 
-// Encode builds a message using JAR cliparser
+// Encode builds a message using JAR cliparser. The cliparser "encode" command
+// expects its params argument as a single JSON object string, not key=value
+// pairs -- confirmed empirically against a real cliparser jar (a bare key=value
+// arg throws org.json.JSONException: "A JSONObject text must begin with '{'").
 func (r *JarRunner) Encode(txID int, messageName string, params map[string]interface{}) (string, error) {
-	args := []string{"-jar", r.jarPath, "encode", fmt.Sprintf("%d", txID), messageName}
-
-	// Add parameters as key=value pairs
-	for key, value := range params {
-		args = append(args, fmt.Sprintf("%s=%v", key, value))
+	var paramsJSON string
+	if len(params) == 0 {
+		paramsJSON = "{}"
+	} else {
+		paramsBytes, err := json.Marshal(params)
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal params: %w", err)
+		}
+		paramsJSON = string(paramsBytes)
 	}
+
+	args := []string{"-jar", r.jarPath, "encode", fmt.Sprintf("%d", txID), messageName, paramsJSON}
 
 	cmd := exec.Command(r.javaCmd, args...)
 

@@ -123,7 +123,7 @@ func main() {
 		server.SendWriteEvent(charType, data)
 
 		// Reassemble multi-packet messages
-		message, isComplete, err := reassembler.AddPacket(charType, data)
+		message, rawPacketsHex, isComplete, err := reassembler.AddPacket(charType, data)
 		if err != nil {
 			log.Errorf("Failed to add packet to reassembler: %v", err)
 			return
@@ -138,7 +138,7 @@ func main() {
 		log.Infof("Received complete message on %s: %s", charType, hex.EncodeToString(message))
 
 		// Parse the message using pumpX2 bridge
-		parsed, err := bridge.ParseMessage(charType, hex.EncodeToString(message))
+		parsed, err := bridge.ParseMessage(charType, rawPacketsHex)
 		if err != nil {
 			log.Errorf("Failed to parse message: %v", err)
 			return

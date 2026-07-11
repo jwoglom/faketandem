@@ -55,6 +55,19 @@ func (pb *PacketBuffer) AssembleMessage() ([]byte, error) {
 	return message, nil
 }
 
+// RawPacketsHex returns the original, unstripped BLE fragments as hex strings, in
+// the order received. pumpX2's cliparser expects raw fragments (including their
+// [remaining][txId] framing bytes) rather than a pre-stripped, concatenated
+// payload -- the framing bytes of the first fragment carry the real opcode/txId/
+// cargoSize header that the parser needs.
+func (pb *PacketBuffer) RawPacketsHex() []string {
+	rawHex := make([]string, 0, len(pb.Packets))
+	for _, packet := range pb.Packets {
+		rawHex = append(rawHex, hex.EncodeToString(packet))
+	}
+	return rawHex
+}
+
 // Reassembler manages the reassembly of multi-packet messages
 type Reassembler struct {
 	buffers      map[string]*PacketBuffer
@@ -118,12 +131,14 @@ func (r *Reassembler) bufferKey(charType bluetooth.CharacteristicType, txID uint
 }
 
 // AddPacket adds a packet to the reassembler
-// Returns (completeMessage, isComplete, error)
-func (r *Reassembler) AddPacket(charType bluetooth.CharacteristicType, packet []byte) ([]byte, bool, error) {
+// Returns (completeMessage, rawPacketsHex, isComplete, error). rawPacketsHex holds
+// the original unstripped fragments (only populated once isComplete is true) --
+// see RawPacketsHex for why callers need these instead of the stripped message.
+func (r *Reassembler) AddPacket(charType bluetooth.CharacteristicType, packet []byte) ([]byte, []string, bool, error) {
 	// Parse packet header
 	header, err := ParsePacketHeader(packet)
 	if err != nil {
-		return nil, false, fmt.Errorf("failed to parse packet header: %w", err)
+		return nil, nil, false, fmt.Errorf("failed to parse packet header: %w", err)
 	}
 
 	r.mutex.Lock()
@@ -162,16 +177,17 @@ func (r *Reassembler) AddPacket(charType bluetooth.CharacteristicType, packet []
 		message, err := buffer.AssembleMessage()
 		if err != nil {
 			delete(r.buffers, key) // Remove invalid buffer
-			return nil, false, fmt.Errorf("failed to assemble message: %w", err)
+			return nil, nil, false, fmt.Errorf("failed to assemble message: %w", err)
 		}
+		rawPacketsHex := buffer.RawPacketsHex()
 
 		// Remove buffer
 		delete(r.buffers, key)
 
-		return message, true, nil
+		return message, rawPacketsHex, true, nil
 	}
 
-	return nil, false, nil
+	return nil, nil, false, nil
 }
 
 // Reset clears all buffers

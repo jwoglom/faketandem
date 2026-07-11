@@ -65,54 +65,32 @@ func (b *Bridge) SetTimeSinceReset(seconds uint32) {
 	b.timeSinceReset = seconds
 }
 
-// ParseMessage parses a hex message into a structured format
-func (b *Bridge) ParseMessage(charType bluetooth.CharacteristicType, hexData string) (*ParsedMessage, error) {
+// ParseMessage parses a message from its raw BLE fragments into a structured
+// format. rawPacketsHex must be the original, unstripped fragment bytes
+// (including framing) in receive order -- see PacketBuffer.RawPacketsHex.
+func (b *Bridge) ParseMessage(charType bluetooth.CharacteristicType, rawPacketsHex []string) (*ParsedMessage, error) {
 	btChar := charType.ToBtChar()
-	output, err := b.runner.Parse(btChar, hexData)
+	output, err := b.runner.Parse(btChar, rawPacketsHex)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse message: %w", err)
 	}
 
-	// The parse command outputs structured information
-	// Try to parse as JSON first, otherwise parse text output
-	var msg ParsedMessage
+	opcode, txID, ok := opcodeAndTxIDFromFirstFragment(rawPacketsHex)
+	if !ok {
+		return nil, fmt.Errorf("failed to extract opcode/txId from raw fragments")
+	}
+	messageName, cargo := parseCliparserOutput(output)
 
-	// For now, we'll need to parse the text output
-	// The cliparser outputs in a specific format - we need to extract the data
-	// Example output might be:
-	// Message: ApiVersionRequest
-	// TxID: 1
-	// Cargo: {...}
-
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	msg.Raw = hexData
-	msg.IsValid = true // Assume valid if parsing succeeded
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "Message:") {
-			msg.MessageType = strings.TrimSpace(strings.TrimPrefix(line, "Message:"))
-		} else if strings.HasPrefix(line, "TxID:") || strings.HasPrefix(line, "Transaction ID:") {
-			var txid int
-			if _, err := fmt.Sscanf(line, "TxID: %d", &txid); err != nil {
-				log.Debugf("Failed to parse TxID: %v", err)
-			}
-			msg.TxID = txid
-		} else if strings.HasPrefix(line, "Opcode:") {
-			var opcode int
-			if _, err := fmt.Sscanf(line, "Opcode: %d", &opcode); err != nil {
-				log.Debugf("Failed to parse Opcode: %v", err)
-			}
-			msg.Opcode = opcode
-		}
+	msg := &ParsedMessage{
+		Opcode:      opcode,
+		MessageType: messageName,
+		TxID:        txID,
+		Cargo:       cargo,
+		Raw:         strings.Join(rawPacketsHex, ""),
+		IsValid:     messageName != "",
 	}
 
-	// Initialize cargo as empty map
-	if msg.Cargo == nil {
-		msg.Cargo = make(map[string]interface{})
-	}
-
-	return &msg, nil
+	return msg, nil
 }
 
 // EncodeMessage builds a message using the specified parameters
