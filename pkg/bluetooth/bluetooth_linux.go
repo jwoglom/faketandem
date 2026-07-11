@@ -25,6 +25,8 @@ type Ble struct {
 	device  *gatt.Device
 	central *gatt.Central
 
+	serialNumber string
+
 	// Notifiers for each characteristic
 	notifiers    map[CharacteristicType]gatt.Notifier
 	notifiersMtx sync.Mutex
@@ -64,7 +66,7 @@ var DefaultServerOptions = []gatt.Option{
 }
 
 // New creates a new BLE device with the Tandem pump service
-func New(adapterID string) (*Ble, error) {
+func New(adapterID string, serialNumber string) (*Ble, error) {
 	d, err := gatt.NewDevice(DefaultServerOptions...)
 	if err != nil {
 		log.Fatalf("pkg bluetooth; failed to open device, err: %s", err)
@@ -73,6 +75,7 @@ func New(adapterID string) (*Ble, error) {
 
 	b := &Ble{
 		device:        &d,
+		serialNumber:  serialNumber,
 		notifiers:     make(map[CharacteristicType]gatt.Notifier),
 		charData:      make(map[CharacteristicType][]byte),
 		extraCharData: make(map[string][]byte),
@@ -197,7 +200,7 @@ func (b *Ble) addDeviceInformationService(d gatt.Device) {
 
 	b.addReadOnlyCharacteristic(s, ManufacturerNameStringCharUUID, []byte("Tandem Diabetes Care"))
 	b.addReadOnlyCharacteristic(s, ModelNumberStringCharUUID, []byte("X2")) // Always "X2" even for Mobi
-	b.addReadOnlyCharacteristic(s, SerialNumberStringCharUUID, []byte("bi 123"))
+	b.addReadOnlyCharacteristic(s, SerialNumberStringCharUUID, []byte(b.serialNumber))
 	b.addReadOnlyCharacteristic(s, SoftwareRevisionStringCharUUID, []byte("3553172181"))
 
 	b.addService(d, s, "Device Information")

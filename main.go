@@ -94,7 +94,7 @@ func main() {
 	simulator := state.NewSimulator(pumpState, 1*time.Second)
 	defer simulator.Stop()
 
-	ble, err := bluetooth.New("hci0")
+	ble, err := bluetooth.New("hci0", pumpState.GetSerialNumber())
 	if err != nil {
 		log.Fatalf("Could not start BLE: %s", err)
 	}
