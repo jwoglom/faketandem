@@ -19,22 +19,26 @@ type Bridge struct {
 	timeSinceReset uint32
 }
 
-// NewBridge creates a new pumpX2 cliparser bridge
-func NewBridge(pumpX2Path, mode, gradleCmd, javaCmd string) (*Bridge, error) {
+// NewBridge creates a new pumpX2 cliparser bridge. If jarPath is non-empty, it is
+// used directly as the cliparser JAR, skipping gradle entirely regardless of mode.
+func NewBridge(pumpX2Path, mode, gradleCmd, javaCmd, jarPath string) (*Bridge, error) {
 	var runner Runner
 
 	if mode == "gradle" {
 		log.Info("Using gradle mode for cliparser")
 		runner = NewGradleRunner(pumpX2Path, gradleCmd)
+	} else if jarPath != "" {
+		log.Infof("Using prebuilt cliparser JAR: %s", jarPath)
+		runner = NewJarRunner(jarPath, javaCmd)
 	} else {
 		log.Info("Using JAR mode for cliparser")
 		// Build/find the cliparser JAR
-		jarPath, err := BuildCliParserJAR(pumpX2Path, gradleCmd)
+		builtJarPath, err := BuildCliParserJAR(pumpX2Path, gradleCmd)
 		if err != nil {
 			return nil, fmt.Errorf("failed to initialize cliparser JAR: %w", err)
 		}
-		log.Infof("Using cliparser JAR: %s", jarPath)
-		runner = NewJarRunner(jarPath, javaCmd)
+		log.Infof("Using cliparser JAR: %s", builtJarPath)
+		runner = NewJarRunner(builtJarPath, javaCmd)
 	}
 
 	return &Bridge{

@@ -57,6 +57,7 @@ func TestPumpX2JPAKEAuthenticator_Initialization(t *testing.T) {
 		pumpX2Mode,
 		gradleCmd,
 		javaCmd,
+		"",
 	)
 
 	if auth == nil {
@@ -127,6 +128,7 @@ func TestJPAKESessionManager_CreateWithMode(t *testing.T) {
 				"gradle",
 				"./gradlew",
 				"java",
+				"",
 			)
 
 			auth := manager.GetOrCreate("test-session", "123456", &pumpx2.Bridge{})
@@ -151,7 +153,7 @@ func TestJPAKESessionManager_CreateWithMode(t *testing.T) {
 
 // TestJPAKESessionManager_MultipleSessionsSamePairing tests multiple concurrent sessions
 func TestJPAKESessionManager_MultipleSessionsSamePairing(t *testing.T) {
-	manager := NewJPAKESessionManager("go", "/tmp", "gradle", "./gradlew", "java")
+	manager := NewJPAKESessionManager("go", "/tmp", "gradle", "./gradlew", "java", "")
 
 	pairingCode := "123456"
 	bridge := &pumpx2.Bridge{}
@@ -179,7 +181,7 @@ func TestJPAKESessionManager_MultipleSessionsSamePairing(t *testing.T) {
 
 // TestJPAKESessionManager_DifferentPairingCodes tests sessions with different pairing codes
 func TestJPAKESessionManager_DifferentPairingCodes(t *testing.T) {
-	manager := NewJPAKESessionManager("go", "/tmp", "gradle", "./gradlew", "java")
+	manager := NewJPAKESessionManager("go", "/tmp", "gradle", "./gradlew", "java", "")
 
 	bridge := &pumpx2.Bridge{}
 
@@ -200,7 +202,7 @@ func TestJPAKESessionManager_DifferentPairingCodes(t *testing.T) {
 
 // TestJPAKESessionManager_RemoveSession tests session removal
 func TestJPAKESessionManager_RemoveSession(t *testing.T) {
-	manager := NewJPAKESessionManager("go", "/tmp", "gradle", "./gradlew", "java")
+	manager := NewJPAKESessionManager("go", "/tmp", "gradle", "./gradlew", "java", "")
 
 	bridge := &pumpx2.Bridge{}
 	pairingCode := "123456"
@@ -293,7 +295,7 @@ func BenchmarkJPAKEAuthenticator_Creation(b *testing.B) {
 
 // BenchmarkJPAKESessionManager_GetOrCreate benchmarks session creation
 func BenchmarkJPAKESessionManager_GetOrCreate(b *testing.B) {
-	manager := NewJPAKESessionManager("go", "/tmp", "gradle", "./gradlew", "java")
+	manager := NewJPAKESessionManager("go", "/tmp", "gradle", "./gradlew", "java", "")
 	bridge := &pumpx2.Bridge{}
 	pairingCode := "123456"
 

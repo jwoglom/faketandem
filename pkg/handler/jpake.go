@@ -23,15 +23,16 @@ type JPAKESessionManager struct {
 	mutex          sync.RWMutex
 
 	// Configuration for creating authenticators
-	jpakeMode  string
-	pumpX2Path string
-	pumpX2Mode string
-	gradleCmd  string
-	javaCmd    string
+	jpakeMode     string
+	pumpX2Path    string
+	pumpX2Mode    string
+	gradleCmd     string
+	javaCmd       string
+	pumpX2JarPath string
 }
 
 // NewJPAKESessionManager creates a new JPAKE session manager
-func NewJPAKESessionManager(jpakeMode, pumpX2Path, pumpX2Mode, gradleCmd, javaCmd string) *JPAKESessionManager {
+func NewJPAKESessionManager(jpakeMode, pumpX2Path, pumpX2Mode, gradleCmd, javaCmd, pumpX2JarPath string) *JPAKESessionManager {
 	return &JPAKESessionManager{
 		authenticators: make(map[string]JPAKEAuthenticatorInterface),
 		jpakeMode:      jpakeMode,
@@ -39,6 +40,7 @@ func NewJPAKESessionManager(jpakeMode, pumpX2Path, pumpX2Mode, gradleCmd, javaCm
 		pumpX2Mode:     pumpX2Mode,
 		gradleCmd:      gradleCmd,
 		javaCmd:        javaCmd,
+		pumpX2JarPath:  pumpX2JarPath,
 	}
 }
 
@@ -55,7 +57,7 @@ func (m *JPAKESessionManager) GetOrCreate(sessionID string, pairingCode string, 
 
 	if m.jpakeMode == "pumpx2" {
 		log.Infof("Creating pumpX2-based JPAKE authenticator for session: %s", sessionID)
-		auth = NewPumpX2JPAKEAuthenticator(pairingCode, bridge, m.pumpX2Path, m.pumpX2Mode, m.gradleCmd, m.javaCmd)
+		auth = NewPumpX2JPAKEAuthenticator(pairingCode, bridge, m.pumpX2Path, m.pumpX2Mode, m.gradleCmd, m.javaCmd, m.pumpX2JarPath)
 	} else {
 		log.Infof("Creating Go-based JPAKE authenticator for session: %s", sessionID)
 		auth = NewJPAKEAuthenticator(pairingCode, bridge)

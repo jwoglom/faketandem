@@ -404,7 +404,7 @@ func TestJPAKEAuthenticator_IncompleteAuth(t *testing.T) {
 // TestJPAKESessionManager tests session management
 func TestJPAKESessionManager(t *testing.T) {
 	// Create manager with Go mode
-	manager := NewJPAKESessionManager("go", "/tmp/pumpx2", "gradle", "./gradlew", "java")
+	manager := NewJPAKESessionManager("go", "/tmp/pumpx2", "gradle", "./gradlew", "java", "")
 
 	// Create first session
 	session1 := manager.GetOrCreate("session1", "123456", &pumpx2.Bridge{})
