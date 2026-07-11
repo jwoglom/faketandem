@@ -9,18 +9,11 @@ is not tracked in git (see `.gitignore`); place the jar here yourself.
 
 ## Obtaining the jar
 
-The last one used here was `pumpx2-cliparser-1.9.0.jar`
-(SHA-256 `04e2005e0707586330188ab8644ffe876ae00d6a11e803a59de04504c585159d`),
-fetched from pumpX2's "Android CI" workflow's `maven-repository.zip` artifact
-on the `dev` branch (commit `3250225`, run #398,
-https://github.com/jwoglom/pumpX2/actions/runs/28298802885), extracted at
-`com/jwoglom/pumpx2/pumpx2-cliparser/1.9.0/pumpx2-cliparser-1.9.0.jar`.
+Run `make jar` from the repo root -- it downloads a prebuilt
+`pumpx2-cliparser-<version>.jar` from jitpack.io (see the `Makefile`'s
+`PUMPX2_CLIPARSER_VERSION` for the pinned version) directly into this
+directory. No local Gradle/JDK toolchain or pumpX2 checkout needed.
 
-To get a current one:
-
-1. Find the latest successful "Android CI" run on pumpX2's `dev` branch.
-2. Download its `maven-repository.zip` artifact (or the `pumpx2-cliparser-all.jar`
-   artifact directly, if that upload step succeeded for that run).
-3. Extract `com/jwoglom/pumpx2/pumpx2-cliparser/<version>/pumpx2-cliparser-<version>.jar`
-   and place it here.
-4. Update `run.sh`'s `-pumpx2-jar-path` argument to match the filename.
+To bump the version, update `PUMPX2_CLIPARSER_VERSION` in the `Makefile` and
+re-run `make jar`; also update `run.sh`'s `-pumpx2-jar-path` argument to match
+the new filename.
