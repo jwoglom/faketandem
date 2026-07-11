@@ -149,11 +149,18 @@ func (h *SetTempRateHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState 
 		},
 	}
 
+	// SetTempRateResponse(int status, int tempRateId). Note: as of pumpX2
+	// v1.9.0 this message's own @MessageProps(size=4) doesn't match what its
+	// buildCargo() actually emits (3 bytes), so Validate.isTrue always fails
+	// inside cliparser regardless of params -- an upstream library bug, not
+	// fixable from here. Kept semantically correct for clarity even though
+	// it's known to still fail.
 	response, err := h.bridge.EncodeMessage(
 		msg.TxID,
 		"SetTempRateResponse",
 		map[string]interface{}{
-			"status": 0,
+			"status":     0,
+			"tempRateId": 1,
 		},
 	)
 	if err != nil {
@@ -203,11 +210,13 @@ func (h *StopTempRateHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState
 		},
 	}
 
+	// StopTempRateResponse(int status, int tempRateId)
 	response, err := h.bridge.EncodeMessage(
 		msg.TxID,
 		"StopTempRateResponse",
 		map[string]interface{}{
-			"status": 0,
+			"status":     0,
+			"tempRateId": 1,
 		},
 	)
 	if err != nil {
@@ -219,6 +228,31 @@ func (h *StopTempRateHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState
 		Immediate:       true,
 		StateChanges:    stateChanges,
 	}, nil
+}
+
+// simpleControlResponseParamsOverrides provides response params for the
+// response classes whose real constructor doesn't match the generic
+// {"status": 0} shape SimpleControlHandler otherwise uses for every message
+// type it's registered for.
+var simpleControlResponseParamsOverrides = map[string]map[string]interface{}{
+	// PlaySoundResponse has no int-status constructor, only a raw byte[] one (size=1).
+	"PlaySoundResponse": {"raw": "00"},
+	// StreamDataPreflightResponse(int status, int statusTypeId, int streamTypeId)
+	"StreamDataPreflightResponse": {"status": 0, "statusTypeId": 0, "streamTypeId": 0},
+	// ActivateShelfModeResponse has no fields at all; only a no-arg constructor exists.
+	"ActivateShelfModeResponse": {},
+	// PrimeTubingSuspendResponse(int statusCode, int reserve)
+	"PrimeTubingSuspendResponse": {"statusCode": 0, "reserve": 0},
+	// FactoryResetResponse has no fields at all; only a no-arg constructor exists.
+	"FactoryResetResponse": {},
+	// AdditionalBolusResponse(int status, int bolusId, int reserve)
+	"AdditionalBolusResponse": {"status": 0, "bolusId": 1, "reserve": 0},
+	// CreateIDPResponse(int status, int newIdpId)
+	"CreateIDPResponse": {"status": 0, "newIdpId": 1},
+	// SetIDPSegmentResponse has no int-status constructor, only a raw byte[] one (size=2).
+	"SetIDPSegmentResponse": {"raw": "0000"},
+	// RenameIDPResponse(int status, int numberOfProfiles)
+	"RenameIDPResponse": {"status": 0, "numberOfProfiles": 1},
 }
 
 // SimpleControlHandler handles simple control requests that just return success
@@ -255,12 +289,15 @@ func (h *SimpleControlHandler) RequiresAuth() bool {
 func (h *SimpleControlHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling %s: txID=%d cargo=%v", h.msgType, msg.TxID, msg.Cargo)
 
+	params, ok := simpleControlResponseParamsOverrides[h.responseType]
+	if !ok {
+		params = map[string]interface{}{"status": 0}
+	}
+
 	response, err := h.bridge.EncodeMessage(
 		msg.TxID,
 		h.responseType,
-		map[string]interface{}{
-			"status": 0,
-		},
+		params,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode %s: %w", h.responseType, err)
