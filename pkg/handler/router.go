@@ -92,7 +92,6 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewBolusPermissionHandler(r.bridge))
 	r.RegisterHandler(NewBolusCalcDataSnapshotHandler(r.bridge))
 	r.RegisterHandler(NewInitiateBolusHandler(r.bridge))
-	r.RegisterHandler(NewBolusTerminationHandler(r.bridge))
 	r.RegisterHandler(NewRemoteBgEntryHandler(r.bridge))
 	r.RegisterHandler(NewRemoteCarbEntryHandler(r.bridge))
 	r.RegisterHandler(NewBolusPermissionReleaseHandler(r.bridge))
@@ -163,7 +162,7 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewStreamDataReadinessHandler(r.bridge))
 	r.RegisterHandler(NewFactoryResetBHandler(r.bridge))
 
-	// Bolus cancel handler (used by controlX2 instead of BolusTermination)
+	// Bolus cancel handler (used by controlX2)
 	r.RegisterHandler(NewCancelBolusHandler(r.bridge))
 
 	// Pump suspend/resume handlers
