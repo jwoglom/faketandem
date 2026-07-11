@@ -9,6 +9,10 @@ pumpx2:
 	fi
 	# Default org.gradle.jvmargs of -Xmx4096m is too large for a Raspberry Pi's RAM.
 	sed -i 's/org.gradle.jvmargs=-Xmx4096m/org.gradle.jvmargs=-Xmx1024m/' pumpX2/gradle.properties
+	# sampleapp/androidLib require the Android SDK and a working git subprocess to
+	# even configure, which a headless Pi running just the cliparser jar has neither
+	# of; drop them from the module graph so Gradle never evaluates them.
+	sed -i "s/include ':sampleapp', ':androidLib', ':messages', ':shared', ':cliparser'/include ':messages', ':shared', ':cliparser'/" pumpX2/settings.gradle
 
 jar: pumpx2
 	cd pumpX2 && ./gradlew :cliparser:shadowJar
