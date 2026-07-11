@@ -442,10 +442,16 @@ func (j *PumpX2JPAKEAuthenticator) encodeClientRequest(requestData map[string]in
 
 	// Try to use the bridge to encode the message if available
 	if j.bridge != nil {
-		// Build params map excluding messageName
+		// Build params map excluding messageName and cargo. cliparser's "encode"
+		// picks a constructor purely by matching parameter *count*, so any extra
+		// key makes it fail to find one -- "cargo" is a base Message field our
+		// output parser always includes (every message's toString() has it), but
+		// it's never an actual constructor parameter (constructors take the
+		// specific named fields, e.g. appInstanceId/centralChallenge; "cargo" is
+		// set internally from those during parse()).
 		params := make(map[string]interface{})
 		for key, value := range requestData {
-			if key != "messageName" {
+			if key != "messageName" && key != "cargo" {
 				params[key] = value
 			}
 		}
