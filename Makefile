@@ -4,8 +4,8 @@ build:
 	GOOS=linux GOARCH=arm go build -o main ./
 
 pumpx2:
-	@if [ ! -d pumpx2 ]; then \
-		git clone https://github.com/jwoglom/pumpx2 .; \
+	@if [ ! -d pumpX2 ]; then \
+		git clone https://github.com/jwoglom/pumpX2 pumpX2; \
 	fi
 
 .DEFAULT_GOAL := all
