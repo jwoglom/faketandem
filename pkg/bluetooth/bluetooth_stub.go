@@ -22,7 +22,7 @@ type Ble struct {
 }
 
 // New creates a new BLE device (stub for non-Linux platforms)
-func New(adapterID string) (*Ble, error) {
+func New(adapterID string, serialNumber string) (*Ble, error) {
 	log.Warn("Bluetooth is only supported on Linux. Creating stub BLE instance.")
 	return &Ble{
 		charData: make(map[CharacteristicType][]byte),
