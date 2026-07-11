@@ -371,8 +371,19 @@ func (j *PumpX2JPAKEAuthenticator) processRound1(requestData map[string]interfac
 }
 
 // processRound2 handles round 2
+//
+// jpake-server's Main.jpakeAuthServer does NOT print anything in response to
+// the client's round 2 request (Jpake2Request) -- its own round 2 public value
+// was already sent proactively as "JPAKE_2:" right after round 1b (see
+// processRound1), before it ever reads the client's round 2 message. It reads
+// Jpake2Request from stdin and then, without printing, immediately blocks
+// trying to read the client's round 3 request (Jpake3SessionKeyRequest) next;
+// only once *that* arrives does it print "JPAKE_3:". So this function must
+// only forward the client's request and return the already-cached
+// Jpake2Response -- trying to read "JPAKE_3:" here (as an earlier version of
+// this code did) deadlocks, since jpake-server won't produce it until the
+// round 3 request (sent by processRound3, on a later call) has also arrived.
 func (j *PumpX2JPAKEAuthenticator) processRound2(requestData map[string]interface{}) (map[string]interface{}, error) {
-	// Send client's Jpake2Request
 	requestHex := j.encodeClientRequest(requestData)
 
 	log.Debugf("Sending client Jpake2Request to pumpX2: %s", requestHex)
@@ -380,7 +391,23 @@ func (j *PumpX2JPAKEAuthenticator) processRound2(requestData map[string]interfac
 		log.Warnf("Failed to send Jpake2Request to pumpX2: %v", err)
 	}
 
-	// Read server's round 3 response
+	j.round = 2
+
+	return convertServerResponseToParams(j.round2Response)
+}
+
+// processRound3 handles round 3
+func (j *PumpX2JPAKEAuthenticator) processRound3(requestData map[string]interface{}) (map[string]interface{}, error) {
+	// Send client's Jpake3SessionKeyRequest. jpake-server has been blocked
+	// waiting for exactly this since it finished reading round 2 (see
+	// processRound2) -- only once it arrives does jpake-server print "JPAKE_3:".
+	requestHex := j.encodeClientRequest(requestData)
+
+	log.Debugf("Sending client Jpake3SessionKeyRequest to pumpX2: %s", requestHex)
+	if err := j.gexp.Send(requestHex + "\n"); err != nil {
+		log.Warnf("Failed to send to pumpX2: %v", err)
+	}
+
 	round3Regex := regexp.MustCompile(`JPAKE_3:\s*({.+})`)
 	output, _, err := j.gexp.Expect(round3Regex, 30*time.Second)
 	if err != nil {
@@ -402,21 +429,6 @@ func (j *PumpX2JPAKEAuthenticator) processRound2(requestData map[string]interfac
 	}
 
 	log.Debugf("Got server Round3 response: %+v", j.round3Response)
-
-	j.round = 2
-
-	return convertServerResponseToParams(j.round2Response)
-}
-
-// processRound3 handles round 3
-func (j *PumpX2JPAKEAuthenticator) processRound3(requestData map[string]interface{}) (map[string]interface{}, error) {
-	// Send client's Jpake3SessionKeyRequest
-	requestHex := j.encodeClientRequest(requestData)
-
-	log.Debugf("Sending client Jpake3SessionKeyRequest to pumpX2: %s", requestHex)
-	if err := j.gexp.Send(requestHex + "\n"); err != nil {
-		log.Warnf("Failed to send to pumpX2: %v", err)
-	}
 
 	j.round = 3
 
@@ -518,6 +530,20 @@ func (j *PumpX2JPAKEAuthenticator) encodeClientRequest(requestData map[string]in
 			if key != "messageName" && key != "cargo" {
 				params[key] = value
 			}
+		}
+
+		// Jpake3SessionKeyRequest has only one real field (challengeParam, an
+		// int) besides cargo, so excluding "cargo" above leaves exactly one
+		// param -- which collides with the class's OTHER one-arg constructor,
+		// Jpake3SessionKeyRequest(byte[] rawCargo). cliparser's "encode" picks
+		// whichever constructor Class.getConstructors() happens to return first
+		// for that parameter count, and empirically that's the byte[] one, which
+		// then fails to convert challengeParam's plain int/JSON-number value to
+		// byte[] ("Cannot convert java.lang.Integer to byte[]"). Route around
+		// the ambiguity by targeting that raw-cargo constructor deliberately: it
+		// reconstructs an identical message from the same bytes.
+		if messageName == "Jpake3SessionKeyRequest" {
+			params = map[string]interface{}{"cargo": requestData["cargo"]}
 		}
 
 		// Use bridge to encode the message

@@ -1,10 +1,15 @@
 package handler
 
 import (
+	"bufio"
 	"encoding/json"
 	"os"
+	"os/exec"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/jwoglom/faketandem/pkg/bluetooth"
 	"github.com/jwoglom/faketandem/pkg/pumpx2"
 )
 
@@ -105,5 +110,219 @@ func TestConvertServerResponseToParams_UnknownMessage(t *testing.T) {
 
 	if _, err := convertServerResponseToParams(envelope); err == nil {
 		t.Error("expected an error for an unmapped response message name")
+	}
+}
+
+// jpakeResponseTypeForTest mirrors JPAKEHandler.getResponseType -- duplicated
+// here since that method is tied to a *JPAKEHandler, not the authenticator.
+func jpakeResponseTypeForTest(requestType string) string {
+	switch requestType {
+	case "Jpake1aRequest":
+		return "Jpake1aResponse"
+	case "Jpake1bRequest":
+		return "Jpake1bResponse"
+	case "Jpake2Request":
+		return "Jpake2Response"
+	case "Jpake3SessionKeyRequest":
+		return "Jpake3SessionKeyResponse"
+	case "Jpake4KeyConfirmationRequest":
+		return "Jpake4KeyConfirmationResponse"
+	default:
+		return requestType + "Response"
+	}
+}
+
+// jpakeRoundForTest mirrors the round numbers wired up in router.go.
+func jpakeRoundForTest(requestType string) int {
+	switch requestType {
+	case "Jpake1aRequest", "Jpake1bRequest":
+		return 1
+	case "Jpake2Request":
+		return 2
+	case "Jpake3SessionKeyRequest":
+		return 3
+	case "Jpake4KeyConfirmationRequest":
+		return 4
+	default:
+		return 0
+	}
+}
+
+// TestPumpX2JPAKEAuthenticator_FullFlowViaJar drives PumpX2JPAKEAuthenticator
+// through all 5 real JPAKE rounds against a real "jpake" client subprocess
+// (pumpX2's own client-side JPAKE implementation), using jar mode so it runs
+// without gradle/network access.
+//
+// This guards against a regression where processRound2 tried to read
+// jpake-server's "JPAKE_3:" line immediately after forwarding the client's
+// Jpake2Request. jpake-server's Main.jpakeAuthServer does not print JPAKE_3
+// until it has *also* read the client's next request (Jpake3SessionKeyRequest)
+// from stdin -- so that early read blocked forever (a real device+app capture
+// showed this as a 30-second hang followed by a BLE disconnect). The fix moved
+// that read into processRound3, after the round 3 request has been sent.
+//
+//nolint:gocyclo // sequential protocol-driving test, not meaningfully splittable
+func TestPumpX2JPAKEAuthenticator_FullFlowViaJar(t *testing.T) {
+	jarPath := os.Getenv("FAKETANDEM_TEST_CLIPARSER_JAR")
+	if jarPath == "" {
+		t.Skip("FAKETANDEM_TEST_CLIPARSER_JAR not set, skipping real jar integration test")
+	}
+
+	const pairingCode = "123456"
+
+	bridge, err := pumpx2.NewBridge("", "jar", "", "java", jarPath)
+	if err != nil {
+		t.Fatalf("failed to create bridge: %v", err)
+	}
+	bridge.SetPairingCode(pairingCode)
+
+	auth := NewPumpX2JPAKEAuthenticator(pairingCode, bridge, "", "jar", "", "java", jarPath)
+	defer func() { _ = auth.Close() }()
+
+	clientCmd := exec.Command("java", "-jar", jarPath, "jpake", pairingCode)
+	clientStdin, err := clientCmd.StdinPipe()
+	if err != nil {
+		t.Fatalf("failed to create client stdin pipe: %v", err)
+	}
+	clientStdout, err := clientCmd.StdoutPipe()
+	if err != nil {
+		t.Fatalf("failed to create client stdout pipe: %v", err)
+	}
+	if err := clientCmd.Start(); err != nil {
+		t.Fatalf("failed to start jpake client: %v", err)
+	}
+	defer func() {
+		_ = clientStdin.Close()
+		if clientCmd.Process != nil {
+			_ = clientCmd.Process.Kill()
+		}
+	}()
+
+	scanner := bufio.NewScanner(clientStdout)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	readClientLine := func() (string, bool) {
+		type result struct {
+			line string
+			ok   bool
+		}
+		ch := make(chan result, 1)
+		go func() {
+			if scanner.Scan() {
+				ch <- result{scanner.Text(), true}
+				return
+			}
+			ch <- result{"", false}
+		}()
+		select {
+		case r := <-ch:
+			return r.line, r.ok
+		case <-time.After(20 * time.Second):
+			t.Fatal("timed out waiting for jpake client output")
+			return "", false
+		}
+	}
+
+	requestOrder := []string{
+		"Jpake1aRequest",
+		"Jpake1bRequest",
+		"Jpake2Request",
+		"Jpake3SessionKeyRequest",
+		"Jpake4KeyConfirmationRequest",
+	}
+
+	for _, expectedRequestType := range requestOrder {
+		var line string
+		for {
+			var ok bool
+			line, ok = readClientLine()
+			if !ok {
+				t.Fatalf("jpake client exited before sending %s", expectedRequestType)
+			}
+			if strings.Contains(line, "_SENT:") && strings.Contains(line, "packets") {
+				break
+			}
+			t.Logf("CLIENT (skipped): %s", line)
+		}
+
+		colonIdx := strings.Index(line, ": ")
+		if colonIdx < 0 {
+			t.Fatalf("could not find JSON payload in client line: %s", line)
+		}
+		var payload map[string]interface{}
+		if err := json.Unmarshal([]byte(line[colonIdx+2:]), &payload); err != nil {
+			t.Fatalf("failed to parse client request JSON: %v", err)
+		}
+		rawPackets, ok := payload["packets"].([]interface{})
+		if !ok || len(rawPackets) == 0 {
+			t.Fatalf("client request line had no packets: %s", line)
+		}
+		rawFrags := make([]string, len(rawPackets))
+		for i, p := range rawPackets {
+			rawFrags[i], _ = p.(string)
+		}
+
+		parsed, err := bridge.ParseMessage(bluetooth.CharAuthorization, rawFrags)
+		if err != nil {
+			t.Fatalf("ParseMessage failed for %s: %v", expectedRequestType, err)
+		}
+		if parsed.MessageType != expectedRequestType {
+			t.Fatalf("expected parsed message type %s, got %s", expectedRequestType, parsed.MessageType)
+		}
+
+		requestData := make(map[string]interface{}, len(parsed.Cargo)+1)
+		for k, v := range parsed.Cargo {
+			requestData[k] = v
+		}
+		requestData["messageName"] = parsed.MessageType
+
+		round := jpakeRoundForTest(parsed.MessageType)
+		responseParams, err := auth.ProcessRound(round, requestData)
+		if err != nil {
+			t.Fatalf("ProcessRound(%d) failed for %s: %v", round, expectedRequestType, err)
+		}
+
+		responseType := jpakeResponseTypeForTest(parsed.MessageType)
+		encoded, err := bridge.EncodeMessage(parsed.TxID, responseType, responseParams)
+		if err != nil {
+			t.Fatalf("EncodeMessage failed for %s: %v", responseType, err)
+		}
+		if len(encoded.Packets) == 0 {
+			t.Fatalf("EncodeMessage returned no packets for %s", responseType)
+		}
+
+		responseLine := strings.Join(encoded.Packets, " ") + "\n"
+		if _, err := clientStdin.Write([]byte(responseLine)); err != nil {
+			t.Fatalf("failed to write response to client stdin: %v", err)
+		}
+	}
+
+	if !auth.IsComplete() {
+		t.Fatal("authenticator did not reach round 4 completion")
+	}
+	sharedSecret, err := auth.GetSharedSecret()
+	if err != nil {
+		t.Fatalf("GetSharedSecret failed: %v", err)
+	}
+	if len(sharedSecret) == 0 {
+		t.Fatal("expected a non-empty derived shared secret")
+	}
+
+	// Drain remaining client output looking for its own derived secret / HMAC
+	// validation result, to independently confirm both sides agree.
+	found := false
+	for i := 0; i < 20; i++ {
+		line, ok := readClientLine()
+		if !ok {
+			break
+		}
+		t.Logf("CLIENT: %s", line)
+		if strings.Contains(line, "derivedSecret") || strings.Contains(line, "HMAC SECRET VALIDATES") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("client did not report a derived secret or HMAC validation after round 4")
 	}
 }
