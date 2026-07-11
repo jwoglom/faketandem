@@ -27,18 +27,26 @@ func opcodeAndTxIDFromFirstFragment(rawPacketsHex []string) (opcode int, txID in
 }
 
 // parseCliparserOutput extracts the message name and cargo fields from the
-// cliparser "parse" command's stdout. The real output shape is:
+// cliparser "parse" command's stdout. The real shape varies by how many
+// leading tab-separated fields precede the message dump:
 //
-//	<opcode-or-error-noise>\t<MessageName>[<field>=<value>,<field>=<value>,...]
+//	<opcode>\t<FullyQualifiedClassName>\t<MessageName>[<field>=<value>,...]
 //
-// where <value> is either a scalar (number/string) or a Java toString() array
-// literal like {65,4,119,...} (signed bytes) for byte[] fields. The leading
-// tab-separated segment is ignored -- see opcodeAndTxIDFromFirstFragment for why.
+// but when parse()'s own naive parseOpcode() fails to hex-decode the (space-
+// joined, multi-fragment) argument as a single blob, it instead prepends an
+// error field before the tab, e.g.:
+//
+//	Unable to parse: ...DecoderException: Odd length for hex string\t<MessageName>[...]
+//
+// Either way, the message dump is always the LAST tab-separated field, so
+// split on the last tab rather than the first -- splitting on the first tab
+// left the FQCN+tab+MessageName glued together as a single bogus "message
+// name" for single-fragment messages, which have no leading error field.
 func parseCliparserOutput(output string) (messageName string, cargo map[string]interface{}) {
 	cargo = make(map[string]interface{})
 
 	tail := output
-	if idx := strings.Index(output, "\t"); idx != -1 {
+	if idx := strings.LastIndex(output, "\t"); idx != -1 {
 		tail = output[idx+1:]
 	}
 	tail = strings.TrimSpace(tail)
