@@ -516,6 +516,20 @@ func (j *PumpX2JPAKEAuthenticator) encodeClientRequest(requestData map[string]in
 		return "00"
 	}
 
+	// If the caller gave us the client's original raw BLE fragments, forward
+	// them to jpake-server verbatim instead of re-encoding through a second
+	// cliparser JVM invocation -- jpake-server doesn't validate the request's
+	// txID, so the original bytes work as-is and this avoids ~1s+ of JVM
+	// startup latency per JPAKE round (a real device+app capture showed the
+	// phone disconnecting shortly after round 3, and cumulative per-round
+	// latency from spawning a JVM both to forward the request and to build the
+	// response is the leading suspect).
+	if rawPacketsHex, ok := requestData["rawPacketsHex"].([]string); ok && len(rawPacketsHex) > 0 {
+		result := strings.Join(rawPacketsHex, " ")
+		log.Debugf("Forwarding client request verbatim (no re-encode): %s -> %s", messageName, result)
+		return result
+	}
+
 	// Try to use the bridge to encode the message if available
 	if j.bridge != nil {
 		// Build params map excluding messageName and cargo. cliparser's "encode"

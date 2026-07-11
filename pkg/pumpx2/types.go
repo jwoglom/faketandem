@@ -9,6 +9,13 @@ type ParsedMessage struct {
 	IsSigned    bool                   `json:"isSigned"`
 	IsValid     bool                   `json:"isValid"`
 	Raw         string                 `json:"raw,omitempty"`
+
+	// RawPacketsHex holds the original, unstripped BLE fragments (including
+	// framing) exactly as received, in order. Kept around so callers that need
+	// to re-forward the message verbatim (e.g. the pumpX2 JPAKE bridge, which
+	// forwards the client's request bytes to jpake-server as-is) don't have to
+	// re-encode it through a second cliparser invocation.
+	RawPacketsHex []string `json:"-"`
 }
 
 // EncodedMessage represents an encoded message ready to send

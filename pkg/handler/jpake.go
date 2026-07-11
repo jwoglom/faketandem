@@ -121,12 +121,16 @@ func (h *JPAKEHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state
 	// PumpX2JPAKEAuthenticator.encodeClientRequest needs the message name to
 	// re-encode the client's request for pumpX2's real jpake-server subprocess;
 	// the Go-based authenticator ignores unrecognized keys, so this is harmless
-	// there.
-	requestData := make(map[string]interface{}, len(msg.Cargo)+1)
+	// there. rawPacketsHex lets it forward the client's original fragments to
+	// jpake-server verbatim instead of re-encoding them through a second,
+	// costly cliparser JVM invocation (jpake-server doesn't validate txID, so
+	// the original bytes work as-is).
+	requestData := make(map[string]interface{}, len(msg.Cargo)+2)
 	for k, v := range msg.Cargo {
 		requestData[k] = v
 	}
 	requestData["messageName"] = h.messageType
+	requestData["rawPacketsHex"] = msg.RawPacketsHex
 
 	// Process this round
 	responseParams, err := auth.ProcessRound(h.round, requestData)
