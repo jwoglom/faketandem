@@ -97,12 +97,12 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewRemoteCarbEntryHandler(r.bridge))
 	r.RegisterHandler(NewBolusPermissionReleaseHandler(r.bridge))
 
-	// Settings handlers - use generic settings manager
+	// Settings handlers - use generic settings manager. ControlIQSettingsRequest,
+	// TherapySettingsGlobalsRequest, and ControlIQGlobalsRequest are not
+	// registered: none of them have a real pumpX2 counterpart, so a real
+	// Tandem app can never send a message that decodes to these names.
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "BasalIQSettingsRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ControlIQSettingsRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "PumpGlobalsRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "TherapySettingsGlobalsRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ControlIQGlobalsRequest", true))
 
 	// Dynamic polling status handlers (controlX2 polls every 5 min)
 	r.RegisterHandler(NewCurrentBatteryHandler(r.bridge, "V2"))
@@ -243,7 +243,10 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMRateAlertSettingsRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "BasalIQAlertInfoRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "RemindersRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "QuickBolusSettingsRequest", true))
+	// QuickBolusSettingsRequest is not registered: no "QuickBolusSettingsResponse"
+	// class exists anywhere in pumpX2. The only quick-bolus message pumpX2 has
+	// is the write pair SetQuickBolusSettingsRequest/Response (registered
+	// above via SettingsWriteHandler), not a "get".
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CgmSupportPackageStatusRequest", true))
 
 	// Keep ProfileBasalHandler as custom since it uses pump state
