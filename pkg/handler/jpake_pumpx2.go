@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -55,6 +56,70 @@ func NewPumpX2JPAKEAuthenticator(pairingCode string, bridge *pumpx2.Bridge, pump
 		pumpX2JarPath: pumpX2JarPath,
 		round:         0,
 	}
+}
+
+// responseParamNames maps each real JPAKE response message name to its
+// constructor's parameter names, in order. jpake-server's own JSON output
+// (e.g. the line after "JPAKE_1A: ") already ran these through cliparser's
+// "encode" command for its own bookkeeping, so its "messageParams" array is
+// positional in this same constructor-argument order (see cliparser's
+// Main.encode/Main.encode(byte,Message,Object[])).
+var responseParamNames = map[string][]string{
+	"Jpake1aResponse":               {"appInstanceId", "centralChallengeHash"},
+	"Jpake1bResponse":               {"appInstanceId", "centralChallengeHash"},
+	"Jpake2Response":                {"appInstanceId", "centralChallengeHash"},
+	"Jpake3SessionKeyResponse":      {"appInstanceId", "nonce", "reserved"},
+	"Jpake4KeyConfirmationResponse": {"appInstanceId", "nonce", "reserved", "hashDigest"},
+}
+
+// convertServerResponseToParams converts one of jpake-server's own response
+// envelopes (the full JSON dumped after "JPAKE_1A:"/"JPAKE_1B:"/etc, shaped for
+// its own display/debugging with keys like messageName/txId/messageParams/
+// packets/characteristic) into the flat {fieldName: value} shape that
+// bridge.EncodeMessage needs to build the response message fresh with the
+// real request's txID. Without this, the 6-key envelope was passed through
+// wholesale and cliparser's "encode" (which picks a constructor purely by
+// matching parameter count) failed to find a match.
+func convertServerResponseToParams(envelope map[string]interface{}) (map[string]interface{}, error) {
+	messageName, _ := envelope["messageName"].(string)
+	fieldNames, ok := responseParamNames[messageName]
+	if !ok {
+		return nil, fmt.Errorf("unknown response message name for param extraction: %s", messageName)
+	}
+
+	rawParams, ok := envelope["messageParams"].([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("response envelope for %s missing messageParams array", messageName)
+	}
+	if len(rawParams) != len(fieldNames) {
+		return nil, fmt.Errorf("response envelope for %s has %d messageParams, expected %d", messageName, len(rawParams), len(fieldNames))
+	}
+
+	params := make(map[string]interface{}, len(fieldNames))
+	for i, name := range fieldNames {
+		params[name] = convertServerResponseValue(rawParams[i])
+	}
+	return params, nil
+}
+
+// convertServerResponseValue converts a single messageParams entry from
+// jpake-server's JSON output into the shape cliparser's "encode" command
+// expects for a byte[] constructor parameter: a hex string. org.json
+// serializes a Java byte[] as a JSON array of signed byte values (e.g.
+// [65,4,-116,...]); non-array values (e.g. the int appInstanceId) pass
+// through unchanged.
+func convertServerResponseValue(value interface{}) interface{} {
+	arr, ok := value.([]interface{})
+	if !ok {
+		return value
+	}
+	b := make([]byte, len(arr))
+	for i, v := range arr {
+		if f, ok := v.(float64); ok {
+			b[i] = byte(int64(f))
+		}
+	}
+	return hex.EncodeToString(b)
 }
 
 // ProcessRound processes a JPAKE round using pumpX2's server-side implementation
@@ -268,7 +333,7 @@ func (j *PumpX2JPAKEAuthenticator) processRound1(requestData map[string]interfac
 		}
 
 		j.round = 1
-		return j.round1aResponse, nil
+		return convertServerResponseToParams(j.round1aResponse)
 	}
 
 	// Second call - send client's Jpake1bRequest
@@ -302,7 +367,7 @@ func (j *PumpX2JPAKEAuthenticator) processRound1(requestData map[string]interfac
 
 	log.Debugf("Got server Round2 response: %+v", j.round2Response)
 
-	return j.round1bResponse, nil
+	return convertServerResponseToParams(j.round1bResponse)
 }
 
 // processRound2 handles round 2
@@ -340,11 +405,10 @@ func (j *PumpX2JPAKEAuthenticator) processRound2(requestData map[string]interfac
 
 	j.round = 2
 
-	return j.round2Response, nil
+	return convertServerResponseToParams(j.round2Response)
 }
 
 // processRound3 handles round 3
-//nolint:unparam // error return required by interface, may be used in future
 func (j *PumpX2JPAKEAuthenticator) processRound3(requestData map[string]interface{}) (map[string]interface{}, error) {
 	// Send client's Jpake3SessionKeyRequest
 	requestHex := j.encodeClientRequest(requestData)
@@ -365,7 +429,7 @@ func (j *PumpX2JPAKEAuthenticator) processRound3(requestData map[string]interfac
 		j.serverNonce = []byte(serverNonceHex)
 	}
 
-	return j.round3Response, nil
+	return convertServerResponseToParams(j.round3Response)
 }
 
 // processRound4 handles round 4
@@ -427,7 +491,7 @@ func (j *PumpX2JPAKEAuthenticator) processRound4(requestData map[string]interfac
 
 	j.round = 4
 
-	return j.round4Response, nil
+	return convertServerResponseToParams(j.round4Response)
 }
 
 // encodeClientRequest encodes a client request using pumpX2's format
