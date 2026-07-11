@@ -25,8 +25,6 @@ type Ble struct {
 	device  *gatt.Device
 	central *gatt.Central
 
-	serialNumber string
-
 	// Notifiers for each characteristic
 	notifiers    map[CharacteristicType]gatt.Notifier
 	notifiersMtx sync.Mutex
@@ -66,7 +64,7 @@ var DefaultServerOptions = []gatt.Option{
 }
 
 // New creates a new BLE device with the Tandem pump service
-func New(adapterID string, serialNumber string) (*Ble, error) {
+func New(adapterID string) (*Ble, error) {
 	d, err := gatt.NewDevice(DefaultServerOptions...)
 	if err != nil {
 		log.Fatalf("pkg bluetooth; failed to open device, err: %s", err)
@@ -75,7 +73,6 @@ func New(adapterID string, serialNumber string) (*Ble, error) {
 
 	b := &Ble{
 		device:        &d,
-		serialNumber:  serialNumber,
 		notifiers:     make(map[CharacteristicType]gatt.Notifier),
 		charData:      make(map[CharacteristicType][]byte),
 		extraCharData: make(map[string][]byte),
@@ -110,7 +107,7 @@ func New(adapterID string, serialNumber string) (*Ble, error) {
 			}
 		}),
 		gatt.CentralDisconnected(func(c gatt.Central) {
-			log.Tracef("pkg bluetooth; ** disconnect: %s", c.ID())
+			log.Debugf("pkg bluetooth; ** disconnect: %s", c.ID())
 			b.central = nil
 			if b.connectionHandler != nil {
 				b.connectionHandler(false)
@@ -141,12 +138,19 @@ func New(adapterID string, serialNumber string) (*Ble, error) {
 func (b *Ble) setupService(d gatt.Device) {
 	b.pumpNameForAdv = pumpName
 
-	b.addGenericAttributeService(d)
+	// Registration order and UUID form (16-bit vs 128-bit) here match a btsnoop
+	// capture of a real Tandem Mobi pairing exactly: Generic Access, Generic
+	// Attribute, Device Information, then the Tandem Pump service, then the
+	// unknown FDFA service, with FDFB/FDFA both declared as short 16-bit UUIDs
+	// (0xFDFB is a Bluetooth SIG-assigned 16-bit UUID for Tandem Diabetes Care).
+	// A real client's single "Read By Group Type" service-discovery request
+	// combines all five services into one response only when they share the
+	// same UUID length, since ATT can't mix UUID lengths within one PDU.
 	b.addGenericAccessService(d)
+	b.addGenericAttributeService(d)
 	b.addDeviceInformationService(d)
-	b.addUnknownServiceFDFA(d)
 
-	serviceUUID := gatt.MustParseUUID(PumpServiceUUID)
+	serviceUUID := gatt.UUID16(0xFDFB)
 	s := gatt.NewService(serviceUUID)
 
 	// Add all characteristics
@@ -161,6 +165,8 @@ func (b *Ble) setupService(d gatt.Device) {
 	if err != nil {
 		log.Fatalf("pkg bluetooth; could not add service: %s", err)
 	}
+
+	b.addUnknownServiceFDFA(d)
 
 	err = b.advertisePump(d, pumpName)
 	if err != nil {
@@ -200,14 +206,18 @@ func (b *Ble) addDeviceInformationService(d gatt.Device) {
 
 	b.addReadOnlyCharacteristic(s, ManufacturerNameStringCharUUID, []byte("Tandem Diabetes Care"))
 	b.addReadOnlyCharacteristic(s, ModelNumberStringCharUUID, []byte("X2")) // Always "X2" even for Mobi
-	b.addReadOnlyCharacteristic(s, SerialNumberStringCharUUID, []byte(b.serialNumber))
+	// A real Tandem Mobi's Serial Number String characteristic reports a truncated
+	// suffix of its device name (e.g. name "Tandem Mobi 976" -> serial "bi 976"),
+	// confirmed via a btsnoop capture of an official pairing. Reproduce that quirk
+	// instead of a real serial number so identity checks match genuine hardware.
+	b.addReadOnlyCharacteristic(s, SerialNumberStringCharUUID, []byte(pumpName[9:]))
 	b.addReadOnlyCharacteristic(s, SoftwareRevisionStringCharUUID, []byte("3553172181"))
 
 	b.addService(d, s, "Device Information")
 }
 
 func (b *Ble) addUnknownServiceFDFA(d gatt.Device) {
-	serviceUUID := gatt.MustParseUUID(UnknownServiceFDFAUUID)
+	serviceUUID := gatt.UUID16(0xFDFA)
 	s := gatt.NewService(serviceUUID)
 
 	b.addUnknownWriteNotifyCharacteristic(s, UnknownCharFFE8UUID)
@@ -339,7 +349,7 @@ func (b *Ble) addReadOnlyCharacteristic(s *gatt.Service, uuidStr string, initial
 		if data == nil {
 			data = []byte{}
 		}
-		log.Tracef("pkg bluetooth; read request on %s, responding with: %s", uuidStr, hex.EncodeToString(data))
+		log.Debugf("pkg bluetooth; read request on %s, responding with: %s", uuidStr, hex.EncodeToString(data))
 		if _, err := rsp.Write(data); err != nil {
 			log.Warnf("Failed to write BLE response: %v", err)
 		}
@@ -355,7 +365,7 @@ func (b *Ble) addReadWriteCharacteristic(s *gatt.Service, uuidStr string, initia
 		dataCopy := make([]byte, len(data))
 		copy(dataCopy, data)
 		b.setExtraCharacteristicData(uuidStr, dataCopy)
-		log.Tracef("pkg bluetooth; received write on %s: %s", uuidStr, hex.EncodeToString(dataCopy))
+		log.Debugf("pkg bluetooth; received write on %s: %s", uuidStr, hex.EncodeToString(dataCopy))
 		return 0
 	})
 	char.HandleReadFunc(func(rsp gatt.ResponseWriter, req *gatt.ReadRequest) {
@@ -363,7 +373,7 @@ func (b *Ble) addReadWriteCharacteristic(s *gatt.Service, uuidStr string, initia
 		if data == nil {
 			data = []byte{}
 		}
-		log.Tracef("pkg bluetooth; read request on %s, responding with: %s", uuidStr, hex.EncodeToString(data))
+		log.Debugf("pkg bluetooth; read request on %s, responding with: %s", uuidStr, hex.EncodeToString(data))
 		if _, err := rsp.Write(data); err != nil {
 			log.Warnf("Failed to write BLE response: %v", err)
 		}
@@ -372,7 +382,7 @@ func (b *Ble) addReadWriteCharacteristic(s *gatt.Service, uuidStr string, initia
 
 func (b *Ble) bindWriteNotifyHandlers(char *gatt.Characteristic, charType CharacteristicType) {
 	char.HandleWriteFunc(func(r gatt.Request, data []byte) (status byte) {
-		log.Tracef("pkg bluetooth; received write on %s: %s", charType, hex.EncodeToString(data))
+		log.Debugf("pkg bluetooth; received write on %s: %s", charType, hex.EncodeToString(data))
 
 		dataCopy := make([]byte, len(data))
 		copy(dataCopy, data)
@@ -397,7 +407,7 @@ func (b *Ble) bindNotifyHandlers(char *gatt.Characteristic, charType Characteris
 
 func (b *Ble) bindUnknownWriteNotifyHandlers(char *gatt.Characteristic, uuidStr string) {
 	char.HandleWriteFunc(func(r gatt.Request, data []byte) (status byte) {
-		log.Tracef("pkg bluetooth; received write on %s: %s", uuidStr, hex.EncodeToString(data))
+		log.Debugf("pkg bluetooth; received write on %s: %s", uuidStr, hex.EncodeToString(data))
 		return 0
 	})
 	char.HandleNotifyFunc(func(r gatt.Request, n gatt.Notifier) {
@@ -407,7 +417,7 @@ func (b *Ble) bindUnknownWriteNotifyHandlers(char *gatt.Characteristic, uuidStr 
 
 func (b *Ble) bindUnknownWriteOnlyHandlers(char *gatt.Characteristic, uuidStr string) {
 	char.HandleWriteFunc(func(r gatt.Request, data []byte) (status byte) {
-		log.Tracef("pkg bluetooth; received write on %s: %s", uuidStr, hex.EncodeToString(data))
+		log.Debugf("pkg bluetooth; received write on %s: %s", uuidStr, hex.EncodeToString(data))
 		return 0
 	})
 }
@@ -504,7 +514,7 @@ func (b *Ble) Notify(charType CharacteristicType, data []byte) error {
 		return fmt.Errorf("notifier for %s is closed", charType)
 	}
 
-	log.Tracef("pkg bluetooth; sending notification on %s: %s", charType, hex.EncodeToString(data))
+	log.Debugf("pkg bluetooth; sending notification on %s: %s", charType, hex.EncodeToString(data))
 	_, err := notifier.Write(data)
 	return err
 }

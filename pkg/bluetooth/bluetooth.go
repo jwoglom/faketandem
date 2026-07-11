@@ -12,11 +12,6 @@ const (
 	DeviceInformationServiceUUID = "180A"
 )
 
-// Additional service UUIDs observed from the Tandem Mobi pump.
-const (
-	UnknownServiceFDFAUUID = "0000fdfa-0000-1000-8000-00805f9b34fb"
-)
-
 // Characteristic UUIDs
 const (
 	CurrentStatusCharUUID    = "7B83FFF6-9F77-4E5C-8064-AAE2C24838B9"
