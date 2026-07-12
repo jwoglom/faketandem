@@ -72,7 +72,7 @@ func (j *QuickReconnectJPAKEAuthenticator) processRound3() (map[string]interface
 	return map[string]interface{}{
 		"appInstanceId": 0,
 		"nonce":         hex.EncodeToString(serverNonce),
-		"reserved":      hex.EncodeToString(make([]byte, 4)),
+		"reserved":      hex.EncodeToString(make([]byte, 8)),
 	}, nil
 }
 
@@ -112,7 +112,7 @@ func (j *QuickReconnectJPAKEAuthenticator) processRound4(requestData map[string]
 	return map[string]interface{}{
 		"appInstanceId": 0,
 		"nonce":         hex.EncodeToString(serverNonce),
-		"reserved":      hex.EncodeToString(make([]byte, 4)),
+		"reserved":      hex.EncodeToString(make([]byte, 8)),
 		"hashDigest":    hex.EncodeToString(serverHash),
 	}, nil
 }
