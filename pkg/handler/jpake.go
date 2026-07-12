@@ -110,11 +110,37 @@ func (m *JPAKESessionManager) GetOrCreate(sessionID string, pairingCode string, 
 	return auth, nil
 }
 
+// jpakeCloser is implemented by authenticators that hold a live resource
+// needing explicit cleanup -- currently PumpX2JPAKEAuthenticator's spawned
+// jpake-server subprocess. Checked via type assertion since most
+// authenticators (Go-based, quick-reconnect) hold no such resource.
+type jpakeCloser interface {
+	Close() error
+}
+
+// closeAuthenticator releases any resources (e.g. a jpake-server subprocess)
+// held by auth. Without this, every completed or abandoned JPAKE handshake
+// using the pumpx2 mode would leak its "java -jar ... jpake-server" process
+// for the lifetime of the emulator, degrading performance (and eventually
+// handshake latency/reliability) the longer the emulator runs.
+func closeAuthenticator(sessionID string, auth JPAKEAuthenticatorInterface) {
+	closer, ok := auth.(jpakeCloser)
+	if !ok {
+		return
+	}
+	if err := closer.Close(); err != nil {
+		log.Warnf("Failed to close JPAKE authenticator for session %s: %v", sessionID, err)
+	}
+}
+
 // Remove removes an authenticator for a session
 func (m *JPAKESessionManager) Remove(sessionID string) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
+	if auth, exists := m.authenticators[sessionID]; exists {
+		closeAuthenticator(sessionID, auth)
+	}
 	delete(m.authenticators, sessionID)
 	log.Debugf("Removed JPAKE authenticator for session: %s", sessionID)
 }
@@ -128,6 +154,9 @@ func (m *JPAKESessionManager) RemoveAll() {
 
 	if len(m.authenticators) == 0 {
 		return
+	}
+	for sessionID, auth := range m.authenticators {
+		closeAuthenticator(sessionID, auth)
 	}
 	m.authenticators = make(map[string]JPAKEAuthenticatorInterface)
 	log.Debug("Cleared all in-progress JPAKE authenticators")
