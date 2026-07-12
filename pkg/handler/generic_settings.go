@@ -10,6 +10,15 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// genericSettingsResponseTypeOverrides maps a request message type to its real
+// pumpX2 response class name, for the rare cases where naively replacing the
+// "Request" suffix with "Response" doesn't produce a real class name.
+// MalfunctionStatusRequest's real response is MalfunctionBitmaskStatusResponse,
+// not "MalfunctionStatusResponse" (confirmed against pumpX2's own class table).
+var genericSettingsResponseTypeOverrides = map[string]string{
+	"MalfunctionStatusRequest": "MalfunctionBitmaskStatusResponse",
+}
+
 // GenericSettingsHandler handles configurable settings messages
 type GenericSettingsHandler struct {
 	bridge          *pumpx2.Bridge
@@ -50,10 +59,14 @@ func (h *GenericSettingsHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpSt
 
 	log.Debugf("Settings response for %s: %v", h.messageType, responseData)
 
-	// Determine response type (replace "Request" with "Response")
-	responseType := h.messageType
-	if len(responseType) > 7 && responseType[len(responseType)-7:] == "Request" {
-		responseType = responseType[:len(responseType)-7] + "Response"
+	// Determine response type (replace "Request" with "Response"), unless a
+	// real pumpX2 response class name override applies.
+	responseType, ok := genericSettingsResponseTypeOverrides[h.messageType]
+	if !ok {
+		responseType = h.messageType
+		if len(responseType) > 7 && responseType[len(responseType)-7:] == "Request" {
+			responseType = responseType[:len(responseType)-7] + "Response"
+		}
 	}
 
 	// Build response using pumpX2 bridge
