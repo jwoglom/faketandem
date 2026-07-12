@@ -82,8 +82,12 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewJPAKEHandler(r.bridge, r.jpakeManager, "Jpake3SessionKeyRequest", 3))
 	r.RegisterHandler(NewJPAKEHandler(r.bridge, r.jpakeManager, "Jpake4KeyConfirmationRequest", 4))
 
-	// Status and data handlers
-	r.RegisterHandler(NewCurrentStatusHandler(r.bridge))
+	// Status and data handlers. CurrentStatusRequest/Response was removed: no
+	// such class exists anywhere in pumpX2 (confirmed via the jar's own class
+	// table), so a real Tandem app can never send a message that decodes to
+	// this name -- the real protocol exposes this data via separate per-topic
+	// messages (InsulinStatusResponse, CurrentBasalStatusResponse,
+	// CurrentBolusStatusResponse, etc), already handled elsewhere.
 	r.RegisterHandler(NewHistoryLogHandler(r.bridge))
 	// CreateHistoryLogRequest/Response has no corresponding class anywhere in
 	// pumpX2 -- not part of the real protocol, so no handler is registered.

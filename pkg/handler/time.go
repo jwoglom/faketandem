@@ -2,6 +2,7 @@ package handler
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/jwoglom/faketandem/pkg/pumpx2"
 	"github.com/jwoglom/faketandem/pkg/state"
@@ -44,12 +45,14 @@ func (h *TimeSinceResetHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpSta
 	// Update bridge with current time since reset
 	h.bridge.SetTimeSinceReset(timeSinceReset)
 
-	// Build response using pumpX2 bridge
+	// Build response using pumpX2 bridge. TimeSinceResetResponse's real
+	// constructor is (long currentTime, long pumpTimeSinceReset).
 	response, err := h.bridge.EncodeMessage(
 		msg.TxID,
 		"TimeSinceResetResponse",
 		map[string]interface{}{
-			"timeSinceReset": timeSinceReset,
+			"currentTime":        time.Now().Unix(),
+			"pumpTimeSinceReset": timeSinceReset,
 		},
 	)
 
