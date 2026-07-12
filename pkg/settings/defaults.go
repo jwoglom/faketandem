@@ -70,8 +70,8 @@ func registerSettingsDefaults(manager *Manager) {
 func registerPollingDefaults(manager *Manager) {
 	registerConstant(manager, "CurrentBatteryV2Request", map[string]interface{}{
 		"batteryLevelPercent": 85,
-		"batteryVoltage":     2800,
-		"isCharging":         false,
+		"batteryVoltage":      2800,
+		"isCharging":          false,
 	})
 
 	registerConstant(manager, "ControlIQIOBRequest", map[string]interface{}{
@@ -141,10 +141,22 @@ func registerPumpInfoDefaults(manager *Manager) {
 		"featureBitmask": 0,
 	})
 
+	// PumpVersionResponse's real constructor takes 10 fields (long armSwVer,
+	// long mspSwVer, long configABits, long configBBits, long serialNum, long
+	// partNum, String pumpRev, long pcbaSN, String pcbaRev, long modelNum) --
+	// values below are a real captured Tandem Mobi PumpVersionResponse from
+	// pumpX2's own test fixtures (PumpVersionResponseTest.testPumpVersionResponse_Mobi).
 	registerConstant(manager, "PumpVersionRequest", map[string]interface{}{
-		"armSwVer":  "7.6.0.0",
-		"mspSwVer":  "1.0.0.0",
-		"configVer": "1.0.0.0",
+		"armSwVer":    3628697757,
+		"mspSwVer":    0,
+		"configABits": 0,
+		"configBBits": 0,
+		"serialNum":   1226976,
+		"partNum":     1013045,
+		"pumpRev":     "0",
+		"pcbaSN":      232700077,
+		"pcbaRev":     "0",
+		"modelNum":    1004000,
 	})
 
 	registerConstant(manager, "BleSoftwareInfoRequest", map[string]interface{}{
@@ -188,17 +200,17 @@ func registerNotificationDefaults(manager *Manager) {
 func registerControlIQDefaults(manager *Manager) {
 	// ControlIQInfoV1Request — from HOME_SCREEN_CHANGE, CONTROL_IQ_INFO qualifying events
 	registerConstant(manager, "ControlIQInfoV1Request", map[string]interface{}{
-		"controlIQEnabled": true,
-		"currentUserMode":  0, // normal mode
-		"weight":           70,
+		"controlIQEnabled":  true,
+		"currentUserMode":   0, // normal mode
+		"weight":            70,
 		"totalDailyInsulin": 40,
 	})
 
 	// ControlIQInfoV2Request — newer variant
 	registerConstant(manager, "ControlIQInfoV2Request", map[string]interface{}{
-		"controlIQEnabled": true,
-		"currentUserMode":  0,
-		"weight":           70,
+		"controlIQEnabled":  true,
+		"currentUserMode":   0,
+		"weight":            70,
 		"totalDailyInsulin": 40,
 	})
 
@@ -304,11 +316,11 @@ func registerAdditionalStatusDefaults(manager *Manager) {
 	})
 
 	registerConstant(manager, "IDPSettingsRequest", map[string]interface{}{
-		"status":       0,
-		"name":         "Profile 1",
-		"idpId":        1,
-		"numSegments":  1,
-		"maxBolus":     25000,
+		"status":          0,
+		"name":            "Profile 1",
+		"idpId":           1,
+		"numSegments":     1,
+		"maxBolus":        25000,
 		"insulinDuration": 300,
 	})
 
@@ -330,14 +342,14 @@ func registerAdditionalStatusDefaults(manager *Manager) {
 		"features": 0,
 	})
 	registerConstant(manager, "PumpVersionBRequest", map[string]interface{}{
-		"armSoftwareVersion":   "3553172181",
-		"mspsoftwareVersion":   "0",
-		"configVersion":        "0",
-		"bleHardwareVersion":   "0",
-		"bleFirmwareVersion":   "0",
-		"bleModelNumber":       "0",
-		"bsoftwareVersion":     "0",
-		"motorModuleVersion":   "0",
+		"armSoftwareVersion": "3553172181",
+		"mspsoftwareVersion": "0",
+		"configVersion":      "0",
+		"bleHardwareVersion": "0",
+		"bleFirmwareVersion": "0",
+		"bleModelNumber":     "0",
+		"bsoftwareVersion":   "0",
+		"motorModuleVersion": "0",
 	})
 	registerConstant(manager, "CgmStatusV2Request", map[string]interface{}{
 		"cgmSensorType":      1,
@@ -346,10 +358,10 @@ func registerAdditionalStatusDefaults(manager *Manager) {
 		"sessionState":       1,
 	})
 	registerConstant(manager, "CurrentEgvGuiDataV2Request", map[string]interface{}{
-		"egv":           120,
-		"trendRate":     0,
-		"trendArrow":    4,
-		"status":        0,
+		"egv":            120,
+		"trendRate":      0,
+		"trendArrow":     4,
+		"status":         0,
 		"timeSinceReset": 0,
 	})
 	registerConstant(manager, "LastBolusStatusRequest", map[string]interface{}{

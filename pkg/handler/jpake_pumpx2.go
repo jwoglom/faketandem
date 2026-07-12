@@ -34,6 +34,13 @@ type PumpX2JPAKEAuthenticator struct {
 	sharedSecret []byte
 	serverNonce  []byte
 
+	// longTermSecret is the properly hex-decoded JPAKE derivedSecret, kept
+	// separate from sharedSecret (which mirrors an existing bytes-of-the-hex-
+	// string convention used for the post-auth message-signing key) because
+	// GetLongTermSecret needs the real secret bytes for a later quick-pair
+	// reconnect's HKDF/HMAC math to match pumpX2's jpake-server.
+	longTermSecret []byte
+
 	// Response cache for each round
 	round1aResponse map[string]interface{}
 	round1bResponse map[string]interface{}
@@ -496,6 +503,11 @@ func (j *PumpX2JPAKEAuthenticator) processRound4(requestData map[string]interfac
 		} else {
 			if derivedSecretHex, ok := result["derivedSecret"].(string); ok {
 				j.sharedSecret = []byte(derivedSecretHex)
+				if raw, decErr := hex.DecodeString(derivedSecretHex); decErr == nil {
+					j.longTermSecret = raw
+				} else {
+					log.Warnf("Failed to hex-decode derivedSecret for long-term key caching: %v", decErr)
+				}
 				log.Infof("Extracted shared secret from pumpX2: %s", derivedSecretHex)
 			}
 		}
@@ -609,6 +621,20 @@ func (j *PumpX2JPAKEAuthenticator) GetSharedSecret() ([]byte, error) {
 	}
 
 	return j.sharedSecret, nil
+}
+
+// GetLongTermSecret returns the properly decoded JPAKE derivedSecret bytes,
+// suitable for caching and reuse by a later quick-pair reconnect (only valid
+// after round 4).
+func (j *PumpX2JPAKEAuthenticator) GetLongTermSecret() ([]byte, error) {
+	j.mutex.Lock()
+	defer j.mutex.Unlock()
+
+	if j.round < 4 {
+		return nil, fmt.Errorf("JPAKE not complete, current round: %d", j.round)
+	}
+
+	return j.longTermSecret, nil
 }
 
 // IsComplete returns true if JPAKE authentication is complete

@@ -48,7 +48,9 @@ func (h *BolusPermissionHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpSt
 		msg.TxID,
 		"BolusPermissionResponse",
 		map[string]interface{}{
-			"granted": true,
+			"status":       0,
+			"bolusId":      pumpState.GetNextBolusID(),
+			"nackReasonId": 0,
 		},
 	)
 
@@ -88,15 +90,23 @@ func (h *BolusCalcDataSnapshotHandler) RequiresAuth() bool {
 func (h *BolusCalcDataSnapshotHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling BolusCalcDataSnapshotRequest: txID=%d", msg.TxID)
 
-	// Provide current bolus calculation data
+	// Provide current bolus calculation data. BolusCalcDataSnapshotResponse's
+	// real constructor takes 13 fields (int/long amounts scaled by 1000, per
+	// pumpX2's convention elsewhere) -- see BolusCalcDataSnapshotResponse.java.
 	calcData := map[string]interface{}{
-		"iob":              pumpState.IOB,
-		"basalRate":        pumpState.GetBasalRate(),
-		"timeSinceReset":   pumpState.GetTimeSinceReset(),
-		"bolusId":          pumpState.GetNextBolusID(),
-		"carbRatio":        12.0,  // g/U - placeholder
-		"correctionFactor": 50.0,  // mg/dL/U - placeholder
-		"targetBG":         100.0, // mg/dL - placeholder
+		"isUnacked":                 false,
+		"correctionFactor":          50,                          // mg/dL/U - placeholder
+		"iob":                       int64(pumpState.IOB * 1000), // milli-units
+		"cartridgeRemainingInsulin": 20000,                       // milli-units - placeholder
+		"targetBg":                  100,                         // mg/dL - placeholder
+		"isf":                       50,                          // mg/dL/U - placeholder
+		"carbEntryEnabled":          true,
+		"carbRatio":                 int64(12000), // g/U * 1000 - placeholder
+		"maxBolusAmount":            25000,        // milli-units - placeholder
+		"maxBolusHourlyTotal":       int64(25000), // milli-units - placeholder
+		"maxBolusEventsExceeded":    false,
+		"maxIobEventsExceeded":      false,
+		"isAutopopAllowed":          true,
 	}
 
 	log.Debugf("Bolus calc data: IOB=%.2f, basal=%.2f, bolusID=%d",
@@ -183,75 +193,14 @@ func (h *InitiateBolusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpStat
 		msg.TxID,
 		"InitiateBolusResponse",
 		map[string]interface{}{
-			"bolusId": bolusID,
-			"success": true,
+			"status":       0,
+			"bolusId":      bolusID,
+			"statusTypeId": 0,
 		},
 	)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode InitiateBolusResponse: %w", err)
-	}
-
-	return &Response{
-		ResponseMessage: response,
-		Immediate:       true,
-		StateChanges:    stateChanges,
-	}, nil
-}
-
-// BolusTerminationHandler handles BolusTerminationRequest messages
-type BolusTerminationHandler struct {
-	bridge *pumpx2.Bridge
-}
-
-// NewBolusTerminationHandler creates a new bolus termination handler
-func NewBolusTerminationHandler(bridge *pumpx2.Bridge) *BolusTerminationHandler {
-	return &BolusTerminationHandler{
-		bridge: bridge,
-	}
-}
-
-// MessageType returns the message type this handler processes
-func (h *BolusTerminationHandler) MessageType() string {
-	return "BolusTerminationRequest"
-}
-
-// RequiresAuth returns true if this message requires authentication
-func (h *BolusTerminationHandler) RequiresAuth() bool {
-	return true
-}
-
-// HandleMessage processes a BolusTerminationRequest
-func (h *BolusTerminationHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
-	log.Infof("Handling BolusTerminationRequest: txID=%d", msg.TxID)
-
-	if !pumpState.Bolus.Active {
-		log.Warn("No active bolus to terminate")
-	}
-
-	log.Infof("Terminating bolus: delivered %.2f of %.2f units",
-		pumpState.Bolus.UnitsDelivered, pumpState.Bolus.UnitsTotal)
-
-	// Stop the bolus
-	stateChanges := []StateChange{
-		{
-			Type: StateChangeBolus,
-			Data: &state.BolusState{
-				Active: false,
-			},
-		},
-	}
-
-	response, err := h.bridge.EncodeMessage(
-		msg.TxID,
-		"BolusTerminationResponse",
-		map[string]interface{}{
-			"success": true,
-		},
-	)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to encode BolusTerminationResponse: %w", err)
 	}
 
 	return &Response{
@@ -300,7 +249,7 @@ func (h *RemoteBgEntryHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpStat
 		msg.TxID,
 		"RemoteBgEntryResponse",
 		map[string]interface{}{
-			"success": true,
+			"status": 0,
 		},
 	)
 
@@ -353,7 +302,7 @@ func (h *RemoteCarbEntryHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpSt
 		msg.TxID,
 		"RemoteCarbEntryResponse",
 		map[string]interface{}{
-			"success": true,
+			"status": 0,
 		},
 	)
 
@@ -399,7 +348,7 @@ func (h *BolusPermissionReleaseHandler) HandleMessage(msg *pumpx2.ParsedMessage,
 		msg.TxID,
 		"BolusPermissionReleaseResponse",
 		map[string]interface{}{
-			"success": true,
+			"status": 0,
 		},
 	)
 
@@ -459,7 +408,9 @@ func (h *CancelBolusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState 
 		msg.TxID,
 		"CancelBolusResponse",
 		map[string]interface{}{
-			"status": 0,
+			"statusId": 0,
+			"bolusId":  pumpState.Bolus.BolusID,
+			"reasonId": 0,
 		},
 	)
 	if err != nil {

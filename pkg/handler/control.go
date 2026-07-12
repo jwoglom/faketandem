@@ -49,7 +49,8 @@ func (h *SetSensorTypeHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpStat
 		msg.TxID,
 		"SetSensorTypeResponse",
 		map[string]interface{}{
-			"status": 0, // success
+			"status":                0, // success
+			"statusAcknowledgement": 0,
 		},
 	)
 
@@ -93,7 +94,8 @@ func (h *StreamDataReadinessHandler) HandleMessage(msg *pumpx2.ParsedMessage, pu
 		msg.TxID,
 		"StreamDataReadinessResponse",
 		map[string]interface{}{
-			"ready": true,
+			"freestyleLibre2ReadinessId": 0,
+			"streamDataTypeOrdinal":      0,
 		},
 	)
 
@@ -135,12 +137,11 @@ func (h *FactoryResetBHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpStat
 
 	log.Warn("Factory reset B requested — this is a simulated pump, ignoring actual reset")
 
+	// FactoryResetBResponse has no fields at all (size=0); only a no-arg constructor exists.
 	response, err := h.bridge.EncodeMessage(
 		msg.TxID,
 		"FactoryResetBResponse",
-		map[string]interface{}{
-			"status": 0, // success
-		},
+		map[string]interface{}{},
 	)
 
 	if err != nil {

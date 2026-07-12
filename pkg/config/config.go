@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,14 +17,15 @@ type Config struct {
 	JavaCmd       string
 
 	// JPAKE configuration
-	JPAKEMode string // "go" or "pumpx2"
+	JPAKEMode        string // "go" or "pumpx2"
+	JPAKELongTermKey []byte // pre-seeded long-term key for quick-pair reconnects, if provided
 
 	// Logging configuration
 	LogLevel string
 }
 
 // New creates a new configuration
-func New(pumpX2Path, pumpX2Mode, jpakeMode, gradleCmd, javaCmd, logLevel, pumpX2JarPath string) (*Config, error) {
+func New(pumpX2Path, pumpX2Mode, jpakeMode, gradleCmd, javaCmd, logLevel, pumpX2JarPath, jpakeLongTermKeyHex string) (*Config, error) {
 	// A prebuilt jar needs neither a pumpX2 checkout nor gradle, so skip all of
 	// that validation and force jar mode when one is given.
 	if pumpX2JarPath != "" {
@@ -68,13 +70,23 @@ func New(pumpX2Path, pumpX2Mode, jpakeMode, gradleCmd, javaCmd, logLevel, pumpX2
 		return nil, fmt.Errorf("invalid jpake-mode: %s (must be 'go' or 'pumpx2')", jpakeMode)
 	}
 
+	var longTermKey []byte
+	if jpakeLongTermKeyHex != "" {
+		var err error
+		longTermKey, err = hex.DecodeString(jpakeLongTermKeyHex)
+		if err != nil {
+			return nil, fmt.Errorf("invalid jpake-long-term-key (must be hex-encoded): %w", err)
+		}
+	}
+
 	return &Config{
-		PumpX2Path:    pumpX2Path,
-		PumpX2Mode:    pumpX2Mode,
-		PumpX2JarPath: pumpX2JarPath,
-		JPAKEMode:     jpakeMode,
-		GradleCmd:     gradleCmd,
-		JavaCmd:       javaCmd,
-		LogLevel:      logLevel,
+		PumpX2Path:       pumpX2Path,
+		PumpX2Mode:       pumpX2Mode,
+		PumpX2JarPath:    pumpX2JarPath,
+		JPAKEMode:        jpakeMode,
+		JPAKELongTermKey: longTermKey,
+		GradleCmd:        gradleCmd,
+		JavaCmd:          javaCmd,
+		LogLevel:         logLevel,
 	}, nil
 }

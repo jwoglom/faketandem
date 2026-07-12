@@ -43,7 +43,7 @@ func NewRouter(bridge *pumpx2.Bridge, pumpState *state.PumpState, ble *bluetooth
 		ble:             ble,
 		txManager:       txManager,
 		settingsManager: settingsManager,
-		jpakeManager:    NewJPAKESessionManager(jpakeMode, pumpX2Path, pumpX2Mode, gradleCmd, javaCmd, pumpX2JarPath),
+		jpakeManager:    NewJPAKESessionManager(jpakeMode, pumpX2Path, pumpX2Mode, gradleCmd, javaCmd, pumpX2JarPath, pumpState),
 		qeNotifier:      NewQualifyingEventsNotifier(ble, pumpState),
 	}
 
@@ -82,17 +82,21 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewJPAKEHandler(r.bridge, r.jpakeManager, "Jpake3SessionKeyRequest", 3))
 	r.RegisterHandler(NewJPAKEHandler(r.bridge, r.jpakeManager, "Jpake4KeyConfirmationRequest", 4))
 
-	// Status and data handlers
-	r.RegisterHandler(NewCurrentStatusHandler(r.bridge))
+	// Status and data handlers. CurrentStatusRequest/Response was removed: no
+	// such class exists anywhere in pumpX2 (confirmed via the jar's own class
+	// table), so a real Tandem app can never send a message that decodes to
+	// this name -- the real protocol exposes this data via separate per-topic
+	// messages (InsulinStatusResponse, CurrentBasalStatusResponse,
+	// CurrentBolusStatusResponse, etc), already handled elsewhere.
 	r.RegisterHandler(NewHistoryLogHandler(r.bridge))
-	r.RegisterHandler(NewCreateHistoryLogHandler(r.bridge))
+	// CreateHistoryLogRequest/Response has no corresponding class anywhere in
+	// pumpX2 -- not part of the real protocol, so no handler is registered.
 	r.RegisterHandler(NewHistoryLogStatusHandler(r.bridge))
 
 	// Bolus handlers
 	r.RegisterHandler(NewBolusPermissionHandler(r.bridge))
 	r.RegisterHandler(NewBolusCalcDataSnapshotHandler(r.bridge))
 	r.RegisterHandler(NewInitiateBolusHandler(r.bridge))
-	r.RegisterHandler(NewBolusTerminationHandler(r.bridge))
 	r.RegisterHandler(NewRemoteBgEntryHandler(r.bridge))
 	r.RegisterHandler(NewRemoteCarbEntryHandler(r.bridge))
 	r.RegisterHandler(NewBolusPermissionReleaseHandler(r.bridge))
@@ -163,7 +167,7 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewStreamDataReadinessHandler(r.bridge))
 	r.RegisterHandler(NewFactoryResetBHandler(r.bridge))
 
-	// Bolus cancel handler (used by controlX2 instead of BolusTermination)
+	// Bolus cancel handler (used by controlX2)
 	r.RegisterHandler(NewCancelBolusHandler(r.bridge))
 
 	// Pump suspend/resume handlers
@@ -198,6 +202,10 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewSettingsWriteHandler(r.bridge, r.settingsManager, "ChangeControlIQSettingsRequest", "ControlIQSettingsRequest"))
 	r.RegisterHandler(NewSettingsWriteHandler(r.bridge, r.settingsManager, "SetMaxBolusLimitRequest", "GlobalMaxBolusSettingsRequest"))
 	r.RegisterHandler(NewSettingsWriteHandler(r.bridge, r.settingsManager, "SetMaxBasalLimitRequest", "BasalLimitSettingsRequest"))
+	// NOTE: SetSleepScheduleResponse has both an (int status) and a (byte[]
+	// raw) single-arg constructor of the same arity; cliparser currently
+	// resolves this to the int ctor via JVM reflection order, but that
+	// ordering isn't JLS-guaranteed, so this is fragile.
 	r.RegisterHandler(NewSettingsWriteHandler(r.bridge, r.settingsManager, "SetSleepScheduleRequest", "ControlIQSleepScheduleRequest"))
 	r.RegisterHandler(NewSettingsWriteHandler(r.bridge, r.settingsManager, "SetQuickBolusSettingsRequest", ""))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetPumpSoundsRequest"))
@@ -246,8 +254,9 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "QuickBolusSettingsRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CgmSupportPackageStatusRequest", true))
 
-	// Keep ProfileBasalHandler as custom since it uses pump state
-	r.RegisterHandler(NewProfileBasalHandler(r.bridge))
+	// ProfileBasalRequest/Response has no corresponding class anywhere in
+	// pumpX2 -- not part of the real protocol, so no handler is registered.
+	// (Basal profile data is exposed via the real ProfileStatusRequest, above.)
 
 	// Set default handler for unknown messages
 	r.SetDefaultHandler(NewDefaultHandler(r.bridge))
@@ -488,6 +497,13 @@ func (r *Router) applySuspendChange(change StateChange) {
 // GetQualifyingEventsNotifier returns the qualifying events notifier
 func (r *Router) GetQualifyingEventsNotifier() *QualifyingEventsNotifier {
 	return r.qeNotifier
+}
+
+// ResetJPAKESession clears any in-progress JPAKE authenticator. Call this on
+// BLE disconnect so a stale/broken authenticator (e.g. one whose pumpX2
+// subprocess died mid-handshake) is never reused by the next connection.
+func (r *Router) ResetJPAKESession() {
+	r.jpakeManager.RemoveAll()
 }
 
 // GetStats returns router statistics
