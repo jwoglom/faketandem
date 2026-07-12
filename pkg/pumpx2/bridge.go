@@ -165,34 +165,3 @@ func (b *Bridge) parseEncodeTextOutput(output string, txID int, messageName stri
 	return msg, nil
 }
 
-// ExecuteJPAKE runs the JPAKE authentication flow with interactive response handling
-// Note: This is for when acting as a CLIENT connecting to a pump.
-// For pump simulator operation, use individual encode/decode for each JPAKE round instead.
-func (b *Bridge) ExecuteJPAKE(pairingCode string, responseProvider JPAKEResponseProvider) (string, error) {
-	output, err := b.runner.ExecuteJPAKE(pairingCode, responseProvider)
-	if err != nil {
-		return "", fmt.Errorf("JPAKE execution failed: %w", err)
-	}
-
-	return output, nil
-}
-
-// ListAllCommands returns all available request opcodes
-func (b *Bridge) ListAllCommands() ([]string, error) {
-	output, err := b.runner.ListAllCommands()
-	if err != nil {
-		return nil, fmt.Errorf("failed to list commands: %w", err)
-	}
-
-	// Parse output - each line is a command
-	lines := strings.Split(strings.TrimSpace(output), "\n")
-	commands := make([]string, 0, len(lines))
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line != "" {
-			commands = append(commands, line)
-		}
-	}
-
-	return commands, nil
-}

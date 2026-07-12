@@ -33,10 +33,3 @@ type OpcodeInfo struct {
 	MessageType string `json:"messageType"`
 	Direction   string `json:"direction"` // "request" or "response"
 }
-
-// CliParserOutput represents the raw output from cliparser
-type CliParserOutput struct {
-	Success bool                   `json:"success"`
-	Error   string                 `json:"error,omitempty"`
-	Data    map[string]interface{} `json:"data,omitempty"`
-}
