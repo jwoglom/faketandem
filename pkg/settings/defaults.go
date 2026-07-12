@@ -214,7 +214,7 @@ func registerPumpInfoDefaults(manager *Manager) {
 	// values below are a real captured Tandem Mobi PumpVersionResponse from
 	// pumpX2's own test fixtures (PumpVersionResponseTest.testPumpVersionResponse_Mobi).
 	registerConstant(manager, "PumpVersionRequest", map[string]interface{}{
-		"armSwVer":    3628697757,
+		"armSwVer":    int64(3628697757),
 		"mspSwVer":    0,
 		"configABits": 0,
 		"configBBits": 0,
