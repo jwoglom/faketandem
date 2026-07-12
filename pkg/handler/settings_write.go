@@ -10,6 +10,16 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// settingsWriteResponseParamsOverrides provides response params for the
+// response classes whose real constructor doesn't take a plain int status
+// (some only have a raw byte[] constructor).
+var settingsWriteResponseParamsOverrides = map[string]map[string]interface{}{
+	// ChangeControlIQSettingsResponse has no int-status constructor, only a raw byte[] one (size=3).
+	"ChangeControlIQSettingsResponse": {"raw": "000000"},
+	// SetQuickBolusSettingsResponse has no int-status constructor, only a raw byte[] one (size=1).
+	"SetQuickBolusSettingsResponse": {"raw": "00"},
+}
+
 // SettingsWriteHandler handles settings write requests by updating the settings
 // manager so subsequent reads reflect the new values, and returns success.
 type SettingsWriteHandler struct {
@@ -49,9 +59,12 @@ func (h *SettingsWriteHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpStat
 		}
 	}
 
-	response, err := h.bridge.EncodeMessage(msg.TxID, h.responseType, map[string]interface{}{
-		"status": 0,
-	})
+	params, ok := settingsWriteResponseParamsOverrides[h.responseType]
+	if !ok {
+		params = map[string]interface{}{"status": 0}
+	}
+
+	response, err := h.bridge.EncodeMessage(msg.TxID, h.responseType, params)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode %s: %w", h.responseType, err)
 	}
@@ -86,8 +99,9 @@ func (h *SetModesHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *st
 		pumpState.SetControlIQMode(int(mode))
 	}
 
+	// SetModesResponse has no int-status constructor, only a raw byte[] one (size=1).
 	response, err := h.bridge.EncodeMessage(msg.TxID, "SetModesResponse", map[string]interface{}{
-		"status": 0,
+		"raw": "00",
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode SetModesResponse: %w", err)
