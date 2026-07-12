@@ -1,6 +1,6 @@
 .PHONY: build jar all
 
-PUMPX2_CLIPARSER_VERSION := v1.9.0
+PUMPX2_CLIPARSER_VERSION := v1.9.1
 PUMPX2_CLIPARSER_JAR := third_party/pumpx2-cliparser-$(PUMPX2_CLIPARSER_VERSION:v%=%).jar
 PUMPX2_CLIPARSER_URL := https://jitpack.io/com/github/jwoglom/pumpX2/pumpx2-cliparser/$(PUMPX2_CLIPARSER_VERSION)/pumpx2-cliparser-$(PUMPX2_CLIPARSER_VERSION).jar
 
