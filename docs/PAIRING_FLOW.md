@@ -468,9 +468,6 @@ faketandem supports this:
 - On BLE disconnect, any in-progress (possibly broken) JPAKE authenticator is
   cleared so the next connection attempt never reuses stale state.
 
-See `docs/PUMPX2_QUICKPAIR_PROPOSAL.md` for a proposal to move the quick-pair
-round 3/4 crypto into pumpX2 itself instead of a parallel Go implementation.
-
 ## Security Analysis
 
 ### Security Properties
