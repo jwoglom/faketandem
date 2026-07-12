@@ -4,12 +4,29 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
 )
+
+// parseEnv returns the environment for a cliparser "parse" subprocess. When
+// btChar is non-empty it sets PUMPX2_CHARACTERISTIC, which cliparser's
+// CharacteristicGuesser reads to disambiguate an opcode that maps to more
+// than one characteristic (Characteristic.valueOf(...), so btChar must be one
+// of pumpX2's Characteristic enum constant names, e.g. "CURRENT_STATUS") --
+// see CharacteristicType.ToBtChar. Without this, cliparser falls back to a
+// fixed CONTROL > AUTHORIZATION > CURRENT_STATUS precedence that can resolve
+// to the wrong message class (and wrong expected cargo size) for opcodes
+// shared across characteristics.
+func parseEnv(btChar string) []string {
+	if btChar == "" {
+		return nil
+	}
+	return append(os.Environ(), "PUMPX2_CHARACTERISTIC="+btChar)
+}
 
 // Runner is an interface for executing cliparser commands
 type Runner interface {
@@ -35,10 +52,8 @@ func NewGradleRunner(pumpX2Path, gradleCmd string) *GradleRunner {
 	}
 }
 
-// Parse parses a message using gradle cliparser. btChar is currently unused --
-// the cliparser "parse" command determines the characteristic from the opcode
-// itself (see CharacteristicGuesser in pumpX2) -- but is kept for interface
-// symmetry with other Runner implementations that may need it.
+// Parse parses a message using gradle cliparser. btChar identifies the
+// characteristic the raw fragments were received on -- see parseEnv.
 func (r *GradleRunner) Parse(btChar string, rawPacketsHex []string) (string, error) {
 	// The cliparser "parse" command expects each raw BLE fragment (including its
 	// framing bytes) as its own whitespace-delimited token; see
@@ -49,6 +64,7 @@ func (r *GradleRunner) Parse(btChar string, rawPacketsHex []string) (string, err
 	gradlePath := filepath.Join(r.pumpX2Path, r.gradleCmd)
 	cmd := exec.Command(gradlePath, "cliparser", "-q", "--console=plain", "--args=parse "+hexValue)
 	cmd.Dir = r.pumpX2Path
+	cmd.Env = parseEnv(btChar)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -117,8 +133,8 @@ func NewJarRunner(jarPath, javaCmd string) *JarRunner {
 	}
 }
 
-// Parse parses a message using JAR cliparser. btChar is currently unused -- see
-// GradleRunner.Parse.
+// Parse parses a message using JAR cliparser. btChar identifies the
+// characteristic the raw fragments were received on -- see parseEnv.
 func (r *JarRunner) Parse(btChar string, rawPacketsHex []string) (string, error) {
 	// The cliparser "parse" command expects each raw BLE fragment (including its
 	// framing bytes) as its own whitespace-delimited token; see
@@ -127,6 +143,7 @@ func (r *JarRunner) Parse(btChar string, rawPacketsHex []string) (string, error)
 	args := []string{"-jar", r.jarPath, "parse", hexValue}
 
 	cmd := exec.Command(r.javaCmd, args...)
+	cmd.Env = parseEnv(btChar)
 
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

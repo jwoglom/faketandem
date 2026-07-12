@@ -73,23 +73,29 @@ func (c CharacteristicType) String() string {
 	}
 }
 
-// ToBtChar returns the btChar name used by pumpX2 cliparser
+// ToBtChar returns the pumpX2 cliparser Characteristic enum constant name for
+// c, used to set the PUMPX2_CHARACTERISTIC environment variable so cliparser's
+// "parse" command can disambiguate an opcode that maps to more than one
+// characteristic (see CharacteristicGuesser.filterKnownPossibilities in
+// pumpX2) instead of guessing via its own fixed CONTROL/AUTHORIZATION/
+// CURRENT_STATUS precedence, which can pick the wrong (and differently
+// cargo-sized) message class. Returns "" for characteristics pumpX2 has no
+// enum constant for (QualifyingEvents is notify-only and never parsed), so
+// the caller knows not to set the environment variable at all.
 func (c CharacteristicType) ToBtChar() string {
 	switch c {
 	case CharCurrentStatus:
-		return "currentStatus"
-	case CharQualifyingEvents:
-		return "qualifyingEvents"
+		return "CURRENT_STATUS"
 	case CharHistoryLog:
-		return "historyLog"
+		return "HISTORY_LOG"
 	case CharAuthorization:
-		return "authentication"
+		return "AUTHORIZATION"
 	case CharControl:
-		return "control"
+		return "CONTROL"
 	case CharControlStream:
-		return "controlStream"
+		return "CONTROL_STREAM"
 	default:
-		return "currentStatus"
+		return ""
 	}
 }
 

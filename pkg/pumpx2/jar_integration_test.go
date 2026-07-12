@@ -18,7 +18,7 @@ func TestJarRunner_Parse_RealJpake1aRequest(t *testing.T) {
 	}
 
 	runner := NewJarRunner(jarPath, "java")
-	output, err := runner.Parse("authentication", realJpake1aRawFragments)
+	output, err := runner.Parse("AUTHORIZATION", realJpake1aRawFragments)
 	if err != nil {
 		t.Fatalf("Parse failed: %v", err)
 	}
