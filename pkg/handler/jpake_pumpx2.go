@@ -62,6 +62,14 @@ func (j *PumpX2JPAKEAuthenticator) ProcessRound(round int, requestData map[strin
 
 	log.Infof("Processing JPAKE round %d using pumpX2 server mode", round)
 
+	// Handle quick pair: if we receive round 3 or 4 without prior rounds, simulate rounds 1-2
+	if j.round == 0 && round >= 3 {
+		log.Infof("Detected quick pair (round %d without prior rounds), initializing cached responses", round)
+		if err := j.initializeQuickPair(); err != nil {
+			return nil, fmt.Errorf("failed to initialize quick pair: %w", err)
+		}
+	}
+
 	// Start the jpake-server command if not started
 	if j.gexp == nil {
 		if err := j.startJPAKEServerProcess(); err != nil {
@@ -87,6 +95,64 @@ func (j *PumpX2JPAKEAuthenticator) ProcessRound(round int, requestData map[strin
 	default:
 		return nil, fmt.Errorf("invalid JPAKE round: %d", round)
 	}
+}
+
+// initializeQuickPair initializes JPAKE state for quick pair (reconnection scenario)
+// Quick pair happens when client sends round 3 without prior full handshake
+// We simulate rounds 1-2 internally without sending client data to pumpX2
+func (j *PumpX2JPAKEAuthenticator) initializeQuickPair() error {
+	log.Infof("Initializing quick pair - simulating rounds 1-2")
+
+	// Start server process if not already started
+	if j.gexp == nil {
+		if err := j.startJPAKEServerProcess(); err != nil {
+			return fmt.Errorf("failed to start JPAKE server process for quick pair: %w", err)
+		}
+
+		if err := j.readServerRound1aResponse(); err != nil {
+			return fmt.Errorf("failed to read server round 1a response: %w", err)
+		}
+	}
+
+	// Simulate round 1a: send a dummy client round 1a request and read server's 1b
+	log.Debugf("Simulating round 1a for quick pair")
+	dummyRound1a := "00"
+	if err := j.gexp.Send(dummyRound1a + "\n"); err != nil {
+		log.Warnf("Failed to send dummy round 1a to pumpX2: %v", err)
+	}
+
+	if err := j.readServerRound1bResponse(); err != nil {
+		log.Warnf("Failed to read JPAKE_1B for quick pair: %v", err)
+		// Continue anyway - we may still be able to handle round 3
+	}
+
+	j.round = 1
+
+	// Simulate round 1b: send a dummy client round 1b request and read server's round 2
+	log.Debugf("Simulating round 1b for quick pair")
+	dummyRound1b := "00"
+	if err := j.gexp.Send(dummyRound1b + "\n"); err != nil {
+		log.Warnf("Failed to send dummy round 1b to pumpX2: %v", err)
+	}
+
+	round2Regex := regexp.MustCompile(`JPAKE_2:\s*({.+})`)
+	output, _, err := j.gexp.Expect(round2Regex, 30*time.Second)
+	if err != nil {
+		log.Warnf("Failed to read JPAKE_2 for quick pair: %v", err)
+		// Continue anyway - we may still be able to handle round 3
+	} else {
+		matches := round2Regex.FindStringSubmatch(output)
+		if len(matches) >= 2 {
+			if err := json.Unmarshal([]byte(matches[1]), &j.round2Response); err != nil {
+				log.Warnf("Failed to unmarshal JPAKE_2 for quick pair: %v", err)
+			}
+		}
+	}
+
+	j.round = 2
+	log.Infof("Quick pair initialization complete, ready for round 3")
+
+	return nil
 }
 
 // getRepoRoot returns the absolute path to the git repository root
