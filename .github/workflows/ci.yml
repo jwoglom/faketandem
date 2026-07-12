@@ -157,6 +157,12 @@ jobs:
         path: faketandem
         retention-days: 7
 
+    - name: Cross-compile for Raspberry Pi (linux/arm)
+      env:
+        GOOS: linux
+        GOARCH: arm
+      run: go build -v -o faketandem-arm .
+
   lint:
     name: Lint
     runs-on: ubuntu-latest
