@@ -27,6 +27,10 @@ const elements = {
   setPairingBtn: document.getElementById("set-pairing-btn"),
   resetPairingBtn: document.getElementById("reset-pairing-btn"),
   disconnectPumpBtn: document.getElementById("disconnect-pump-btn"),
+  longTermKeyInput: document.getElementById("long-term-key"),
+  longTermKeyError: document.getElementById("long-term-key-error"),
+  setLongTermKeyBtn: document.getElementById("set-long-term-key-btn"),
+  resetLongTermKeyBtn: document.getElementById("reset-long-term-key-btn"),
   messageTypeInput: document.getElementById("message-type"),
   modeSelect: document.getElementById("mode-select"),
   configMeta: document.getElementById("config-meta"),
@@ -111,7 +115,7 @@ const updatePairingStateStatus = (pairingState) => {
   }
 };
 
-const updatePairingStatus = (pairingCode, authenticated) => {
+const updatePairingStatus = (pairingCode, authenticated, longTermKey) => {
   resetStatusClasses(elements.pairingAuthStatus);
   if (authenticated === true) {
     elements.pairingAuthStatus.classList.add("connected");
@@ -124,6 +128,9 @@ const updatePairingStatus = (pairingCode, authenticated) => {
   }
   if (typeof pairingCode === "string" && pairingCode.length > 0) {
     elements.pairingCodeInput.value = pairingCode;
+  }
+  if (document.activeElement !== elements.longTermKeyInput) {
+    elements.longTermKeyInput.value = typeof longTermKey === "string" ? longTermKey : "";
   }
   updatePairingValidation();
 };
@@ -189,7 +196,7 @@ const connectWebSocket = () => {
         return;
       }
       if (payload.type === "pairing_state") {
-        updatePairingStatus(payload.pairing_code, payload.authenticated);
+        updatePairingStatus(payload.pairing_code, payload.authenticated, payload.long_term_key);
         logEvent("Pairing state updated.");
         return;
       }
@@ -661,6 +668,19 @@ const init = () => {
   });
   elements.disconnectPumpBtn.addEventListener("click", () => {
     sendCommand({ command: "disconnectPump" });
+  });
+  elements.setLongTermKeyBtn.addEventListener("click", () => {
+    const longTermKey = elements.longTermKeyInput.value.trim();
+    if (!/^[0-9a-fA-F]+$/.test(longTermKey) || longTermKey.length % 2 !== 0) {
+      elements.longTermKeyError.textContent = "Long-term key must be an even-length hex string.";
+      return;
+    }
+    elements.longTermKeyError.textContent = "";
+    sendCommand({ command: "setLongTermKey", longTermKey });
+  });
+  elements.resetLongTermKeyBtn.addEventListener("click", () => {
+    elements.longTermKeyError.textContent = "";
+    sendCommand({ command: "resetLongTermKey" });
   });
   elements.refreshSettingsBtn.addEventListener("click", fetchSettings);
   elements.modeSelect.addEventListener("change", updateEditorVisibility);

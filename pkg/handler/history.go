@@ -49,35 +49,20 @@ func (h *HistoryLogHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *
 
 	log.Debugf("History log requested: start=%d, end=%d", startSeq, endSeq)
 
-	// Get entries from pump state
+	// Get entries from pump state. The real HistoryLogResponse has no field
+	// for embedded entries -- actual log entries go out separately via
+	// HistoryLogStreamResponse messages on the history log characteristic.
+	// This response just acknowledges the request and reports a stream ID.
 	entries := pumpState.GetHistoryLogEntries(startSeq, endSeq)
+	log.Debugf("History log entries matched: %d", len(entries))
 
-	// Build entry data for response
-	entryData := make([]interface{}, 0, len(entries))
-	for _, entry := range entries {
-		entryMap := map[string]interface{}{
-			"sequence":  entry.Sequence,
-			"type":      entry.Type,
-			"timestamp": entry.Timestamp.Unix(),
-		}
-		for k, v := range entry.Data {
-			entryMap[k] = v
-		}
-		entryData = append(entryData, entryMap)
-	}
-
-	actualEndSeq := startSeq
-	if len(entries) > 0 {
-		actualEndSeq = entries[len(entries)-1].Sequence
-	}
-
+	// HistoryLogResponse(int status, int streamId)
 	response, err := h.bridge.EncodeMessage(
 		msg.TxID,
 		"HistoryLogResponse",
 		map[string]interface{}{
-			"startSequence": startSeq,
-			"endSequence":   actualEndSeq,
-			"entries":       entryData,
+			"status":   0,
+			"streamId": 1,
 		},
 	)
 
@@ -86,58 +71,6 @@ func (h *HistoryLogHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *
 	}
 
 	log.Debugf("Sent history log response with %d entries", len(entries))
-
-	return &Response{
-		ResponseMessage: response,
-		Characteristic:  bluetooth.CharHistoryLog,
-		Immediate:       true,
-	}, nil
-}
-
-// CreateHistoryLogHandler handles CreateHistoryLogRequest messages
-type CreateHistoryLogHandler struct {
-	bridge *pumpx2.Bridge
-}
-
-// NewCreateHistoryLogHandler creates a new create history log handler
-func NewCreateHistoryLogHandler(bridge *pumpx2.Bridge) *CreateHistoryLogHandler {
-	return &CreateHistoryLogHandler{
-		bridge: bridge,
-	}
-}
-
-// MessageType returns the message type this handler processes
-func (h *CreateHistoryLogHandler) MessageType() string {
-	return "CreateHistoryLogRequest"
-}
-
-// RequiresAuth returns true if this message requires authentication
-func (h *CreateHistoryLogHandler) RequiresAuth() bool {
-	return true
-}
-
-// HandleMessage processes a CreateHistoryLogRequest
-func (h *CreateHistoryLogHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
-	log.Infof("Handling CreateHistoryLogRequest: txID=%d", msg.TxID)
-
-	numberOfLogs := uint32(0)
-	if val, ok := msg.Cargo["numberOfLogs"].(float64); ok {
-		numberOfLogs = uint32(val)
-	}
-
-	log.Debugf("Create history log requested: numberOfLogs=%d", numberOfLogs)
-
-	response, err := h.bridge.EncodeMessage(
-		msg.TxID,
-		"CreateHistoryLogResponse",
-		map[string]interface{}{
-			"status": 0, // 0 = success
-		},
-	)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to encode CreateHistoryLogResponse: %w", err)
-	}
 
 	return &Response{
 		ResponseMessage: response,

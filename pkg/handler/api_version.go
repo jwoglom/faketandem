@@ -46,8 +46,8 @@ func (h *APIVersionHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *
 		msg.TxID,
 		"ApiVersionResponse",
 		map[string]interface{}{
-			"v1": major,
-			"v2": minor,
+			"majorVersion": major,
+			"minorVersion": minor,
 		},
 	)
 

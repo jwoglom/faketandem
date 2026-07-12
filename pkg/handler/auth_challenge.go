@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 
 	"github.com/jwoglom/faketandem/pkg/pumpx2"
@@ -47,13 +49,27 @@ func (h *CentralChallengeHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpS
 
 	log.Debugf("App instance ID: %d", appInstanceID)
 
+	// CentralChallengeResponse(int appInstanceId, byte[] centralChallengeHash,
+	// byte[] hmacKey): centralChallengeHash is 20 bytes, hmacKey is 8 bytes
+	// (size=30 total).
+	centralChallengeHash := make([]byte, 20)
+	if _, err := rand.Read(centralChallengeHash); err != nil {
+		return nil, fmt.Errorf("failed to generate centralChallengeHash: %w", err)
+	}
+	hmacKey := make([]byte, 8)
+	if _, err := rand.Read(hmacKey); err != nil {
+		return nil, fmt.Errorf("failed to generate hmacKey: %w", err)
+	}
+
 	// Build response using pumpX2 bridge
 	// For JPAKE authentication, we need to provide parameters for the first round
 	response, err := h.bridge.EncodeMessage(
 		msg.TxID,
 		"CentralChallengeResponse",
 		map[string]interface{}{
-			"appInstanceId": appInstanceID,
+			"appInstanceId":        appInstanceID,
+			"centralChallengeHash": hex.EncodeToString(centralChallengeHash),
+			"hmacKey":              hex.EncodeToString(hmacKey),
 		},
 	)
 

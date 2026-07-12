@@ -214,6 +214,12 @@ func (j *JPAKEAuthenticator) GetSharedSecret() ([]byte, error) {
 	return j.sharedSecret, nil
 }
 
+// GetLongTermSecret returns the derived secret for caching by a later
+// quick-pair reconnect (only valid after round 4).
+func (j *JPAKEAuthenticator) GetLongTermSecret() ([]byte, error) {
+	return j.GetSharedSecret()
+}
+
 // IsComplete returns true if JPAKE authentication is complete
 func (j *JPAKEAuthenticator) IsComplete() bool {
 	j.mutex.Lock()
