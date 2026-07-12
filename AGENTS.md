@@ -398,5 +398,8 @@ All Go dependencies are vendored in `vendor/`. No `go mod download` is needed.
 ### Important: always set PUMPX2_PATH
 Always run tests with `PUMPX2_PATH=/workspace/pumpX2` to avoid skipping integration tests. Without this env var, `TestPumpX2JPAKEAuthenticator_FullFlow` is silently skipped.
 
+### Cliparser JAR-mode integration tests: FAKETANDEM_TEST_CLIPARSER_JAR
+A separate set of integration tests exercise cliparser via a prebuilt JAR instead of a full gradle checkout: `pkg/pumpx2/jar_integration_test.go` and `pkg/handler/jpake_pumpx2_test.go`. These are gated on `FAKETANDEM_TEST_CLIPARSER_JAR` (a path to a built `pumpx2-cliparser-all.jar`), not `PUMPX2_PATH`, and are silently skipped without it.
+
 ### Pre-push hook
 `scripts/pre-push.sh` runs `golangci-lint --fix` then verifies no issues remain. It exits gracefully if `golangci-lint` is not installed. When pushing with `--no-verify`, the hook is skipped.

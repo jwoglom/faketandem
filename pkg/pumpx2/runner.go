@@ -118,6 +118,34 @@ func (r *GradleRunner) ExecuteJPAKE(pairingCode string, responseProvider JPAKERe
 	cmd := exec.Command(gradlePath, "cliparser", "-q", "--console=plain", "--args="+args)
 	cmd.Dir = r.pumpX2Path
 
+	log.Infof("Starting interactive JPAKE authentication with pairing code: %s", pairingCode)
+
+	return runInteractiveJPAKE(cmd, responseProvider)
+}
+
+// ListAllCommands lists all available commands
+func (r *GradleRunner) ListAllCommands() (string, error) {
+	gradlePath := filepath.Join(r.pumpX2Path, r.gradleCmd)
+	cmd := exec.Command(gradlePath, "cliparser", "-q", "--console=plain", "--args=listallcommands")
+	cmd.Dir = r.pumpX2Path
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("gradle listallcommands failed: %w\nStderr: %s", err, stderr.String())
+	}
+
+	return stdout.String(), nil
+}
+
+// runInteractiveJPAKE drives an already-configured (but not yet started) cliparser
+// "jpake" subprocess through its interactive stdin/stdout protocol: each "STEP: hex"
+// line read from stdout is handed to responseProvider, whose hex response is written
+// back to stdin, until the process exits. Shared by GradleRunner and JarRunner, which
+// differ only in how cmd is constructed.
+func runInteractiveJPAKE(cmd *exec.Cmd, responseProvider JPAKEResponseProvider) (string, error) {
 	// Set up pipes for interactive communication
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -136,8 +164,6 @@ func (r *GradleRunner) ExecuteJPAKE(pairingCode string, responseProvider JPAKERe
 
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
-
-	log.Infof("Starting interactive JPAKE authentication with pairing code: %s", pairingCode)
 
 	// Start the command
 	if err := cmd.Start(); err != nil {
@@ -166,8 +192,8 @@ func (r *GradleRunner) ExecuteJPAKE(pairingCode string, responseProvider JPAKERe
 				if err != nil {
 					log.Errorf("Response provider failed for step %s: %v", step, err)
 					if err := stdin.Close(); err != nil {
-					log.Debugf("Error closing stdin: %v", err)
-				}
+						log.Debugf("Error closing stdin: %v", err)
+					}
 					_ = cmd.Wait() // Ignore error in cleanup path
 					return "", fmt.Errorf("response provider error at step %s: %w", step, err)
 				}
@@ -208,23 +234,6 @@ func (r *GradleRunner) ExecuteJPAKE(pairingCode string, responseProvider JPAKERe
 	log.Infof("JPAKE authentication completed: %s", result)
 
 	return result, nil
-}
-
-// ListAllCommands lists all available commands
-func (r *GradleRunner) ListAllCommands() (string, error) {
-	gradlePath := filepath.Join(r.pumpX2Path, r.gradleCmd)
-	cmd := exec.Command(gradlePath, "cliparser", "-q", "--console=plain", "--args=listallcommands")
-	cmd.Dir = r.pumpX2Path
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if err := cmd.Run(); err != nil {
-		return "", fmt.Errorf("gradle listallcommands failed: %w\nStderr: %s", err, stderr.String())
-	}
-
-	return stdout.String(), nil
 }
 
 // JarRunner executes cliparser via JAR file
@@ -308,96 +317,9 @@ func (r *JarRunner) Encode(txID int, messageName string, params map[string]inter
 func (r *JarRunner) ExecuteJPAKE(pairingCode string, responseProvider JPAKEResponseProvider) (string, error) {
 	cmd := exec.Command(r.javaCmd, "-jar", r.jarPath, "jpake", pairingCode)
 
-	// Set up pipes for interactive communication
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return "", fmt.Errorf("failed to create stdin pipe: %w", err)
-	}
-	defer func() {
-		if err := stdin.Close(); err != nil {
-			log.Debugf("Error closing stdin: %v", err)
-		}
-	}()
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return "", fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
 	log.Infof("Starting interactive JPAKE authentication (JAR mode) with pairing code: %s", pairingCode)
 
-	// Start the command
-	if err := cmd.Start(); err != nil {
-		return "", fmt.Errorf("failed to start JPAKE command: %w", err)
-	}
-
-	// Read from stdout line by line and interact
-	scanner := bufio.NewScanner(stdout)
-	var finalResult strings.Builder
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		log.Tracef("JPAKE output: %s", line)
-
-		// Check if this is a step output (format: "STEP_NAME: encoded_hex")
-		if strings.Contains(line, ": ") {
-			parts := strings.SplitN(line, ": ", 2)
-			if len(parts) == 2 {
-				step := strings.TrimSpace(parts[0])
-				requestHex := strings.TrimSpace(parts[1])
-
-				log.Infof("JPAKE step: %s, request: %s", step, requestHex)
-
-				// Call the response provider to get the pump's response
-				responseHex, err := responseProvider(step, requestHex)
-				if err != nil {
-					log.Errorf("Response provider failed for step %s: %v", step, err)
-					if err := stdin.Close(); err != nil {
-					log.Debugf("Error closing stdin: %v", err)
-				}
-					_ = cmd.Wait() // Ignore error in cleanup path
-					return "", fmt.Errorf("response provider error at step %s: %w", step, err)
-				}
-
-				log.Infof("JPAKE step %s: sending response: %s", step, responseHex)
-
-				// Write the response to stdin
-				if _, err := fmt.Fprintln(stdin, responseHex); err != nil {
-					return "", fmt.Errorf("failed to write response for step %s: %w", step, err)
-				}
-			}
-		} else {
-			// This might be the final result (JSON output)
-			finalResult.WriteString(line)
-			finalResult.WriteString("\n")
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		return "", fmt.Errorf("error reading JPAKE output: %w", err)
-	}
-
-	// Close stdin to signal we're done
-	if err := stdin.Close(); err != nil {
-		log.Debugf("Error closing stdin: %v", err)
-	}
-
-	// Wait for command to finish
-	if err := cmd.Wait(); err != nil {
-		stderrStr := stderr.String()
-		if stderrStr != "" {
-			return "", fmt.Errorf("JPAKE command failed: %w\nStderr: %s", err, stderrStr)
-		}
-		return "", fmt.Errorf("JPAKE command failed: %w", err)
-	}
-
-	result := strings.TrimSpace(finalResult.String())
-	log.Infof("JPAKE authentication completed: %s", result)
-
-	return result, nil
+	return runInteractiveJPAKE(cmd, responseProvider)
 }
 
 // ListAllCommands lists all available commands
