@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 
@@ -14,8 +15,22 @@ import (
 type JPAKEAuthenticatorInterface interface {
 	ProcessRound(round int, requestData map[string]interface{}) (map[string]interface{}, error)
 	GetSharedSecret() ([]byte, error)
+	// GetLongTermSecret returns the raw JPAKE-derived secret suitable for
+	// caching and reuse by a later quick-pair reconnect (see
+	// QuickReconnectJPAKEAuthenticator). Only meaningful once IsComplete().
+	GetLongTermSecret() ([]byte, error)
 	IsComplete() bool
 }
+
+// ErrJPAKEQuickPairRejected is returned when a client attempts a quick-pair
+// reconnect (sending Jpake3SessionKeyRequest as the first message on a fresh
+// session) but the emulator has no cached long-term key to resume from --
+// e.g. a fresh emulator instance that was never fully paired with this
+// client before. Real pumpX2 jpake-server cannot answer round 3 without
+// having run rounds 1a/1b/2 first, so the caller should force the client back
+// to a full pairing by dropping the connection rather than attempting (and
+// failing) to spawn pumpX2 for round 3 directly.
+var ErrJPAKEQuickPairRejected = errors.New("quick-pair reconnect rejected: no cached long-term JPAKE key, client must fully re-pair")
 
 // JPAKESessionManager manages JPAKE authentication sessions
 type JPAKESessionManager struct {
@@ -29,10 +44,14 @@ type JPAKESessionManager struct {
 	gradleCmd     string
 	javaCmd       string
 	pumpX2JarPath string
+
+	// pumpState gives access to the cached long-term key for quick-pair
+	// reconnects (see GetOrCreate).
+	pumpState *state.PumpState
 }
 
 // NewJPAKESessionManager creates a new JPAKE session manager
-func NewJPAKESessionManager(jpakeMode, pumpX2Path, pumpX2Mode, gradleCmd, javaCmd, pumpX2JarPath string) *JPAKESessionManager {
+func NewJPAKESessionManager(jpakeMode, pumpX2Path, pumpX2Mode, gradleCmd, javaCmd, pumpX2JarPath string, pumpState *state.PumpState) *JPAKESessionManager {
 	return &JPAKESessionManager{
 		authenticators: make(map[string]JPAKEAuthenticatorInterface),
 		jpakeMode:      jpakeMode,
@@ -41,16 +60,38 @@ func NewJPAKESessionManager(jpakeMode, pumpX2Path, pumpX2Mode, gradleCmd, javaCm
 		gradleCmd:      gradleCmd,
 		javaCmd:        javaCmd,
 		pumpX2JarPath:  pumpX2JarPath,
+		pumpState:      pumpState,
 	}
 }
 
-// GetOrCreate gets or creates an authenticator for a session
-func (m *JPAKESessionManager) GetOrCreate(sessionID string, pairingCode string, bridge *pumpx2.Bridge) JPAKEAuthenticatorInterface {
+// GetOrCreate gets or creates an authenticator for a session. round is the
+// JPAKE round of the message that triggered this call (see JPAKEHandler);
+// when round is 3 and no authenticator yet exists for this session, the
+// client is attempting a quick-pair reconnect (Jpake3SessionKeyRequest sent
+// as the very first message, skipping rounds 1a/1b/2). That can only be
+// honored if we have a cached long-term key from an earlier completed
+// pairing (or one seeded via -jpake-long-term-key); otherwise it returns
+// ErrJPAKEQuickPairRejected so the caller can force the client back to a
+// full pairing instead of spawning pumpX2's jpake-server for round 3 (which
+// requires rounds 1a/1b/2 to have already run against that same process and
+// will fail outright).
+func (m *JPAKESessionManager) GetOrCreate(sessionID string, pairingCode string, bridge *pumpx2.Bridge, round int) (JPAKEAuthenticatorInterface, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
 	if auth, exists := m.authenticators[sessionID]; exists {
-		return auth
+		return auth, nil
+	}
+
+	if round == 3 {
+		longTermKey := m.pumpState.GetLongTermKey()
+		if len(longTermKey) == 0 {
+			return nil, ErrJPAKEQuickPairRejected
+		}
+		log.Infof("Quick-pair reconnect detected for session %s (Jpake3SessionKeyRequest with no prior rounds); resuming from cached long-term key", sessionID)
+		auth := NewQuickReconnectJPAKEAuthenticator(longTermKey)
+		m.authenticators[sessionID] = auth
+		return auth, nil
 	}
 
 	var auth JPAKEAuthenticatorInterface
@@ -66,7 +107,7 @@ func (m *JPAKESessionManager) GetOrCreate(sessionID string, pairingCode string, 
 	m.authenticators[sessionID] = auth
 	log.Debugf("Created new JPAKE authenticator (%s mode) for session: %s", m.jpakeMode, sessionID)
 
-	return auth
+	return auth, nil
 }
 
 // Remove removes an authenticator for a session
@@ -76,6 +117,20 @@ func (m *JPAKESessionManager) Remove(sessionID string) {
 
 	delete(m.authenticators, sessionID)
 	log.Debugf("Removed JPAKE authenticator for session: %s", sessionID)
+}
+
+// RemoveAll clears every in-progress authenticator. Called on BLE disconnect
+// so a stale/broken authenticator (e.g. one whose pumpX2 subprocess died
+// mid-handshake) is never reused by the next connection attempt.
+func (m *JPAKESessionManager) RemoveAll() {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	if len(m.authenticators) == 0 {
+		return
+	}
+	m.authenticators = make(map[string]JPAKEAuthenticatorInterface)
+	log.Debug("Cleared all in-progress JPAKE authenticators")
 }
 
 // JPAKEHandler handles JPAKE authentication messages
@@ -116,7 +171,10 @@ func (h *JPAKEHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state
 	sessionID := "default"
 	pairingCode := pumpState.GetPairingCode()
 
-	auth := h.sessionManager.GetOrCreate(sessionID, pairingCode, h.bridge)
+	auth, err := h.sessionManager.GetOrCreate(sessionID, pairingCode, h.bridge, h.round)
+	if err != nil {
+		return nil, err
+	}
 
 	// PumpX2JPAKEAuthenticator.encodeClientRequest needs the message name to
 	// re-encode the client's request for pumpX2's real jpake-server subprocess;
@@ -166,6 +224,17 @@ func (h *JPAKEHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state
 			Type: StateChangeAuth,
 			Data: sharedSecret,
 		})
+
+		// Cache the long-term key so a later BLE reconnect that quick-pairs
+		// (Jpake3SessionKeyRequest sent directly) can be honored without a
+		// full renegotiation. This is a no-op re-set when auth is itself a
+		// QuickReconnectJPAKEAuthenticator, since it just returns the same
+		// cached secret it was resumed from.
+		if longTermSecret, err := auth.GetLongTermSecret(); err != nil {
+			log.Warnf("Failed to get long-term key for caching: %v", err)
+		} else if len(longTermSecret) > 0 {
+			pumpState.SetLongTermKey(longTermSecret)
+		}
 
 		// Clean up the authenticator
 		h.sessionManager.Remove(sessionID)

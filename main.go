@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/hex"
+	"errors"
 	"flag"
 	"time"
 
@@ -24,6 +25,7 @@ func main() {
 	var pumpX2Mode = flag.String("pumpx2-mode", "gradle", "mode to run cliparser: 'gradle' or 'jar'")
 	var pumpX2JarPath = flag.String("pumpx2-jar-path", "", "path to a prebuilt cliparser jar; skips gradle entirely and implies -pumpx2-mode=jar")
 	var jpakeMode = flag.String("jpake-mode", "pumpx2", "JPAKE mode: 'pumpx2' (real EC-JPAKE via pumpX2's jpake-server, required for real hardware/apps) or 'go' (simplified, cryptographically incompatible with real devices)")
+	var jpakeLongTermKey = flag.String("jpake-long-term-key", "", "hex-encoded JPAKE long-term key to pre-seed, letting a previously-paired client quick-pair (reconnect via Jpake3SessionKeyRequest directly) without a fresh full pairing; also displayed/settable in the web UI once derived from a completed pairing")
 	var gradleCmd = flag.String("gradle-cmd", "./gradlew", "gradle command to use")
 	var javaCmd = flag.String("java-cmd", "java", "java command to use")
 
@@ -47,7 +49,7 @@ func main() {
 	})
 
 	// Initialize configuration
-	cfg, err := config.New(*pumpX2Path, *pumpX2Mode, *jpakeMode, *gradleCmd, *javaCmd, logLevel, *pumpX2JarPath)
+	cfg, err := config.New(*pumpX2Path, *pumpX2Mode, *jpakeMode, *gradleCmd, *javaCmd, logLevel, *pumpX2JarPath, *jpakeLongTermKey)
 	if err != nil {
 		log.Fatalf("Configuration error: %s", err)
 	}
@@ -91,6 +93,11 @@ func main() {
 	// Set pairing code in bridge
 	bridge.SetPairingCode(pumpState.GetPairingCode())
 
+	if len(cfg.JPAKELongTermKey) > 0 {
+		pumpState.SetLongTermKey(cfg.JPAKELongTermKey)
+		log.Infof("Seeded JPAKE long-term key from -jpake-long-term-key flag (%d bytes); quick-pair reconnects will be honored", len(cfg.JPAKELongTermKey))
+	}
+
 	// Start background simulator
 	simulator := state.NewSimulator(pumpState, 1*time.Second)
 	defer simulator.Stop()
@@ -115,7 +122,7 @@ func main() {
 	// Create API server
 	server := api.New(ble)
 	server.SetSettingsManager(router.GetSettingsManager())
-	configureConnectionHandlers(ble, server)
+	configureConnectionHandlers(ble, server, router)
 
 	// Set up write handler to log incoming data and notify websocket clients
 	ble.SetWriteHandler(func(charType bluetooth.CharacteristicType, data []byte) {
@@ -150,6 +157,10 @@ func main() {
 		// Route to handler
 		if err := router.RouteMessage(charType, parsed); err != nil {
 			log.Errorf("Failed to route message: %v", err)
+			if errors.Is(err, handler.ErrJPAKEQuickPairRejected) {
+				log.Warn("Dropping connection to force client back to full pairing (no cached long-term JPAKE key available for this quick-pair reconnect)")
+				ble.ShutdownConnection()
+			}
 			return
 		}
 	})
@@ -176,7 +187,7 @@ func main() {
 	}
 }
 
-func configureConnectionHandlers(ble *bluetooth.Ble, server *api.Server) {
+func configureConnectionHandlers(ble *bluetooth.Ble, server *api.Server, router *handler.Router) {
 	ble.SetConnectionHandler(func(connected bool) {
 		server.SendPumpState()
 		if connected {
@@ -184,6 +195,10 @@ func configureConnectionHandlers(ble *bluetooth.Ble, server *api.Server) {
 			return
 		}
 		log.Info("BLE central disconnected; updated websocket clients.")
+		// Clear any in-progress JPAKE authenticator so a stale/broken one
+		// (e.g. a pumpX2 subprocess that died mid-handshake) is never reused
+		// by the next connection attempt.
+		router.ResetJPAKESession()
 	})
 }
 
@@ -192,7 +207,7 @@ func configureWebsocketCommands(server *api.Server, ble *bluetooth.Ble, bridge *
 		log.Infof("Received command from websocket: %s, params: %v", command, params)
 		switch command {
 		case "getPairingState":
-			server.SendPairingState(pumpState.GetPairingCode(), pumpState.IsAuthenticated)
+			server.SendPairingState(pumpState.GetPairingCode(), pumpState.IsAuthenticated, pumpState.GetLongTermKey())
 		case "setPairingCode":
 			pairingCode, _ := params["pairingCode"].(string)
 			if pairingCode == "" {
@@ -202,10 +217,22 @@ func configureWebsocketCommands(server *api.Server, ble *bluetooth.Ble, bridge *
 			pumpState.SetPairingCode(pairingCode)
 			pumpState.ResetAuthentication()
 			bridge.SetPairingCode(pairingCode)
-			server.SendPairingState(pumpState.GetPairingCode(), pumpState.IsAuthenticated)
+			server.SendPairingState(pumpState.GetPairingCode(), pumpState.IsAuthenticated, pumpState.GetLongTermKey())
 		case "resetPairing":
 			pumpState.ResetAuthentication()
-			server.SendPairingState(pumpState.GetPairingCode(), pumpState.IsAuthenticated)
+			server.SendPairingState(pumpState.GetPairingCode(), pumpState.IsAuthenticated, pumpState.GetLongTermKey())
+		case "setLongTermKey":
+			longTermKeyHex, _ := params["longTermKey"].(string)
+			longTermKey, err := hex.DecodeString(longTermKeyHex)
+			if longTermKeyHex == "" || err != nil {
+				log.Warnf("Invalid long-term key from setLongTermKey command: %q", longTermKeyHex)
+				return
+			}
+			pumpState.SetLongTermKey(longTermKey)
+			server.SendPairingState(pumpState.GetPairingCode(), pumpState.IsAuthenticated, pumpState.GetLongTermKey())
+		case "resetLongTermKey":
+			pumpState.SetLongTermKey(nil)
+			server.SendPairingState(pumpState.GetPairingCode(), pumpState.IsAuthenticated, pumpState.GetLongTermKey())
 		case "disconnectPump":
 			ble.ShutdownConnection()
 			server.SendPumpState()

@@ -15,6 +15,7 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/jwoglom/faketandem/pkg/pumpx2"
+	"github.com/jwoglom/faketandem/pkg/state"
 )
 
 // TestPumpX2JPAKEAuthenticator_FullFlow tests the complete JPAKE authentication flow
@@ -404,22 +405,31 @@ func TestJPAKEAuthenticator_IncompleteAuth(t *testing.T) {
 // TestJPAKESessionManager tests session management
 func TestJPAKESessionManager(t *testing.T) {
 	// Create manager with Go mode
-	manager := NewJPAKESessionManager("go", "/tmp/pumpx2", "gradle", "./gradlew", "java", "")
+	manager := NewJPAKESessionManager("go", "/tmp/pumpx2", "gradle", "./gradlew", "java", "", state.NewPumpState())
 
 	// Create first session
-	session1 := manager.GetOrCreate("session1", "123456", &pumpx2.Bridge{})
+	session1, err := manager.GetOrCreate("session1", "123456", &pumpx2.Bridge{}, 1)
+	if err != nil {
+		t.Fatalf("GetOrCreate returned error: %v", err)
+	}
 	if session1 == nil {
 		t.Fatal("Failed to create session1")
 	}
 
 	// Get same session again
-	session1Again := manager.GetOrCreate("session1", "123456", &pumpx2.Bridge{})
+	session1Again, err := manager.GetOrCreate("session1", "123456", &pumpx2.Bridge{}, 1)
+	if err != nil {
+		t.Fatalf("GetOrCreate returned error: %v", err)
+	}
 	if session1 != session1Again {
 		t.Error("Expected to get same session instance")
 	}
 
 	// Create different session
-	session2 := manager.GetOrCreate("session2", "654321", &pumpx2.Bridge{})
+	session2, err := manager.GetOrCreate("session2", "654321", &pumpx2.Bridge{}, 1)
+	if err != nil {
+		t.Fatalf("GetOrCreate returned error: %v", err)
+	}
 	if session2 == nil {
 		t.Fatal("Failed to create session2")
 	}
@@ -431,7 +441,10 @@ func TestJPAKESessionManager(t *testing.T) {
 	manager.Remove("session1")
 
 	// Create new session with same ID should be different instance
-	session1New := manager.GetOrCreate("session1", "123456", &pumpx2.Bridge{})
+	session1New, err := manager.GetOrCreate("session1", "123456", &pumpx2.Bridge{}, 1)
+	if err != nil {
+		t.Fatalf("GetOrCreate returned error: %v", err)
+	}
 	if session1 == session1New {
 		t.Error("Expected new session instance after removal")
 	}

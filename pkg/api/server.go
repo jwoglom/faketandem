@@ -47,6 +47,7 @@ type BleEvent struct {
 	Message        string `json:"message,omitempty"`
 	PairingCode    string `json:"pairing_code,omitempty"`
 	Authenticated  *bool  `json:"authenticated,omitempty"`
+	LongTermKey    string `json:"long_term_key,omitempty"`
 }
 
 // New creates a new API server
@@ -133,13 +134,15 @@ func (s *Server) SendConnectionEvent(connected bool) {
 	})
 }
 
-// SendPairingState sends pairing code and authentication status to websocket clients
-func (s *Server) SendPairingState(pairingCode string, authenticated bool) {
+// SendPairingState sends pairing code, authentication status, and the cached
+// JPAKE long-term key (hex-encoded, empty if none cached) to websocket clients
+func (s *Server) SendPairingState(pairingCode string, authenticated bool, longTermKey []byte) {
 	authValue := authenticated
 	s.SendEvent(BleEvent{
 		Type:          "pairing_state",
 		PairingCode:   pairingCode,
 		Authenticated: &authValue,
+		LongTermKey:   hex.EncodeToString(longTermKey),
 	})
 }
 
