@@ -438,6 +438,36 @@ Messages that do NOT require authentication:
 
 ---
 
+## Quick-Pair Reconnects
+
+A real app that has already completed a full JPAKE pairing once does not
+always repeat the whole 5-message flow on a later BLE reconnect. Instead it
+can send `Jpake3SessionKeyRequest` as the very first message, skipping
+rounds 1a/1b/2, and reuses the long-term secret derived during the original
+pairing to establish a fresh per-connection session key.
+
+faketandem supports this:
+
+- After a full pairing completes, the derived long-term key is cached in
+  `PumpState.LongTermKey` (visible/settable in the web UI under "JPAKE
+  Long-Term Key", and seedable via `-jpake-long-term-key <hex>` on the
+  command line).
+- If a client sends `Jpake3SessionKeyRequest` as the first message of a
+  fresh session and a long-term key is cached, `QuickReconnectJPAKEAuthenticator`
+  (`pkg/handler/jpake_quickreconnect.go`) answers rounds 3/4 directly using
+  that cached secret (via the same HKDF/HMAC-SHA256 construction pumpX2's
+  `jpake-server` uses -- see `Hkdf.build`/`HmacSha256.hmacSha256`), without
+  needing pumpX2's subprocess, which can only run the full round sequence.
+- If no long-term key is cached (e.g. a freshly started emulator that was
+  never fully paired with this client), the quick-pair attempt is rejected
+  and the BLE connection is dropped, forcing the client back to a full
+  pairing from `Jpake1aRequest` -- attempting to forward
+  `Jpake3SessionKeyRequest` straight to a fresh pumpX2 `jpake-server`
+  process fails outright (`Expected Jpake1aRequest, got: ...`) since that
+  process has no JPAKE state yet.
+- On BLE disconnect, any in-progress (possibly broken) JPAKE authenticator is
+  cleared so the next connection attempt never reuses stale state.
+
 ## Security Analysis
 
 ### Security Properties

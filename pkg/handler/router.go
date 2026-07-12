@@ -43,7 +43,7 @@ func NewRouter(bridge *pumpx2.Bridge, pumpState *state.PumpState, ble *bluetooth
 		ble:             ble,
 		txManager:       txManager,
 		settingsManager: settingsManager,
-		jpakeManager:    NewJPAKESessionManager(jpakeMode, pumpX2Path, pumpX2Mode, gradleCmd, javaCmd, pumpX2JarPath),
+		jpakeManager:    NewJPAKESessionManager(jpakeMode, pumpX2Path, pumpX2Mode, gradleCmd, javaCmd, pumpX2JarPath, pumpState),
 		qeNotifier:      NewQualifyingEventsNotifier(bridge, ble, pumpState),
 	}
 
@@ -488,6 +488,13 @@ func (r *Router) applySuspendChange(change StateChange) {
 // GetQualifyingEventsNotifier returns the qualifying events notifier
 func (r *Router) GetQualifyingEventsNotifier() *QualifyingEventsNotifier {
 	return r.qeNotifier
+}
+
+// ResetJPAKESession clears any in-progress JPAKE authenticator. Call this on
+// BLE disconnect so a stale/broken authenticator (e.g. one whose pumpX2
+// subprocess died mid-handshake) is never reused by the next connection.
+func (r *Router) ResetJPAKESession() {
+	r.jpakeManager.RemoveAll()
 }
 
 // GetStats returns router statistics

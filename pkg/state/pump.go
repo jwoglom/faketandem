@@ -26,6 +26,15 @@ type PumpState struct {
 	PairingCode     string
 	IsAuthenticated bool
 
+	// LongTermKey is the JPAKE-derived secret from a completed full pairing
+	// (rounds 1a/1b/2/3/4). Real Tandem apps cache this on the phone and, on a
+	// later BLE reconnect, skip straight to a "quick pair" that only re-runs
+	// rounds 3/4 (fresh nonce + HKDF session key) against this cached secret
+	// instead of repeating the full password-authenticated exchange. It
+	// persists across BLE disconnects (unlike AuthKey, which is per-connection)
+	// so the emulator can honor that quick-pair flow.
+	LongTermKey []byte
+
 	// Insulin Delivery
 	Basal *BasalState
 	Bolus *BolusState
@@ -251,6 +260,26 @@ func (ps *PumpState) SetPairingCode(code string) {
 	defer ps.mutex.Unlock()
 
 	ps.PairingCode = code
+	// A new pairing code means a new JPAKE password, so any previously cached
+	// long-term key is no longer valid for a quick-pair reconnect.
+	ps.LongTermKey = nil
+}
+
+// GetLongTermKey returns the cached JPAKE long-term key, if any
+func (ps *PumpState) GetLongTermKey() []byte {
+	ps.mutex.RLock()
+	defer ps.mutex.RUnlock()
+
+	return ps.LongTermKey
+}
+
+// SetLongTermKey caches the JPAKE long-term key derived from a completed full
+// pairing (or seeded via CLI flag), so later quick-pair reconnects can reuse it.
+func (ps *PumpState) SetLongTermKey(key []byte) {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+
+	ps.LongTermKey = key
 }
 
 // GetAuthKey returns the authentication key
