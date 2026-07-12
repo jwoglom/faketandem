@@ -33,19 +33,22 @@ func (h *CurrentBolusStatusHandler) RequiresAuth() bool {
 func (h *CurrentBolusStatusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	pumpState.RLock()
 	bolus := pumpState.Bolus
-	cargo := map[string]interface{}{}
+	// CurrentBolusStatusResponse(int statusId, int bolusId, long timestamp,
+	// long requestedVolume, int bolusSourceId, int bolusTypeBitmask)
+	cargo := map[string]interface{}{
+		"bolusSourceId":    0,
+		"bolusTypeBitmask": 0,
+	}
 	if bolus.Active {
-		cargo["bolusStatus"] = 1
+		cargo["statusId"] = 1
 		cargo["bolusId"] = bolus.BolusID
-		cargo["deliveredVolume"] = int(bolus.UnitsDelivered * 1000)
-		cargo["totalVolume"] = int(bolus.UnitsTotal * 1000)
-		cargo["bolusType"] = 0
+		cargo["timestamp"] = pumpState.CurrentTime.Unix()
+		cargo["requestedVolume"] = int(bolus.UnitsTotal * 1000)
 	} else {
-		cargo["bolusStatus"] = 0
+		cargo["statusId"] = 0
 		cargo["bolusId"] = 0
-		cargo["deliveredVolume"] = 0
-		cargo["totalVolume"] = 0
-		cargo["bolusType"] = 0
+		cargo["timestamp"] = pumpState.CurrentTime.Unix()
+		cargo["requestedVolume"] = 0
 	}
 	pumpState.RUnlock()
 
@@ -86,24 +89,29 @@ func (h *CurrentBasalStatusHandler) RequiresAuth() bool {
 func (h *CurrentBasalStatusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	pumpState.RLock()
 	basal := pumpState.Basal
-	cargo := map[string]interface{}{
-		"basalRate":       int(basal.CurrentRate * 1000),
-		"tempBasalActive": basal.TempBasalActive,
-	}
+	currentRate := basal.CurrentRate
+	basalModifiedBitmask := 0
 	if basal.TempBasalActive {
-		cargo["tempBasalRate"] = int(basal.TempBasalRate * 1000)
-		cargo["tempBasalMinutesRemaining"] = int(basal.TempBasalEnd.Sub(pumpState.CurrentTime).Minutes())
-	} else {
-		cargo["tempBasalRate"] = 0
-		cargo["tempBasalMinutesRemaining"] = 0
+		currentRate = basal.TempBasalRate
+		basalModifiedBitmask |= 1
 	}
 	suspended := pumpState.PumpingSuspended
+	if suspended {
+		currentRate = 0
+		basalModifiedBitmask |= 2
+	}
 	pumpState.RUnlock()
 
-	cargo["pumpingSuspended"] = suspended
+	// CurrentBasalStatusResponse(long profileBasalRate, long currentBasalRate,
+	// int basalModifiedBitmask)
+	cargo := map[string]interface{}{
+		"profileBasalRate":     int(basal.CurrentRate * 1000),
+		"currentBasalRate":     int(currentRate * 1000),
+		"basalModifiedBitmask": basalModifiedBitmask,
+	}
 
-	log.Debugf("CurrentBasalStatus: rate=%v, tempActive=%v, suspended=%v",
-		cargo["basalRate"], cargo["tempBasalActive"], suspended)
+	log.Debugf("CurrentBasalStatus: profileRate=%v, currentRate=%v, suspended=%v",
+		basal.CurrentRate, currentRate, suspended)
 
 	response, err := h.bridge.EncodeMessage(msg.TxID, "CurrentBasalStatusResponse", cargo)
 	if err != nil {
@@ -138,19 +146,13 @@ func (h *TempRateStatusHandler) RequiresAuth() bool {
 
 // HandleMessage returns dynamic temp rate status
 func (h *TempRateStatusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
-	pumpState.RLock()
-	basal := pumpState.Basal
+	// TempRateStatusResponse only has a no-arg constructor and a raw byte[]
+	// constructor -- no named fields are reachable via cliparser, so this
+	// can't convey the actual temp rate state. Send zeroed raw bytes
+	// (size=16, matching the no-arg-equivalent cargo).
 	cargo := map[string]interface{}{
-		"tempRateActive": basal.TempBasalActive,
+		"raw": "00000000000000000000000000000000",
 	}
-	if basal.TempBasalActive {
-		cargo["tempRatePercentage"] = int(basal.TempBasalRate / basal.CurrentRate * 100)
-		cargo["tempRateMinutesRemaining"] = int(basal.TempBasalEnd.Sub(pumpState.CurrentTime).Minutes())
-	} else {
-		cargo["tempRatePercentage"] = 100
-		cargo["tempRateMinutesRemaining"] = 0
-	}
-	pumpState.RUnlock()
 
 	response, err := h.bridge.EncodeMessage(msg.TxID, "TempRateStatusResponse", cargo)
 	if err != nil {
@@ -185,11 +187,13 @@ func (h *InsulinStatusHandler) RequiresAuth() bool {
 
 // HandleMessage returns dynamic insulin status
 func (h *InsulinStatusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
+	// InsulinStatusResponse(long currentInsulinAmount, boolean isEstimate,
+	// long insulinLowAmount)
 	pumpState.RLock()
 	cargo := map[string]interface{}{
 		"currentInsulinAmount": int(pumpState.Reservoir.CurrentUnits * 100),
-		"maxInsulinAmount":     int(pumpState.Reservoir.MaxUnits * 100),
-		"insulinOnBoard":       int(pumpState.IOB * 1000),
+		"isEstimate":           0,
+		"insulinLowAmount":     0,
 	}
 	pumpState.RUnlock()
 
@@ -233,11 +237,35 @@ func (h *CurrentBatteryHandler) RequiresAuth() bool {
 // HandleMessage returns dynamic battery status
 func (h *CurrentBatteryHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	pumpState.RLock()
-	cargo := map[string]interface{}{
-		"batteryLevelPercent": pumpState.Battery.Percentage,
-		"isCharging":          pumpState.Battery.Charging,
-	}
+	batteryPercent := pumpState.Battery.Percentage
+	charging := pumpState.Battery.Charging
 	pumpState.RUnlock()
+
+	// CurrentBatteryV1Response(int currentBatteryAbc, int currentBatteryIbc)
+	// CurrentBatteryV2Response(int currentBatteryAbc, int currentBatteryIbc,
+	// int chargingStatus, int unknown1, int unknown2, int unknown3, int unknown4)
+	// Neither constructor has a boolean charging field.
+	var cargo map[string]interface{}
+	if h.resType == "CurrentBatteryV2Response" {
+		chargingStatus := 0
+		if charging {
+			chargingStatus = 1
+		}
+		cargo = map[string]interface{}{
+			"currentBatteryAbc": batteryPercent,
+			"currentBatteryIbc": batteryPercent,
+			"chargingStatus":    chargingStatus,
+			"unknown1":          0,
+			"unknown2":          0,
+			"unknown3":          0,
+			"unknown4":          0,
+		}
+	} else {
+		cargo = map[string]interface{}{
+			"currentBatteryAbc": batteryPercent,
+			"currentBatteryIbc": batteryPercent,
+		}
+	}
 
 	response, err := h.bridge.EncodeMessage(msg.TxID, h.resType, cargo)
 	if err != nil {
@@ -272,11 +300,29 @@ func (h *ControlIQIOBHandler) RequiresAuth() bool { return true }
 // HandleMessage returns dynamic IOB
 func (h *ControlIQIOBHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	pumpState.RLock()
-	cargo := map[string]interface{}{
-		"iob":        int(pumpState.IOB * 1000),
-		"timeOffset": pumpState.TimeSinceReset,
-	}
+	iob := int(pumpState.IOB * 1000)
+	timeOffset := pumpState.TimeSinceReset
 	pumpState.RUnlock()
+
+	// ControlIQIOBResponse(long mudaliarIOB, long timeRemainingSeconds,
+	// long mudaliarTotalIOB, long swan6hrIOB, int iobType)
+	// NonControlIQIOBResponse(long iob, long timeRemaining, long totalIOB)
+	var cargo map[string]interface{}
+	if h.resType == "ControlIQIOBResponse" {
+		cargo = map[string]interface{}{
+			"mudaliarIOB":          iob,
+			"timeRemainingSeconds": timeOffset,
+			"mudaliarTotalIOB":     iob,
+			"swan6hrIOB":           iob,
+			"iobType":              0,
+		}
+	} else {
+		cargo = map[string]interface{}{
+			"iob":           iob,
+			"timeRemaining": timeOffset,
+			"totalIOB":      iob,
+		}
+	}
 
 	response, err := h.bridge.EncodeMessage(msg.TxID, h.resType, cargo)
 	if err != nil {
