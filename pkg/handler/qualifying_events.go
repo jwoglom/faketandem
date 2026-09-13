@@ -31,12 +31,12 @@ const (
 
 // QualifyingEventsNotifier sends qualifying event bitmask notifications
 type QualifyingEventsNotifier struct {
-	ble       *bluetooth.Ble
+	ble       bluetooth.Transport
 	pumpState *state.PumpState
 }
 
 // NewQualifyingEventsNotifier creates a new qualifying events notifier
-func NewQualifyingEventsNotifier(ble *bluetooth.Ble, pumpState *state.PumpState) *QualifyingEventsNotifier {
+func NewQualifyingEventsNotifier(ble bluetooth.Transport, pumpState *state.PumpState) *QualifyingEventsNotifier {
 	return &QualifyingEventsNotifier{
 		ble:       ble,
 		pumpState: pumpState,

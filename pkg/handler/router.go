@@ -18,7 +18,7 @@ type Router struct {
 	handlers        map[string]MessageHandler
 	bridge          *pumpx2.Bridge
 	pumpState       *state.PumpState
-	ble             *bluetooth.Ble
+	ble             bluetooth.Transport
 	txManager       *protocol.TransactionManager
 	settingsManager *settings.Manager
 	jpakeManager    *JPAKESessionManager
@@ -31,7 +31,7 @@ type Router struct {
 }
 
 // NewRouter creates a new message router
-func NewRouter(bridge *pumpx2.Bridge, pumpState *state.PumpState, ble *bluetooth.Ble, txManager *protocol.TransactionManager, jpakeMode, pumpX2Path, pumpX2Mode, gradleCmd, javaCmd, pumpX2JarPath string) *Router {
+func NewRouter(bridge *pumpx2.Bridge, pumpState *state.PumpState, ble bluetooth.Transport, txManager *protocol.TransactionManager, jpakeMode, pumpX2Path, pumpX2Mode, gradleCmd, javaCmd, pumpX2JarPath string) *Router {
 	// Create and initialize settings manager
 	settingsManager := settings.NewManager()
 	settings.RegisterDefaults(settingsManager)

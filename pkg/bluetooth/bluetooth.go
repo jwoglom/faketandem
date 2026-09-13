@@ -7,8 +7,8 @@ const (
 
 // Standard service UUIDs.
 const (
-	GenericAttributeServiceUUID = "1801"
-	GenericAccessServiceUUID    = "1800"
+	GenericAttributeServiceUUID  = "1801"
+	GenericAccessServiceUUID     = "1800"
 	DeviceInformationServiceUUID = "180A"
 )
 
@@ -24,15 +24,15 @@ const (
 
 // Standard characteristic UUIDs.
 const (
-	ServiceChangedCharUUID          = "2A05"
-	DeviceNameCharUUID              = "2A00"
-	AppearanceCharUUID              = "2A01"
+	ServiceChangedCharUUID                          = "2A05"
+	DeviceNameCharUUID                              = "2A00"
+	AppearanceCharUUID                              = "2A01"
 	PeripheralPreferredConnectionParametersCharUUID = "2A04"
-	CentralAddressResolutionCharUUID = "2AA6"
-	ManufacturerNameStringCharUUID  = "2A29"
-	ModelNumberStringCharUUID       = "2A24"
-	SerialNumberStringCharUUID      = "2A25"
-	SoftwareRevisionStringCharUUID  = "2A28"
+	CentralAddressResolutionCharUUID                = "2AA6"
+	ManufacturerNameStringCharUUID                  = "2A29"
+	ModelNumberStringCharUUID                       = "2A24"
+	SerialNumberStringCharUUID                      = "2A25"
+	SoftwareRevisionStringCharUUID                  = "2A28"
 )
 
 // Additional characteristic UUIDs observed from the Tandem Mobi pump.
