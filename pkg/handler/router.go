@@ -488,8 +488,15 @@ func (r *Router) applyBolusChange(change StateChange) {
 	if bolusState.Active {
 		r.pumpState.StartBolusWithSource(
 			bolusState.UnitsTotal, bolusState.BolusID, bolusState.SourceID, bolusState.TypeBitmask)
-		r.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryBolusActivated, "BolusActivated", map[string]interface{}{
-			"bolusId": bolusState.BolusID, "units": bolusState.UnitsTotal,
+		r.pumpState.AppendHistory(state.HistoryEvent{
+			TypeID: state.HistoryBolusActivated,
+			Name:   "BolusActivated",
+			Fields: map[string]interface{}{
+				"bolusId":     bolusState.BolusID,
+				"selectedIob": 0,
+				"iob":         r.pumpState.GetIOB(),
+				"bolusSize":   bolusState.UnitsTotal,
+			},
 		})
 		if r.qeNotifier != nil {
 			if err := r.qeNotifier.NotifyBolusStart(bolusState.BolusID, bolusState.UnitsTotal); err != nil {
@@ -534,8 +541,17 @@ func (r *Router) applyBasalChange(change StateChange) {
 	r.pumpState.SetBasalState(basalState)
 	newRate := r.pumpState.GetBasalRate()
 	if basalState.TempBasalActive {
-		r.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryTempRateActivated, "TempRateActivated", map[string]interface{}{
-			"tempRate": basalState.TempBasalRate, "normalRate": basalState.CurrentRate,
+		// The record's own fields are the commanded percentage, the duration in
+		// milliseconds and the temp rate id -- the same three the driver reads
+		// back out of TempRateActivatedHistoryLog.
+		r.pumpState.AppendHistory(state.HistoryEvent{
+			TypeID: state.HistoryTempRateActivated,
+			Name:   "TempRateActivated",
+			Fields: map[string]interface{}{
+				"percent":              basalState.TempBasalPercent,
+				"durationMilliseconds": basalState.TempBasalEnd.Sub(basalState.TempBasalStart).Seconds() * 1000,
+				"tempRateId":           basalState.TempRateID,
+			},
 		})
 	}
 	if r.qeNotifier != nil {
@@ -562,10 +578,32 @@ func (r *Router) applySuspendChange(change StateChange) {
 		return
 	}
 	r.pumpState.SetPumpingSuspended(suspended)
+
+	// Both records carry the reservoir's remaining whole units at the moment of
+	// the change: on real pumps this field tracks
+	// InsulinStatusResponse.currentInsulinAmount to the unit, and it used to be
+	// emitted as an empty payload here.
+	insulinAmount := int(r.pumpState.GetReservoirLevel())
 	if suspended {
-		r.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryPumpingSuspended, "PumpingSuspended", nil)
+		r.pumpState.AppendHistory(state.HistoryEvent{
+			TypeID: state.HistoryPumpingSuspended,
+			Name:   "PumpingSuspended",
+			Fields: map[string]interface{}{
+				"preSuspendState": 106,
+				"insulinAmount":   insulinAmount,
+				"reasonId":        0, // user-aborted; a pump-raised suspend uses 1
+				"rpaTimeout":      15,
+			},
+		})
 	} else {
-		r.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryPumpingResumed, "PumpingResumed", nil)
+		r.pumpState.AppendHistory(state.HistoryEvent{
+			TypeID: state.HistoryPumpingResumed,
+			Name:   "PumpingResumed",
+			Fields: map[string]interface{}{
+				"preResumeState": 100,
+				"insulinAmount":  insulinAmount,
+			},
+		})
 	}
 	if r.qeNotifier == nil {
 		return
