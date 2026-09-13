@@ -126,6 +126,11 @@ func (s *Simulator) update() {
 	// after the pump state mutex has been released.
 	if completed := s.updateBolusDelivery(); completed != nil {
 		s.pumpState.RecordLastBolus(*completed)
+		// The end reason goes on the record: it is the wire's
+		// completionStatusId, and leaving it off made a bolus that ran to
+		// completion look, in the log, exactly like one that was canceled.
+		s.pumpState.RecordBolusCompleted(
+			completed.BolusID, completed.DeliveredUnits, completed.RequestedUnits, completed.EndReasonID)
 	}
 
 	// Update basal delivery
@@ -215,13 +220,6 @@ func (s *Simulator) updateBolusDelivery() *LastBolusRecord {
 			EndTime:        s.pumpState.Now(),
 		}
 
-		// Record history log entry
-		s.addHistoryEntryWithTypeID(HistoryBolusCompleted, "BolusCompleted", map[string]interface{}{
-			"bolusId":        bolusID,
-			"unitsDelivered": unitsDelivered,
-			"unitsTotal":     unitsTotal,
-		})
-
 		// Notify qualifying event
 		if s.eventNotifier != nil {
 			if err := s.eventNotifier.NotifyBolusComplete(bolusID, unitsDelivered, unitsTotal); err != nil {
@@ -249,13 +247,20 @@ func (s *Simulator) updateBasalDelivery(elapsed time.Duration) {
 		if s.pumpState.Now().After(s.pumpState.Basal.TempBasalEnd) {
 			log.Info("Temp basal expired, returning to normal basal rate")
 			oldRate := s.pumpState.Basal.TempBasalRate
+			expired := TempRateSnapshot{
+				Active:     true,
+				Percent:    s.pumpState.Basal.TempBasalPercent,
+				Rate:       oldRate,
+				StartTime:  s.pumpState.Basal.TempBasalStart,
+				EndTime:    s.pumpState.Basal.TempBasalEnd,
+				TempRateID: s.pumpState.Basal.TempRateID,
+			}
 			s.pumpState.Basal.TempBasalActive = false
 			basalRate = s.pumpState.Basal.CurrentRate
 
-			s.pumpState.AddHistoryLogEntryWithTypeID(HistoryTempRateCompleted, "TempRateCompleted", map[string]interface{}{
-				"tempRate":   oldRate,
-				"normalRate": basalRate,
-			})
+			// Stamped at the programmed end, not at the tick that noticed it:
+			// a coarse tick must not move a temp rate's recorded end second.
+			s.pumpState.RecordTempRateCompleted(expired, basalRate, expired.EndTime)
 
 			if s.eventNotifier != nil {
 				if err := s.eventNotifier.NotifyBasalRateChange(oldRate, basalRate, false); err != nil {
@@ -402,11 +407,6 @@ func (s *Simulator) addAlert(alertType AlertType, priority AlertPriority, messag
 	}
 	s.pumpState.ActiveAlerts = append(s.pumpState.ActiveAlerts, alert)
 	return alert
-}
-
-// addHistoryEntryWithTypeID adds a typed history log entry (must NOT hold pumpState mutex)
-func (s *Simulator) addHistoryEntryWithTypeID(typeID int, entryType string, data map[string]interface{}) {
-	s.pumpState.AddHistoryLogEntryWithTypeID(typeID, entryType, data)
 }
 
 // GetStats returns simulator statistics

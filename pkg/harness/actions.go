@@ -132,9 +132,7 @@ func (h *Harness) actionBolusStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.pumpState.StartBolusWithSource(body.Units, bolusID, sourceID, body.TypeBitmask)
-	h.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryBolusActivated, "BolusActivated", map[string]interface{}{
-		"bolusId": bolusID, "units": body.Units, "bolusSourceId": sourceID,
-	})
+	h.pumpState.RecordBolusActivated(bolusID, body.Units, sourceID)
 
 	if n := h.notifier(); n != nil {
 		h.emit("bolus start", func() error { return n.NotifyBolusStart(bolusID, body.Units) })
@@ -275,12 +273,7 @@ func (h *Harness) actionBolusEnd(w http.ResponseWriter, r *http.Request, endReas
 		TypeBitmask:    bolus.TypeBitmask,
 		EndReasonID:    endReason,
 	})
-	h.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryBolusCompleted, "BolusCompleted", map[string]interface{}{
-		"bolusId":        bolus.BolusID,
-		"unitsDelivered": delivered,
-		"unitsTotal":     bolus.UnitsTotal,
-		"endReasonId":    endReason,
-	})
+	h.pumpState.RecordBolusCompleted(bolus.BolusID, delivered, bolus.UnitsTotal, endReason)
 
 	if n := h.notifier(); n != nil {
 		if endReason == state.BolusEndReasonCompleted {
@@ -346,7 +339,7 @@ func (h *Harness) actionTempBasalStart(w http.ResponseWriter, r *http.Request) {
 	tempRateID := h.pumpState.NextTempRateID()
 	oldRate := h.pumpState.GetBasalRate()
 
-	h.pumpState.SetBasalState(&state.BasalState{
+	basal := &state.BasalState{
 		CurrentRate:      profileRate,
 		TempBasalActive:  true,
 		TempBasalRate:    rate,
@@ -354,11 +347,9 @@ func (h *Harness) actionTempBasalStart(w http.ResponseWriter, r *http.Request) {
 		TempBasalPercent: percent,
 		TempBasalStart:   start,
 		TempRateID:       tempRateID,
-	})
-	h.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryTempRateActivated, "TempRateActivated", map[string]interface{}{
-		"tempRate": rate, "normalRate": profileRate, "percent": percent,
-		"minutes": body.DurationMinutes, "tempRateId": tempRateID,
-	})
+	}
+	h.pumpState.SetBasalState(basal)
+	h.pumpState.RecordTempRateActivated(basal, profileRate)
 
 	if n := h.notifier(); n != nil {
 		h.emit("basal change", func() error { return n.NotifyBasalRateChange(oldRate, rate, true) })
@@ -388,7 +379,7 @@ func (h *Harness) actionTempBasalStop(w http.ResponseWriter, r *http.Request) {
 	}
 
 	profileRate := h.pumpState.GetProfileBasalRate()
-	h.stopTempRate(profileRate, temp.Rate)
+	h.stopTempRate(profileRate, temp)
 
 	log.Infof("harness: temp rate %d stopped, back to profile %.3f U/hr", temp.TempRateID, profileRate)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"state": h.Snapshot()})
@@ -396,16 +387,18 @@ func (h *Harness) actionTempBasalStop(w http.ResponseWriter, r *http.Request) {
 
 // stopTempRate clears a running temp rate and emits its history record and
 // qualifying event. Shared by the stop action and by a suspend.
-func (h *Harness) stopTempRate(profileRate, oldRate float64) {
+//
+// The whole snapshot goes in rather than just the old rate, because the
+// TempRateCompleted record has to name the temp rate id it closes and report
+// how much of the programmed duration was left -- which a bare rate cannot say.
+func (h *Harness) stopTempRate(profileRate float64, temp state.TempRateSnapshot) {
 	h.pumpState.SetBasalState(&state.BasalState{
 		CurrentRate:     profileRate,
 		TempBasalActive: false,
 	})
-	h.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryTempRateCompleted, "TempRateCompleted", map[string]interface{}{
-		"tempRate": oldRate, "normalRate": profileRate,
-	})
+	h.pumpState.RecordTempRateCompleted(temp, profileRate, h.pumpState.Now())
 	if n := h.notifier(); n != nil {
-		h.emit("basal change", func() error { return n.NotifyBasalRateChange(oldRate, profileRate, false) })
+		h.emit("basal change", func() error { return n.NotifyBasalRateChange(temp.Rate, profileRate, false) })
 	}
 }
 
@@ -455,13 +448,11 @@ func (h *Harness) actionSuspend(w http.ResponseWriter, r *http.Request) {
 	h.stopBolusForSuspend()
 
 	if temp := h.pumpState.GetTempRate(); temp.Active {
-		h.stopTempRate(h.pumpState.GetProfileBasalRate(), temp.Rate)
+		h.stopTempRate(h.pumpState.GetProfileBasalRate(), temp)
 	}
 
 	h.pumpState.SetPumpingSuspendedWithReason(true, reason)
-	h.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryPumpingSuspended, "PumpingSuspended", map[string]interface{}{
-		"reason": reason,
-	})
+	h.pumpState.RecordPumpingSuspended(reason)
 
 	if reason != SuspendReasonUser {
 		h.raiseSuspendAlarm(reason, body.Message)
@@ -496,12 +487,7 @@ func (h *Harness) stopBolusForSuspend() {
 		TypeBitmask:    bolus.TypeBitmask,
 		EndReasonID:    state.BolusEndReasonStopped,
 	})
-	h.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryBolusCompleted, "BolusCompleted", map[string]interface{}{
-		"bolusId":        bolus.BolusID,
-		"unitsDelivered": bolus.UnitsDelivered,
-		"unitsTotal":     bolus.UnitsTotal,
-		"endReasonId":    state.BolusEndReasonStopped,
-	})
+	h.pumpState.RecordBolusCompleted(bolus.BolusID, bolus.UnitsDelivered, bolus.UnitsTotal, state.BolusEndReasonStopped)
 
 	if n := h.notifier(); n != nil {
 		h.emit("bolus canceled", func() error {
@@ -535,9 +521,7 @@ func (h *Harness) raiseSuspendAlarm(reason, message string) {
 		Timestamp: h.pumpState.Now(),
 	}
 	h.pumpState.AddAlert(alert)
-	h.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryAlarmActivated, "AlarmActivated", map[string]interface{}{
-		"alarmId": alert.ID, "reason": reason, "message": message,
-	})
+	h.pumpState.RecordAlarmActivated(alert, reason)
 
 	if n := h.notifier(); n != nil {
 		h.emit("alert", func() error { return n.NotifyAlert(alert) })
@@ -583,7 +567,7 @@ func (h *Harness) actionResume(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.pumpState.SetPumpingSuspendedWithReason(false, "")
-	h.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryPumpingResumed, "PumpingResumed", nil)
+	h.pumpState.RecordPumpingResumed()
 
 	if n := h.notifier(); n != nil {
 		h.emit("pump resume", func() error { return n.NotifyPumpResumed() })
@@ -598,16 +582,14 @@ func (h *Harness) actionResume(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]interface{}{"state": h.Snapshot()})
 }
 
+// clearAlerts acknowledges every standing alarm, writing one AlarmCleared
+// record per alarm (a pump has no "3 alarms went away" record) and keeping each
+// one's clear time in the pump's cleared-alarm log, which the snapshot reports
+// as alarms_history.
 func (h *Harness) clearAlerts() {
-	h.pumpState.Lock()
-	cleared := len(h.pumpState.ActiveAlerts)
-	h.pumpState.ActiveAlerts = nil
-	h.pumpState.Unlock()
-
-	if cleared > 0 {
-		h.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryAlarmCleared, "AlarmCleared", map[string]interface{}{
-			"cleared": cleared,
-		})
+	when := h.pumpState.Now()
+	for _, cleared := range h.pumpState.ClearAlerts(when) {
+		h.pumpState.RecordAlarmCleared(cleared.Alert, cleared.ClearedAt)
 	}
 }
 
