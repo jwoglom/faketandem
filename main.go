@@ -122,7 +122,7 @@ func main() {
 	// Create API server
 	server := api.New(ble)
 	server.SetSettingsManager(router.GetSettingsManager())
-	configureConnectionHandlers(ble, server, router)
+	configureConnectionHandlers(ble, server, router, pumpState)
 
 	// Set up write handler to log incoming data and notify websocket clients
 	ble.SetWriteHandler(func(charType bluetooth.CharacteristicType, data []byte) {
@@ -187,7 +187,7 @@ func main() {
 	}
 }
 
-func configureConnectionHandlers(ble *bluetooth.Ble, server *api.Server, router *handler.Router) {
+func configureConnectionHandlers(ble *bluetooth.Ble, server *api.Server, router *handler.Router, pumpState *state.PumpState) {
 	ble.SetConnectionHandler(func(connected bool) {
 		server.SendPumpState()
 		if connected {
@@ -199,6 +199,17 @@ func configureConnectionHandlers(ble *bluetooth.Ble, server *api.Server, router 
 		// (e.g. a pumpX2 subprocess that died mid-handshake) is never reused
 		// by the next connection attempt.
 		router.ResetJPAKESession()
+		// A real pump derives a fresh session key per connection, so a central
+		// that reconnects must authenticate again before any auth-gated message
+		// is served. Leaving IsAuthenticated set across a disconnect let a
+		// reconnecting central skip authentication entirely, which would mask
+		// reconnect-auth regressions in the driver under test.
+		//
+		// This clears the per-connection session key only. The cached JPAKE
+		// long-term key (PumpState.LongTermKey) deliberately survives, so the
+		// quick-reconnect flow -- rounds 3/4 against the cached secret -- still
+		// works on the next connection.
+		pumpState.ResetAuthentication()
 	})
 }
 
