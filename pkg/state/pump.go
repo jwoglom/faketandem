@@ -76,6 +76,15 @@ type PumpState struct {
 	// Alerts/Alarms
 	ActiveAlerts []Alert
 
+	// AlarmBitmask is the pump's active-alarm set as AlarmStatusResponse
+	// carries it: a 64-bit mask where bit N is the alarm whose
+	// AlarmStatusResponse.AlarmResponseType raw value is N (bit 2 OCCLUSION_ALARM,
+	// bit 3 PUMP_RESET_ALARM, bit 8 EMPTY_CARTRIDGE_ALARM, bit 18
+	// RESUME_PUMP_ALARM, and so on). Alarms are pump-raised conditions that stop
+	// or threaten insulin delivery, which is why they are modeled as a raw mask
+	// a scenario can set directly rather than derived from ActiveAlerts.
+	AlarmBitmask uint64
+
 	// nextBolusID backs GetNextBolusID's monotonic allocator.
 	nextBolusID uint32
 	// nextTempRateID backs NextTempRateID's monotonic allocator.
@@ -199,6 +208,10 @@ type HistoryLogEntry struct {
 	// records already written.
 	PumpTime uint32
 	Data     map[string]interface{}
+	// SourceNibble is the high nibble of the record's type-ID word. The driver
+	// masks it off when reading the type, so it only matters when reproducing a
+	// captured record byte-for-byte (Mobi captures carry 1, older ones 0).
+	SourceNibble uint8
 }
 
 // HistoryLogState represents history log storage
@@ -421,6 +434,13 @@ func (ps *PumpState) GetSerialNumber() string {
 	return ps.SerialNumber
 }
 
+// GetIOB returns the pump's current insulin-on-board estimate, in units.
+func (ps *PumpState) GetIOB() float64 {
+	ps.mutex.RLock()
+	defer ps.mutex.RUnlock()
+	return ps.IOB
+}
+
 // GetReservoirLevel returns the current reservoir level
 func (ps *PumpState) GetReservoirLevel() float64 {
 	ps.mutex.RLock()
@@ -571,22 +591,12 @@ func (ps *PumpState) AddHistoryLogEntry(entryType string, data map[string]interf
 	ps.AddHistoryLogEntryWithTypeID(0, entryType, data)
 }
 
-// AddHistoryLogEntryWithTypeID adds a history log entry with a specific type ID.
+// AddHistoryLogEntryWithTypeID adds a history log entry with a specific type ID,
+// stamped with the pump's current clock. It is a thin wrapper over
+// AppendHistory, which is the API to use when the timestamp or the assigned
+// sequence number matters.
 func (ps *PumpState) AddHistoryLogEntryWithTypeID(typeID int, entryType string, data map[string]interface{}) {
-	ps.HistoryLog.mutex.Lock()
-	defer ps.HistoryLog.mutex.Unlock()
-
-	now := time.Now()
-	entry := HistoryLogEntry{
-		Sequence:  ps.HistoryLog.NextSequence,
-		TypeID:    typeID,
-		Type:      entryType,
-		Timestamp: now,
-		PumpTime:  PumpTimeSeconds(now),
-		Data:      data,
-	}
-	ps.HistoryLog.Entries = append(ps.HistoryLog.Entries, entry)
-	ps.HistoryLog.NextSequence++
+	ps.AppendHistory(HistoryEvent{TypeID: typeID, Name: entryType, Fields: data})
 }
 
 // GetHistoryLogEntries returns history log entries in a sequence range
@@ -653,6 +663,38 @@ func (ps *PumpState) AddAlert(alert Alert) {
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
 	ps.ActiveAlerts = append(ps.ActiveAlerts, alert)
+}
+
+// SetAlarmBitmask replaces the pump's active-alarm bitmask wholesale.
+func (ps *PumpState) SetAlarmBitmask(mask uint64) {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+	ps.AlarmBitmask = mask
+	log.Infof("Alarm bitmask set to 0x%016x", mask)
+}
+
+// SetAlarm raises (active) or clears a single alarm bit. bit is the
+// AlarmResponseType raw value, 0-63; out-of-range bits are ignored.
+func (ps *PumpState) SetAlarm(bit uint, active bool) {
+	if bit > 63 {
+		log.Warnf("Ignoring out-of-range alarm bit %d", bit)
+		return
+	}
+
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+	if active {
+		ps.AlarmBitmask |= uint64(1) << bit
+	} else {
+		ps.AlarmBitmask &^= uint64(1) << bit
+	}
+}
+
+// GetAlarmBitmask returns the pump's active-alarm bitmask.
+func (ps *PumpState) GetAlarmBitmask() uint64 {
+	ps.mutex.RLock()
+	defer ps.mutex.RUnlock()
+	return ps.AlarmBitmask
 }
 
 // SetControlIQMode sets the ControlIQ mode
