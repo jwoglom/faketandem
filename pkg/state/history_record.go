@@ -68,8 +68,10 @@ func (ps *PumpState) AppendHistory(event HistoryEvent) HistoryLogEntry {
 	pumpTime := event.PumpTime
 	var timestamp time.Time
 	if pumpTime == 0 {
-		timestamp = ps.currentTimeOrNow()
-		pumpTime = PumpTimeSeconds(timestamp)
+		// Live events are stamped from the pump's clock, including any
+		// pump-clock skew, so they line up with every other wire timestamp.
+		timestamp = ps.Now()
+		pumpTime = ps.PumpTimeFor(timestamp)
 	} else {
 		timestamp = PumpTimeToWallClock(pumpTime)
 	}
@@ -90,18 +92,6 @@ func (ps *PumpState) AppendHistory(event HistoryEvent) HistoryLogEntry {
 	ps.HistoryLog.NextSequence++
 
 	return entry
-}
-
-// currentTimeOrNow reads the pump's modeled clock, falling back to wall clock
-// before the first simulator tick has set it.
-func (ps *PumpState) currentTimeOrNow() time.Time {
-	ps.mutex.RLock()
-	current := ps.CurrentTime
-	ps.mutex.RUnlock()
-	if current.IsZero() {
-		return time.Now()
-	}
-	return current
 }
 
 // EncodeRecord renders the entry as the 26 bytes a HistoryLogStreamResponse

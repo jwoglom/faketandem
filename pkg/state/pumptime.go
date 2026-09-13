@@ -25,9 +25,10 @@ const tandemEpochUnix int64 = 1199145600
 // Note that TandemKit's Dates.swift additionally shifts by the phone's local
 // UTC offset when decoding, on the theory that a real pump reports its clock in
 // local time with no zone attached. This helper deliberately does NOT apply an
-// offset: it is the single place a future pump-clock model (offset, skew,
-// freeze, time-zone) should hook into, and baking a host-local offset in here
-// would make that model's behavior depend on the machine running the emulator.
+// offset of its own: the pump-clock model lives in PumpState (Clock plus
+// pumpClockOffset, applied by PumpTimeFor/PumpNow), and baking a host-local
+// offset in here would make that model's behavior depend on the machine
+// running the emulator.
 func PumpTimeSeconds(t time.Time) uint32 {
 	secs := t.UTC().Unix() - tandemEpochUnix
 	if secs < 0 {
@@ -44,16 +45,9 @@ func PumpTimeToWallClock(pumpSeconds uint32) time.Time {
 
 // PumpTimeNow returns the pump's current clock as a pump-epoch timestamp.
 //
-// This reads PumpState.CurrentTime (refreshed by UpdateTimeSinceReset) rather
-// than time.Now() directly, so that when a controllable Clock is introduced
-// every emitted pump timestamp moves with it in one step.
+// It reads the pump's own clock (PumpNow: the controllable Clock plus the
+// configurable pump-clock skew) rather than time.Now(), so a harness that
+// freezes, steps or skews the pump moves every emitted timestamp with it.
 func (ps *PumpState) PumpTimeNow() uint32 {
-	ps.mutex.RLock()
-	current := ps.CurrentTime
-	ps.mutex.RUnlock()
-
-	if current.IsZero() {
-		current = time.Now()
-	}
-	return PumpTimeSeconds(current)
+	return PumpTimeSeconds(ps.PumpNow())
 }

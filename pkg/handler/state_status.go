@@ -55,7 +55,7 @@ func (h *LastBolusStatusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpSt
 	requestedMilliunits := int64(record.RequestedUnits * 1000)
 	timestamp := uint32(0)
 	if ok {
-		timestamp = state.PumpTimeSeconds(record.EndTime)
+		timestamp = pumpState.PumpTimeFor(record.EndTime)
 	}
 
 	var cargo map[string]interface{}
@@ -172,7 +172,7 @@ func (h *TempRateHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *st
 	startTimeRaw := uint32(0)
 	durationSeconds := int64(0)
 	if temp.Active {
-		startTimeRaw = state.PumpTimeSeconds(temp.StartTime)
+		startTimeRaw = pumpState.PumpTimeFor(temp.StartTime)
 		if !temp.EndTime.IsZero() && !temp.StartTime.IsZero() {
 			durationSeconds = int64(temp.EndTime.Sub(temp.StartTime).Seconds())
 		}

@@ -58,7 +58,12 @@ type PumpState struct {
 
 	// Pump mode
 	PumpingSuspended bool
-	ControlIQMode    int // 0=Normal, 1=Sleep, 2=Exercise
+	// suspendReason records WHY delivery is suspended ("user", "occlusion",
+	// "alarm", ...). A driver cannot see it directly, but it decides which
+	// history records and qualifying events a suspend produces, and a harness
+	// asserts on it as pump-side truth.
+	suspendReason string
+	ControlIQMode int // 0=Normal, 1=Sleep, 2=Exercise
 
 	// ClosedLoopEnabled reports whether Control-IQ closed-loop control is on.
 	// It defaults to FALSE: a driver that reads closedLoopEnabled=true refuses
@@ -89,6 +94,24 @@ type PumpState struct {
 	nextBolusID uint32
 	// nextTempRateID backs NextTempRateID's monotonic allocator.
 	nextTempRateID int
+
+	// clock is the source of every "now" this state derives (see Clock). It
+	// has its own mutex so Now() can be called with the main state mutex
+	// already held, which the simulator does on every tick.
+	clock Clock
+	// pumpClockOffset skews the pump's own clock away from the clock's time.
+	// Every timestamp put on the wire in pump-epoch seconds is shifted by it,
+	// while internal durations (bolus progress, temp-rate expiry) are not --
+	// which is exactly how a real pump whose clock is set wrong behaves, and
+	// what makes a driver's pump-time drift handling testable.
+	pumpClockOffset time.Duration
+	clockMtx        sync.RWMutex
+
+	// BolusRateUnitsPerSecond is the speed the simulator delivers a bolus at.
+	// Real pumps deliver far more slowly than the 0.05 U/s default (a Tandem
+	// Mobi is roughly 1/28.7 U/s under 10 U), so a harness that wants driver
+	// timing behavior to match hardware sets this explicitly.
+	BolusRateUnitsPerSecond float64
 
 	mutex sync.RWMutex
 }
@@ -144,6 +167,18 @@ type BolusState struct {
 	// client attributed to carbs and to a correction, in units.
 	FoodVolume       float64
 	CorrectionVolume float64
+
+	// Stalled freezes delivery progress without ending the bolus: the pump
+	// still reports the bolus as in progress and still answers
+	// CurrentBolusStatus for it, but no further insulin goes in. It models a
+	// pump that has stopped making progress (occlusion detection pending, a
+	// paused delivery) and gives a harness a way to hold a bolus open for as
+	// long as a test needs.
+	Stalled bool
+	// StalledAt records when Stalled was set, so resuming can shift StartTime
+	// forward by the stall duration and keep delivered-volume arithmetic
+	// continuous.
+	StalledAt time.Time
 }
 
 // LastBolusRecord is the pump's record of the most recently finished bolus,
@@ -254,6 +289,7 @@ const (
 // NewPumpState creates a new pump state with default values
 func NewPumpState() *PumpState {
 	ps := newDefaultPumpState(time.Now())
+	ps.clock = RealClock{}
 	ps.applyAPIVersionOverride()
 	return ps
 }
@@ -289,7 +325,9 @@ func newDefaultPumpState(now time.Time) *PumpState {
 
 		ClosedLoopEnabled: false,
 		Weight:            70,
-		TotalDailyInsulin: 40,
+
+		BolusRateUnitsPerSecond: DefaultBolusRateUnitsPerSecond,
+		TotalDailyInsulin:       40,
 
 		IOB: 0.0,
 		TDD: 0.0,
@@ -339,9 +377,10 @@ func (ps *PumpState) UpdateTimeSinceReset() {
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
 
-	elapsed := time.Since(ps.StartTime)
+	now := ps.Now()
+	elapsed := now.Sub(ps.StartTime)
 	ps.TimeSinceReset = uint32(elapsed.Seconds())
-	ps.CurrentTime = time.Now()
+	ps.CurrentTime = now
 }
 
 // SetAuthenticated marks the pump as authenticated
@@ -504,10 +543,12 @@ func (ps *PumpState) StartBolusWithSource(units float64, bolusID uint32, sourceI
 	ps.Bolus.Active = true
 	ps.Bolus.UnitsTotal = units
 	ps.Bolus.UnitsDelivered = 0
-	ps.Bolus.StartTime = time.Now()
+	ps.Bolus.StartTime = ps.Now()
 	ps.Bolus.BolusID = bolusID
 	ps.Bolus.SourceID = sourceID
 	ps.Bolus.TypeBitmask = typeBitmask
+	ps.Bolus.Stalled = false
+	ps.Bolus.StalledAt = time.Time{}
 
 	// Keep the allocator ahead of any externally supplied ID so a later
 	// permission grant can never reissue one already in use.
@@ -596,7 +637,22 @@ func (ps *PumpState) AddHistoryLogEntry(entryType string, data map[string]interf
 // AppendHistory, which is the API to use when the timestamp or the assigned
 // sequence number matters.
 func (ps *PumpState) AddHistoryLogEntryWithTypeID(typeID int, entryType string, data map[string]interface{}) {
-	ps.AppendHistory(HistoryEvent{TypeID: typeID, Name: entryType, Fields: data})
+	ps.AddHistoryLogEntryAt(typeID, entryType, ps.Now(), data)
+}
+
+// AddHistoryLogEntryAt adds a history log entry stamped at a chosen instant on
+// the pump's clock, returning its sequence number. Backdating is what lets a
+// harness stage history that predates the connection -- a pump does not start
+// its log when a phone shows up. The record itself is built by AppendHistory
+// so the wire encoding and sequence allocation live in one place.
+func (ps *PumpState) AddHistoryLogEntryAt(typeID int, entryType string, when time.Time, data map[string]interface{}) uint32 {
+	entry := ps.AppendHistory(HistoryEvent{
+		TypeID:   typeID,
+		Name:     entryType,
+		PumpTime: ps.PumpTimeFor(when),
+		Fields:   data,
+	})
+	return entry.Sequence
 }
 
 // GetHistoryLogEntries returns history log entries in a sequence range
@@ -615,9 +671,29 @@ func (ps *PumpState) GetHistoryLogEntries(startSeq, endSeq uint32) []HistoryLogE
 
 // SetPumpingSuspended sets the pumping suspended state
 func (ps *PumpState) SetPumpingSuspended(suspended bool) {
+	ps.SetPumpingSuspendedWithReason(suspended, "")
+}
+
+// SetPumpingSuspendedWithReason sets the pumping suspended state and records
+// why. Resuming clears the reason.
+func (ps *PumpState) SetPumpingSuspendedWithReason(suspended bool, reason string) {
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
 	ps.PumpingSuspended = suspended
+	if suspended {
+		ps.suspendReason = reason
+	} else {
+		ps.suspendReason = ""
+	}
+}
+
+// SuspendReason returns why delivery is suspended, or "" when it is not (or
+// when the suspend came from a path that did not record a reason). Callers
+// holding the state lock read the field through this only when they do not --
+// it takes no lock of its own precisely so the snapshot can call it inside
+// RLock.
+func (ps *PumpState) SuspendReason() string {
+	return ps.suspendReason
 }
 
 // IsPumpingSuspended returns whether pumping is suspended
@@ -625,6 +701,17 @@ func (ps *PumpState) IsPumpingSuspended() bool {
 	ps.mutex.RLock()
 	defer ps.mutex.RUnlock()
 	return ps.PumpingSuspended
+}
+
+// Lock acquires the write lock on the pump state, for the handful of callers
+// (the harness's direct field writes) that need to poke fields with no setter.
+func (ps *PumpState) Lock() {
+	ps.mutex.Lock()
+}
+
+// Unlock releases the write lock on the pump state.
+func (ps *PumpState) Unlock() {
+	ps.mutex.Unlock()
 }
 
 // RLock acquires a read lock on the pump state
@@ -721,7 +808,7 @@ func (ps *PumpState) RecordLastBolus(record LastBolusRecord) {
 
 	record.Valid = true
 	if record.EndTime.IsZero() {
-		record.EndTime = time.Now()
+		record.EndTime = ps.Now()
 	}
 	record.SecondsSinceReset = ps.TimeSinceReset
 	ps.LastBolus = &record

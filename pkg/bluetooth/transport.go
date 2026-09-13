@@ -122,3 +122,18 @@ var (
 	_ Transport = (*Ble)(nil)
 	_ Transport = (*VirtualTransport)(nil)
 )
+
+// RadioController is implemented by transports whose radio can be switched off
+// and back on without tearing the transport down. The virtual transport
+// supports it; the Linux GATT transport does not, so a harness must check the
+// assertion before offering the control.
+type RadioController interface {
+	// SetRadioEnabled turns the radio on or off. Turning it off drops any
+	// attached central and refuses new connections.
+	SetRadioEnabled(enabled bool)
+	// RadioEnabled reports whether the radio is on.
+	RadioEnabled() bool
+}
+
+// Compile-time assertion that the virtual transport can control its radio.
+var _ RadioController = (*VirtualTransport)(nil)

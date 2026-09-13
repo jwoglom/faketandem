@@ -61,14 +61,14 @@ func (h *CurrentBolusStatusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pum
 		}
 		cargo["statusId"] = 1
 		cargo["bolusId"] = bolus.BolusID
-		cargo["timestamp"] = state.PumpTimeSeconds(startTime)
+		cargo["timestamp"] = pumpState.PumpTimeFor(startTime)
 		cargo["requestedVolume"] = int(bolus.UnitsTotal * 1000)
 		cargo["bolusSourceId"] = bolus.SourceID
 		cargo["bolusTypeBitmask"] = bolus.TypeBitmask
 	} else {
 		cargo["statusId"] = 0
 		cargo["bolusId"] = 0
-		cargo["timestamp"] = state.PumpTimeSeconds(currentTime)
+		cargo["timestamp"] = pumpState.PumpTimeFor(currentTime)
 		cargo["requestedVolume"] = 0
 		cargo["bolusSourceId"] = 0
 		cargo["bolusTypeBitmask"] = 0

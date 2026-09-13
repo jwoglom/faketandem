@@ -32,6 +32,14 @@ type Server struct {
 	mtx             sync.Mutex
 	settingsManager *settings.Manager
 
+	// extraRoutes, when set, registers additional endpoints on the mux at
+	// startup. It is how the integration-harness API (clock, state, log,
+	// faults) attaches without this package having to know about pump state,
+	// the router or the fault injector.
+	extraRoutes func(mux *http.ServeMux)
+	// extraEndpoints are the lines those routes contribute to the index page.
+	extraEndpoints []string
+
 	// Callback for when a command is received from the websocket
 	commandHandler CommandHandler
 }
@@ -72,6 +80,13 @@ func (s *Server) SetUIDir(dir string) {
 // SetSettingsManager sets the settings manager for this server
 func (s *Server) SetSettingsManager(manager *settings.Manager) {
 	s.settingsManager = manager
+}
+
+// SetExtraRoutes registers a callback that installs additional endpoints on
+// the server's mux, along with the lines describing them on the index page.
+func (s *Server) SetExtraRoutes(register func(mux *http.ServeMux), endpoints []string) {
+	s.extraRoutes = register
+	s.extraEndpoints = endpoints
 }
 
 // SetCommandHandler sets the callback for when commands are received
@@ -185,7 +200,7 @@ func (s *Server) SendPumpState() {
 
 func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		if _, err := fmt.Fprintf(w, "Pump Emulator API - Connect via WebSocket at /ws\n\nSettings API:\n  GET    /api/settings\n  GET    /api/settings/{messageType}\n  PUT    /api/settings/{messageType}\n  POST   /api/settings/{messageType}/reset\n\nBluetooth Pairing API:\n  GET    /api/bluetooth/pairingstate\n  POST   /api/bluetooth/pairingstate\n  States: NotDiscoverable, DiscoverableOnly, PairStep1, PairStep2"); err != nil {
+		if _, err := io.WriteString(w, s.indexPage()); err != nil {
 			log.Warnf("Failed to write response: %v", err)
 		}
 	})
@@ -200,6 +215,31 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/settings", s.handleSettingsAPI)
 	mux.HandleFunc("/api/settings/", s.handleSettingsAPI)
 	mux.HandleFunc("/api/bluetooth/pairingstate", s.handlePairingStateAPI)
+	if s.extraRoutes != nil {
+		s.extraRoutes(mux)
+	}
+}
+
+// indexPage lists the endpoints this server exposes.
+func (s *Server) indexPage() string {
+	var b strings.Builder
+	b.WriteString("Pump Emulator API - Connect via WebSocket at /ws\n\n")
+	b.WriteString("Settings API:\n")
+	b.WriteString("  GET    /api/settings\n")
+	b.WriteString("  GET    /api/settings/{messageType}\n")
+	b.WriteString("  PUT    /api/settings/{messageType}\n")
+	b.WriteString("  POST   /api/settings/{messageType}/reset\n\n")
+	b.WriteString("Bluetooth Pairing API:\n")
+	b.WriteString("  GET    /api/bluetooth/pairingstate\n")
+	b.WriteString("  POST   /api/bluetooth/pairingstate\n")
+	b.WriteString("  States: NotDiscoverable, DiscoverableOnly, PairStep1, PairStep2\n")
+	if len(s.extraEndpoints) > 0 {
+		b.WriteString("\nIntegration harness API:\n")
+		for _, line := range s.extraEndpoints {
+			b.WriteString("  " + line + "\n")
+		}
+	}
+	return b.String()
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {

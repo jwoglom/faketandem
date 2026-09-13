@@ -15,7 +15,13 @@ type Simulator struct {
 	stopChan       chan bool
 	ticker         *time.Ticker
 	updateInterval time.Duration
-	mutex          sync.Mutex
+	// lastUpdate is the pump-clock instant the previous update ran at. Basal
+	// delivery, battery drain and IOB decay integrate over the elapsed pump
+	// time rather than over the ticker interval, so a harness that advances a
+	// manual clock by an hour and calls Tick once gets an hour's worth of
+	// simulation instead of one tick's worth.
+	lastUpdate time.Time
+	mutex      sync.Mutex
 }
 
 // NewSimulator creates a new background simulator
@@ -79,8 +85,40 @@ func (s *Simulator) simulationLoop() {
 	}
 }
 
+// Tick runs exactly one simulation update, synchronously.
+//
+// It is what a harness calls after stepping a ManualClock: with the background
+// ticker stopped (or simply ignored), Advance + Tick gives a fully
+// deterministic pump with no wall-clock waiting anywhere.
+func (s *Simulator) Tick() {
+	s.update()
+}
+
+// elapsedSincePrevious returns how much pump time has passed since the last
+// update, and records this one. The first update after Start has no previous
+// instant, so it counts as one interval.
+func (s *Simulator) elapsedSincePrevious(now time.Time) time.Duration {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	prev := s.lastUpdate
+	s.lastUpdate = now
+	if prev.IsZero() {
+		return s.updateInterval
+	}
+	elapsed := now.Sub(prev)
+	if elapsed < 0 {
+		// The clock was moved backwards; deliver nothing rather than
+		// un-delivering insulin.
+		return 0
+	}
+	return elapsed
+}
+
 // update performs a single simulation update
 func (s *Simulator) update() {
+	elapsed := s.elapsedSincePrevious(s.pumpState.Now())
+
 	// Update time
 	s.pumpState.UpdateTimeSinceReset()
 
@@ -91,10 +129,10 @@ func (s *Simulator) update() {
 	}
 
 	// Update basal delivery
-	s.updateBasalDelivery()
+	s.updateBasalDelivery(elapsed)
 
 	// Update battery
-	s.updateBattery()
+	s.updateBattery(elapsed)
 
 	// Check for alerts
 	s.checkAlerts()
@@ -111,10 +149,24 @@ func (s *Simulator) updateBolusDelivery() *LastBolusRecord {
 		return nil
 	}
 
-	// Calculate delivery rate (units per second)
-	// Assume bolus delivers at 0.05 units/second (3 units/minute)
-	deliveryRate := 0.05 // units/second
-	elapsed := time.Since(s.pumpState.Bolus.StartTime).Seconds()
+	// A stalled bolus stays open and keeps answering CurrentBolusStatus, but
+	// makes no further progress.
+	if s.pumpState.Bolus.Stalled {
+		return nil
+	}
+
+	// Delivery speed is configurable (see PumpState.BolusRateUnitsPerSecond):
+	// a real pump is much slower than the 0.05 U/s default, and driver
+	// behavior that depends on a bolus still being unfinished is only
+	// reproducible when the two agree.
+	deliveryRate := s.pumpState.BolusRateUnitsPerSecond
+	if deliveryRate <= 0 {
+		deliveryRate = DefaultBolusRateUnitsPerSecond
+	}
+	elapsed := s.pumpState.Now().Sub(s.pumpState.Bolus.StartTime).Seconds()
+	if elapsed < 0 {
+		elapsed = 0
+	}
 	expectedDelivered := deliveryRate * elapsed
 
 	if expectedDelivered > s.pumpState.Bolus.UnitsTotal {
@@ -160,7 +212,7 @@ func (s *Simulator) updateBolusDelivery() *LastBolusRecord {
 			SourceID:       sourceID,
 			TypeBitmask:    typeBitmask,
 			EndReasonID:    BolusEndReasonCompleted,
-			EndTime:        time.Now(),
+			EndTime:        s.pumpState.Now(),
 		}
 
 		// Record history log entry
@@ -183,8 +235,8 @@ func (s *Simulator) updateBolusDelivery() *LastBolusRecord {
 	return nil
 }
 
-// updateBasalDelivery simulates basal insulin delivery
-func (s *Simulator) updateBasalDelivery() {
+// updateBasalDelivery simulates basal insulin delivery over elapsed pump time.
+func (s *Simulator) updateBasalDelivery(elapsed time.Duration) {
 	s.pumpState.mutex.Lock()
 	defer s.pumpState.mutex.Unlock()
 
@@ -194,7 +246,7 @@ func (s *Simulator) updateBasalDelivery() {
 		basalRate = s.pumpState.Basal.TempBasalRate
 
 		// Check if temp basal has expired
-		if time.Now().After(s.pumpState.Basal.TempBasalEnd) {
+		if s.pumpState.Now().After(s.pumpState.Basal.TempBasalEnd) {
 			log.Info("Temp basal expired, returning to normal basal rate")
 			oldRate := s.pumpState.Basal.TempBasalRate
 			s.pumpState.Basal.TempBasalActive = false
@@ -213,11 +265,16 @@ func (s *Simulator) updateBasalDelivery() {
 		}
 	}
 
+	// A suspended pump delivers no basal at all.
+	if s.pumpState.PumpingSuspended {
+		basalRate = 0
+	}
+
 	// Basal rate is in units/hour, convert to units/second
 	basalPerSecond := basalRate / 3600.0
 
-	// Deliver basal for the update interval
-	basalDelivered := basalPerSecond * s.updateInterval.Seconds()
+	// Deliver basal for the pump time that has actually elapsed
+	basalDelivered := basalPerSecond * elapsed.Seconds()
 
 	// Deduct from reservoir
 	s.pumpState.Reservoir.CurrentUnits -= basalDelivered
@@ -232,14 +289,14 @@ func (s *Simulator) updateBasalDelivery() {
 	// Decay IOB slightly (very simplified - real IOB calculation is complex)
 	// Assume insulin action time of ~4 hours
 	iobDecayPerSecond := s.pumpState.IOB / (4.0 * 3600.0)
-	s.pumpState.IOB -= iobDecayPerSecond * s.updateInterval.Seconds()
+	s.pumpState.IOB -= iobDecayPerSecond * elapsed.Seconds()
 	if s.pumpState.IOB < 0 {
 		s.pumpState.IOB = 0
 	}
 }
 
-// updateBattery simulates battery drain
-func (s *Simulator) updateBattery() {
+// updateBattery simulates battery drain over elapsed pump time.
+func (s *Simulator) updateBattery(elapsed time.Duration) {
 	s.pumpState.mutex.Lock()
 	defer s.pumpState.mutex.Unlock()
 
@@ -247,7 +304,7 @@ func (s *Simulator) updateBattery() {
 	// Assume battery lasts ~7 days (168 hours)
 	// Drain 100% over 168 hours = ~0.595% per hour = ~0.0001653% per second
 	drainPerSecond := 100.0 / (7.0 * 24.0 * 3600.0)
-	drainAmount := drainPerSecond * s.updateInterval.Seconds()
+	drainAmount := drainPerSecond * elapsed.Seconds()
 
 	s.pumpState.Battery.Percentage -= int(drainAmount * 100) // Scale for percentage
 	if s.pumpState.Battery.Percentage < 0 {
@@ -340,7 +397,7 @@ func (s *Simulator) addAlert(alertType AlertType, priority AlertPriority, messag
 		Type:         alertType,
 		Priority:     priority,
 		Message:      message,
-		Timestamp:    time.Now(),
+		Timestamp:    s.pumpState.Now(),
 		Acknowledged: false,
 	}
 	s.pumpState.ActiveAlerts = append(s.pumpState.ActiveAlerts, alert)
