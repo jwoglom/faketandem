@@ -16,21 +16,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// ErrorResponseEncoder builds the protocol-level ErrorResponse (opcode 77)
-// that the error_response fault sends in place of a handler's own answer.
-//
-// It is a hook rather than an implementation because ErrorResponse cannot be
-// produced through cliparser: pumpX2 has no encodable ErrorResponse message
-// class, so the bytes have to be framed natively (header, cargo, CRC16,
-// optional signed trailer). The native packet encoder being built alongside
-// this work fills it in; until it does, an armed error_response fault behaves
-// as a drop and says so in the request log and the emulator log, so a harness
-// never silently believes it exercised an error path it did not.
-//
-// txID is the transaction the error answers, requestOpcode/requestName
-// identify what it answers, and errorCode is the code the fault carries.
-var ErrorResponseEncoder func(txID int, errorCode int, requestOpcode int, requestName string) (*pumpx2.EncodedMessage, error)
-
 // Router routes messages to appropriate handlers
 type Router struct {
 	handlers        map[string]MessageHandler
@@ -499,9 +484,19 @@ func (r *Router) sendErrorResponse(charType bluetooth.CharacteristicType, msg *p
 		return nil
 	}
 
-	log.Warnf("Fault %d (error_response): answering %s txID=%d with ErrorResponse code %d",
-		fault.ID, msg.MessageType, msg.TxID, fault.ErrorCode)
-	return r.sendAndRecord(charType, errMsg, -1, fault.Kind,
+	// A real pump answers on the characteristic the message belongs to, not on
+	// whatever characteristic the rejected request arrived on: ErrorResponse is
+	// a CURRENT_STATUS message, and that is the only place the driver looks for
+	// it (TandemPeripheralManager's CURRENT_STATUS/opcode-77 branch). An
+	// encoder that names no characteristic keeps the request's.
+	errCharType := charType
+	if named, ok := bluetooth.CharacteristicTypeFromName(errMsg.Characteristic); ok {
+		errCharType = named
+	}
+
+	log.Warnf("Fault %d (error_response): answering %s txID=%d with ErrorResponse code %d on %s",
+		fault.ID, msg.MessageType, msg.TxID, fault.ErrorCode, errCharType)
+	return r.sendAndRecord(errCharType, errMsg, -1, fault.Kind,
 		fmt.Sprintf("ErrorResponse code %d in place of %s", fault.ErrorCode, msg.MessageType))
 }
 
