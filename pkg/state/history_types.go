@@ -56,13 +56,13 @@ const (
 	HistoryMalfunction    = 76
 
 	// CGM events
-	HistoryCGMData              = 100
-	HistoryCGMCalibration       = 101
-	HistoryCGMSensorTypeChange  = 102
-	HistoryCGMStartSession      = 103
-	HistoryCGMStopSession       = 104
-	HistoryCGMAlertActivated    = 105
-	HistoryCGMAlertCleared      = 106
+	HistoryCGMData             = 100
+	HistoryCGMCalibration      = 101
+	HistoryCGMSensorTypeChange = 102
+	HistoryCGMStartSession     = 103
+	HistoryCGMStopSession      = 104
+	HistoryCGMAlertActivated   = 105
+	HistoryCGMAlertCleared     = 106
 
 	// Settings events
 	HistoryParamChangeGlobalSettings = 110
@@ -81,7 +81,63 @@ const (
 	HistoryHypoMinimizerResume  = 131
 
 	// Daily/status
-	HistoryDailyStatus = 140
-	HistoryLoadStatus  = 141
+	HistoryDailyStatus  = 140
+	HistoryLoadStatus   = 141
 	HistoryUpdateStatus = 142
 )
+
+// historyTypeIDByName maps the record type names this emulator writes to the
+// pumpX2 numeric type IDs above, so an API caller can append a record by the
+// name it sees in the log rather than by looking the number up.
+//
+// It covers the types the emulator generates itself; anything else is appended
+// with an explicit type_id.
+var historyTypeIDByName = map[string]int{
+	"BolusRequestedMsg1":      HistoryBolusRequestedMsg1,
+	"BolusRequestedMsg2":      HistoryBolusRequestedMsg2,
+	"BolusRequestedMsg3":      HistoryBolusRequestedMsg3,
+	"BolusActivated":          HistoryBolusActivated,
+	"BolusCompleted":          HistoryBolusCompleted,
+	"BolusDelivery":           HistoryBolusDelivery,
+	"BolexActivated":          HistoryBolexActivated,
+	"BolexCompleted":          HistoryBolexCompleted,
+	"CorrectionDeclined":      HistoryCorrectionDeclined,
+	"BasalDelivery":           HistoryBasalDelivery,
+	"BasalRateChange":         HistoryBasalRateChange,
+	"DailyBasal":              HistoryDailyBasal,
+	"TempRateActivated":       HistoryTempRateActivated,
+	"TempRateCompleted":       HistoryTempRateCompleted,
+	"CartridgeInserted":       HistoryCartridgeInserted,
+	"CartridgeRemoved":        HistoryCartridgeRemoved,
+	"CartridgeFilled":         HistoryCartridgeFilled,
+	"TubingFilled":            HistoryTubingFilled,
+	"CannulaFilled":           HistoryCannulaFilled,
+	"PumpingSuspended":        HistoryPumpingSuspended,
+	"PumpingResumed":          HistoryPumpingResumed,
+	"BGEntry":                 HistoryBGEntry,
+	"CarbEntry":               HistoryCarbEntry,
+	"DateChange":              HistoryDateChange,
+	"TimeChanged":             HistoryTimeChanged,
+	"NewDay":                  HistoryNewDay,
+	"AlarmActivated":          HistoryAlarmActivated,
+	"AlarmAck":                HistoryAlarmAck,
+	"AlarmCleared":            HistoryAlarmCleared,
+	"AlertActivated":          HistoryAlertActivated,
+	"AlertAck":                HistoryAlertAck,
+	"AlertCleared":            HistoryAlertCleared,
+	"Malfunction":             HistoryMalfunction,
+	"CGMData":                 HistoryCGMData,
+	"CGMCalibration":          HistoryCGMCalibration,
+	"CGMStartSession":         HistoryCGMStartSession,
+	"CGMStopSession":          HistoryCGMStopSession,
+	"HypoMinimizerSuspend":    HistoryHypoMinimizerSuspend,
+	"HypoMinimizerResume":     HistoryHypoMinimizerResume,
+	"ControlIQUserModeChange": HistoryControlIQUserModeChange,
+}
+
+// HistoryTypeIDByName returns the numeric history-log type ID for a record
+// type name, and whether the name is known.
+func HistoryTypeIDByName(name string) (int, bool) {
+	id, ok := historyTypeIDByName[name]
+	return id, ok
+}

@@ -118,6 +118,17 @@ type VirtualTransport struct {
 	pairingState    PairingState
 	pairingStateMtx sync.RWMutex
 
+	// radioOff models a pump whose BLE radio has gone away: the listener
+	// keeps running (so a harness can turn it back on) but every connection
+	// is refused and any current one is dropped.
+	radioOff bool
+	// notifyFilter, when set, is consulted for every notification fragment
+	// before it leaves the link. Returning false drops that one fragment,
+	// which is the fragment-level seam faults are injected at -- the router
+	// works in whole messages and cannot express "this fragment and no more".
+	notifyFilter func(charType CharacteristicType, data []byte) bool
+	radioMtx     sync.RWMutex
+
 	services []virtualService
 	// uuidToChar maps a normalized pump characteristic UUID to its type.
 	uuidToChar map[string]CharacteristicType
@@ -332,6 +343,13 @@ func (v *VirtualTransport) handleConn(conn net.Conn) {
 		Services:         v.services,
 	}); err != nil {
 		log.Warnf("pkg bluetooth; virtual transport failed to send hello: %v", err)
+		c.close()
+		return
+	}
+
+	if !v.RadioEnabled() {
+		log.Warnf("pkg bluetooth; virtual transport rejecting connection from %s - radio is off", conn.RemoteAddr())
+		c.sendDisconnect("radio_off")
 		c.close()
 		return
 	}
@@ -688,6 +706,11 @@ func (v *VirtualTransport) Notify(charType CharacteristicType, data []byte) erro
 		return fmt.Errorf("no notifier registered for %s", charType)
 	}
 
+	if filter := v.getNotifyFilter(); filter != nil && !filter(charType, data) {
+		log.Warnf("pkg bluetooth; virtual transport dropping notification fragment on %s per notify filter", charType)
+		return nil
+	}
+
 	log.Debugf("pkg bluetooth; virtual transport sending notification on %s: %s", charType, hex.EncodeToString(data))
 	return c.send(virtualMessage{Type: "notify", Characteristic: uuid, Value: hex.EncodeToString(data)})
 }
@@ -733,4 +756,44 @@ func (v *VirtualTransport) GetPairingState() PairingState {
 	v.pairingStateMtx.RLock()
 	defer v.pairingStateMtx.RUnlock()
 	return v.pairingState
+}
+
+// SetRadioEnabled turns the virtual radio on or off. Turning it off drops the
+// attached central and refuses new connections until it is turned back on,
+// which is how a harness reproduces a pump that went out of range or powered
+// its radio down without tearing the emulator down.
+func (v *VirtualTransport) SetRadioEnabled(enabled bool) {
+	v.radioMtx.Lock()
+	v.radioOff = !enabled
+	v.radioMtx.Unlock()
+
+	if enabled {
+		log.Info("pkg bluetooth; virtual transport radio on")
+		return
+	}
+
+	log.Info("pkg bluetooth; virtual transport radio off; dropping any attached central")
+	v.ShutdownConnection()
+}
+
+// RadioEnabled reports whether the virtual radio is on.
+func (v *VirtualTransport) RadioEnabled() bool {
+	v.radioMtx.RLock()
+	defer v.radioMtx.RUnlock()
+	return !v.radioOff
+}
+
+// SetNotifyFilter installs (or, with nil, removes) the per-fragment filter
+// consulted before each notification leaves the link. Returning false from it
+// drops that fragment silently, exactly as a lost BLE notification would be.
+func (v *VirtualTransport) SetNotifyFilter(filter func(charType CharacteristicType, data []byte) bool) {
+	v.radioMtx.Lock()
+	defer v.radioMtx.Unlock()
+	v.notifyFilter = filter
+}
+
+func (v *VirtualTransport) getNotifyFilter() func(charType CharacteristicType, data []byte) bool {
+	v.radioMtx.RLock()
+	defer v.radioMtx.RUnlock()
+	return v.notifyFilter
 }

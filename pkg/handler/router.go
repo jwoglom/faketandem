@@ -3,15 +3,33 @@ package handler
 import (
 	"encoding/hex"
 	"fmt"
+	"time"
 
 	"github.com/jwoglom/faketandem/pkg/bluetooth"
+	"github.com/jwoglom/faketandem/pkg/faults"
 	"github.com/jwoglom/faketandem/pkg/protocol"
 	"github.com/jwoglom/faketandem/pkg/pumpx2"
+	"github.com/jwoglom/faketandem/pkg/reqlog"
 	"github.com/jwoglom/faketandem/pkg/settings"
 	"github.com/jwoglom/faketandem/pkg/state"
 
 	log "github.com/sirupsen/logrus"
 )
+
+// ErrorResponseEncoder builds the protocol-level ErrorResponse (opcode 77)
+// that the error_response fault sends in place of a handler's own answer.
+//
+// It is a hook rather than an implementation because ErrorResponse cannot be
+// produced through cliparser: pumpX2 has no encodable ErrorResponse message
+// class, so the bytes have to be framed natively (header, cargo, CRC16,
+// optional signed trailer). The native packet encoder being built alongside
+// this work fills it in; until it does, an armed error_response fault behaves
+// as a drop and says so in the request log and the emulator log, so a harness
+// never silently believes it exercised an error path it did not.
+//
+// txID is the transaction the error answers, requestOpcode/requestName
+// identify what it answers, and errorCode is the code the fault carries.
+var ErrorResponseEncoder func(txID int, errorCode int, requestOpcode int, requestName string) (*pumpx2.EncodedMessage, error)
 
 // Router routes messages to appropriate handlers
 type Router struct {
@@ -25,6 +43,12 @@ type Router struct {
 
 	// Qualifying events notifier
 	qeNotifier *QualifyingEventsNotifier
+
+	// faultRegistry, when set, is consulted before every response leaves the
+	// pump. Nil means no faults are ever injected.
+	faultRegistry *faults.Registry
+	// requestLog, when set, records every message in and out.
+	requestLog *reqlog.Log
 
 	// Default handler for unknown messages
 	defaultHandler MessageHandler
@@ -56,6 +80,30 @@ func NewRouter(bridge *pumpx2.Bridge, pumpState *state.PumpState, ble bluetooth.
 // GetSettingsManager returns the settings manager
 func (r *Router) GetSettingsManager() *settings.Manager {
 	return r.settingsManager
+}
+
+// SetFaultRegistry attaches the fault injector consulted on the response path.
+func (r *Router) SetFaultRegistry(registry *faults.Registry) {
+	r.faultRegistry = registry
+	r.jpakeManager.SetFaultRegistry(registry)
+}
+
+// SetRequestLog attaches the pump-side record of messages in and out.
+func (r *Router) SetRequestLog(l *reqlog.Log) {
+	r.requestLog = l
+	if r.qeNotifier != nil {
+		r.qeNotifier.SetRequestLog(l)
+	}
+}
+
+// GetPumpState returns the pump state this router serves.
+func (r *Router) GetPumpState() *state.PumpState {
+	return r.pumpState
+}
+
+// GetTransport returns the transport this router sends on.
+func (r *Router) GetTransport() bluetooth.Transport {
+	return r.ble
 }
 
 // registerHandlers registers all message handlers
@@ -283,6 +331,10 @@ func (r *Router) SetDefaultHandler(handler MessageHandler) {
 func (r *Router) RouteMessage(charType bluetooth.CharacteristicType, msg *pumpx2.ParsedMessage) error {
 	log.Debugf("Routing message: type=%s, txID=%d, opcode=%d", msg.MessageType, msg.TxID, msg.Opcode)
 
+	if r.requestLog != nil {
+		r.requestLog.RecordRequest(charType.String(), msg.MessageType, msg.Opcode, msg.TxID, msg.Cargo, msg.RawPacketsHex)
+	}
+
 	// Find handler
 	handler, exists := r.handlers[msg.MessageType]
 	if !exists {
@@ -320,7 +372,14 @@ func (r *Router) RouteMessage(charType bluetooth.CharacteristicType, msg *pumpx2
 	return nil
 }
 
-// sendResponse sends a handler response
+// sendResponse sends a handler response.
+//
+// State changes are applied BEFORE anything goes on the wire. That ordering is
+// deliberate and is what makes the "applied but the response was lost" case
+// reachable: a real pump that acts on a request and then loses the reply
+// leaves the driver believing nothing happened while the pump has already
+// moved, and a drop_response fault has to reproduce exactly that, not "nothing
+// happened at all". It also means a fault can never suppress a state change.
 func (r *Router) sendResponse(requestCharType bluetooth.CharacteristicType, response *Response) error {
 	// Determine characteristic to use
 	charType := response.Characteristic
@@ -329,51 +388,177 @@ func (r *Router) sendResponse(requestCharType bluetooth.CharacteristicType, resp
 		charType = requestCharType
 	}
 
+	// Apply state changes first -- see the ordering note above.
+	for _, change := range response.StateChanges {
+		r.applyStateChange(change)
+	}
+
 	// Send main response if present
 	if response.ResponseMessage != nil {
-		if err := r.sendMessage(charType, response.ResponseMessage); err != nil {
+		if err := r.sendWithFaults(charType, response.ResponseMessage); err != nil {
 			return fmt.Errorf("failed to send main response: %w", err)
 		}
 	}
 
 	// Send notifications
 	for _, notification := range response.Notifications {
-		if err := r.sendMessage(notification.Characteristic, notification.Message); err != nil {
+		if err := r.sendWithFaults(notification.Characteristic, notification.Message); err != nil {
 			log.Errorf("Failed to send notification on %s: %v", notification.Characteristic, err)
 			// Continue with other notifications
 		}
 	}
 
-	// Apply state changes
-	for _, change := range response.StateChanges {
-		r.applyStateChange(change)
-	}
-
 	return nil
 }
 
-// sendMessage sends an encoded message on a characteristic
-func (r *Router) sendMessage(charType bluetooth.CharacteristicType, msg *pumpx2.EncodedMessage) error {
+// sendWithFaults applies any armed fault to one outgoing message and then
+// sends whatever is left to send.
+func (r *Router) sendWithFaults(charType bluetooth.CharacteristicType, msg *pumpx2.EncodedMessage) error {
+	fault := r.matchResponseFault(charType, msg)
+	if fault == nil {
+		return r.sendAndRecord(charType, msg, -1, "", "")
+	}
+
+	switch fault.Kind {
+	case faults.KindDropResponse:
+		log.Warnf("Fault %d (drop_response): suppressing %s txID=%d; state changes were already applied",
+			fault.ID, msg.MessageType, msg.TxID)
+		r.recordSuppressed(charType, msg, fault.Kind, "response suppressed after state was applied")
+		return nil
+
+	case faults.KindDelayResponse:
+		delay := fault.Delay()
+		log.Warnf("Fault %d (delay_response): holding %s txID=%d for %v", fault.ID, msg.MessageType, msg.TxID, delay)
+		time.Sleep(delay)
+		return r.sendAndRecord(charType, msg, -1, fault.Kind, fmt.Sprintf("delayed %v", delay))
+
+	case faults.KindErrorResponse:
+		return r.sendErrorResponse(charType, msg, fault)
+
+	case faults.KindDisconnect:
+		return r.disconnectFault(charType, msg, fault)
+
+	default:
+		log.Warnf("Fault %d has kind %q, which the response path does not apply", fault.ID, fault.Kind)
+		return r.sendAndRecord(charType, msg, -1, "", "")
+	}
+}
+
+// matchResponseFault consumes the fault (if any) armed for this message.
+func (r *Router) matchResponseFault(charType bluetooth.CharacteristicType, msg *pumpx2.EncodedMessage) *faults.Fault {
+	if r.faultRegistry == nil {
+		return nil
+	}
+	return r.faultRegistry.Match(faults.Target{
+		Opcode:         msg.Opcode,
+		Message:        msg.MessageType,
+		Characteristic: charType.String(),
+	},
+		faults.KindDropResponse,
+		faults.KindDelayResponse,
+		faults.KindErrorResponse,
+		faults.KindDisconnect,
+	)
+}
+
+// sendErrorResponse replaces a response with a protocol ErrorResponse, via the
+// ErrorResponseEncoder hook. With no encoder installed the fault degrades to a
+// drop and says so, rather than pretending an error path was exercised.
+func (r *Router) sendErrorResponse(charType bluetooth.CharacteristicType, msg *pumpx2.EncodedMessage, fault *faults.Fault) error {
+	if ErrorResponseEncoder == nil {
+		log.Warnf("Fault %d (error_response): no ErrorResponseEncoder installed; dropping %s txID=%d instead",
+			fault.ID, msg.MessageType, msg.TxID)
+		r.recordSuppressed(charType, msg, fault.Kind, "no ErrorResponseEncoder installed; response dropped instead")
+		return nil
+	}
+
+	errMsg, err := ErrorResponseEncoder(msg.TxID, fault.ErrorCode, msg.Opcode, msg.MessageType)
+	if err != nil {
+		log.Errorf("Fault %d (error_response): encoder failed for %s: %v", fault.ID, msg.MessageType, err)
+		r.recordSuppressed(charType, msg, fault.Kind, fmt.Sprintf("ErrorResponseEncoder failed: %v", err))
+		return nil
+	}
+
+	log.Warnf("Fault %d (error_response): answering %s txID=%d with ErrorResponse code %d",
+		fault.ID, msg.MessageType, msg.TxID, fault.ErrorCode)
+	return r.sendAndRecord(charType, errMsg, -1, fault.Kind,
+		fmt.Sprintf("ErrorResponse code %d in place of %s", fault.ErrorCode, msg.MessageType))
+}
+
+// disconnectFault drops the link either instead of answering at all, or
+// partway through the response's fragments.
+func (r *Router) disconnectFault(charType bluetooth.CharacteristicType, msg *pumpx2.EncodedMessage, fault *faults.Fault) error {
+	if fault.After == faults.AfterPartialResponse {
+		limit := fault.FragmentsSent
+		log.Warnf("Fault %d (disconnect): sending %d of %d fragments of %s txID=%d, then dropping the link",
+			fault.ID, limit, len(msg.Packets), msg.MessageType, msg.TxID)
+		err := r.sendAndRecord(charType, msg, limit, fault.Kind,
+			fmt.Sprintf("link dropped after %d of %d fragments", limit, len(msg.Packets)))
+		r.ble.ShutdownConnection()
+		return err
+	}
+
+	log.Warnf("Fault %d (disconnect): dropping the link instead of answering %s txID=%d",
+		fault.ID, msg.MessageType, msg.TxID)
+	r.recordSuppressed(charType, msg, fault.Kind, "link dropped instead of answering")
+	r.ble.ShutdownConnection()
+	return nil
+}
+
+// recordSuppressed logs a response that was encoded but never sent.
+func (r *Router) recordSuppressed(charType bluetooth.CharacteristicType, msg *pumpx2.EncodedMessage, fault, note string) {
+	if r.requestLog == nil {
+		return
+	}
+	r.requestLog.RecordResponse(charType.String(), msg.MessageType, msg.Opcode, msg.TxID, msg.Packets, 0, fault, note)
+}
+
+// sendAndRecord sends up to limit fragments (-1 for all) and records the
+// result in the request log.
+func (r *Router) sendAndRecord(charType bluetooth.CharacteristicType, msg *pumpx2.EncodedMessage, limit int, fault, note string) error {
+	sent, err := r.sendMessage(charType, msg, limit)
+	if r.requestLog != nil {
+		if err != nil {
+			if note != "" {
+				note += "; "
+			}
+			note += "send error: " + err.Error()
+		}
+		r.requestLog.RecordResponse(charType.String(), msg.MessageType, msg.Opcode, msg.TxID, msg.Packets, sent, fault, note)
+	}
+	return err
+}
+
+// sendMessage sends an encoded message on a characteristic, stopping after
+// limit fragments when limit is non-negative. It returns how many fragments
+// actually went out.
+func (r *Router) sendMessage(charType bluetooth.CharacteristicType, msg *pumpx2.EncodedMessage, limit int) (int, error) {
 	log.Infof("Sending %s on %s: txID=%d, %d packet(s)",
 		msg.MessageType, charType, msg.TxID, len(msg.Packets))
 
+	sent := 0
 	for i, packetHex := range msg.Packets {
+		if limit >= 0 && sent >= limit {
+			break
+		}
+
 		packetData, err := hex.DecodeString(packetHex)
 		if err != nil {
-			return fmt.Errorf("failed to decode packet %d: %w", i, err)
+			return sent, fmt.Errorf("failed to decode packet %d: %w", i, err)
 		}
 
 		protocol.LogPacket("TX", charType, packetData)
 
 		// Send via notification
 		if err := r.ble.Notify(charType, packetData); err != nil {
-			return fmt.Errorf("failed to send packet %d: %w", i, err)
+			return sent, fmt.Errorf("failed to send packet %d: %w", i, err)
 		}
+		sent++
 
 		log.Tracef("Sent packet %d/%d: %s", i+1, len(msg.Packets), packetHex)
 	}
 
-	return nil
+	return sent, nil
 }
 
 // applyStateChange applies a state change

@@ -58,7 +58,12 @@ type PumpState struct {
 
 	// Pump mode
 	PumpingSuspended bool
-	ControlIQMode    int // 0=Normal, 1=Sleep, 2=Exercise
+	// suspendReason records WHY delivery is suspended ("user", "occlusion",
+	// "alarm", ...). A driver cannot see it directly, but it decides which
+	// history records and qualifying events a suspend produces, and a harness
+	// asserts on it as pump-side truth.
+	suspendReason string
+	ControlIQMode int // 0=Normal, 1=Sleep, 2=Exercise
 
 	// ClosedLoopEnabled reports whether Control-IQ closed-loop control is on.
 	// It defaults to FALSE: a driver that reads closedLoopEnabled=true refuses
@@ -609,10 +614,18 @@ func (ps *PumpState) AddHistoryLogEntry(entryType string, data map[string]interf
 
 // AddHistoryLogEntryWithTypeID adds a history log entry with a specific type ID.
 func (ps *PumpState) AddHistoryLogEntryWithTypeID(typeID int, entryType string, data map[string]interface{}) {
+	ps.AddHistoryLogEntryAt(typeID, entryType, ps.Now(), data)
+}
+
+// AddHistoryLogEntryAt adds a history log entry stamped at a chosen instant on
+// the pump's clock, returning its sequence number. Backdating is what lets a
+// harness stage history that predates the connection -- a pump does not start
+// its log when a phone shows up.
+func (ps *PumpState) AddHistoryLogEntryAt(typeID int, entryType string, when time.Time, data map[string]interface{}) uint32 {
 	ps.HistoryLog.mutex.Lock()
 	defer ps.HistoryLog.mutex.Unlock()
 
-	now := ps.Now()
+	now := when
 	entry := HistoryLogEntry{
 		Sequence:  ps.HistoryLog.NextSequence,
 		TypeID:    typeID,
@@ -623,6 +636,7 @@ func (ps *PumpState) AddHistoryLogEntryWithTypeID(typeID int, entryType string, 
 	}
 	ps.HistoryLog.Entries = append(ps.HistoryLog.Entries, entry)
 	ps.HistoryLog.NextSequence++
+	return entry.Sequence
 }
 
 // GetHistoryLogEntries returns history log entries in a sequence range
@@ -641,9 +655,29 @@ func (ps *PumpState) GetHistoryLogEntries(startSeq, endSeq uint32) []HistoryLogE
 
 // SetPumpingSuspended sets the pumping suspended state
 func (ps *PumpState) SetPumpingSuspended(suspended bool) {
+	ps.SetPumpingSuspendedWithReason(suspended, "")
+}
+
+// SetPumpingSuspendedWithReason sets the pumping suspended state and records
+// why. Resuming clears the reason.
+func (ps *PumpState) SetPumpingSuspendedWithReason(suspended bool, reason string) {
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
 	ps.PumpingSuspended = suspended
+	if suspended {
+		ps.suspendReason = reason
+	} else {
+		ps.suspendReason = ""
+	}
+}
+
+// SuspendReason returns why delivery is suspended, or "" when it is not (or
+// when the suspend came from a path that did not record a reason). Callers
+// holding the state lock read the field through this only when they do not --
+// it takes no lock of its own precisely so the snapshot can call it inside
+// RLock.
+func (ps *PumpState) SuspendReason() string {
+	return ps.suspendReason
 }
 
 // IsPumpingSuspended returns whether pumping is suspended
@@ -651,6 +685,17 @@ func (ps *PumpState) IsPumpingSuspended() bool {
 	ps.mutex.RLock()
 	defer ps.mutex.RUnlock()
 	return ps.PumpingSuspended
+}
+
+// Lock acquires the write lock on the pump state, for the handful of callers
+// (the harness's direct field writes) that need to poke fields with no setter.
+func (ps *PumpState) Lock() {
+	ps.mutex.Lock()
+}
+
+// Unlock releases the write lock on the pump state.
+func (ps *PumpState) Unlock() {
+	ps.mutex.Unlock()
 }
 
 // RLock acquires a read lock on the pump state

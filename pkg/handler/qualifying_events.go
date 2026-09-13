@@ -2,9 +2,11 @@ package handler
 
 import (
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 
 	"github.com/jwoglom/faketandem/pkg/bluetooth"
+	"github.com/jwoglom/faketandem/pkg/reqlog"
 	"github.com/jwoglom/faketandem/pkg/state"
 
 	log "github.com/sirupsen/logrus"
@@ -33,6 +35,21 @@ const (
 type QualifyingEventsNotifier struct {
 	ble       bluetooth.Transport
 	pumpState *state.PumpState
+	// requestLog, when set, records every bitmask that went out (or failed to)
+	// so a harness can assert on which qualifying events the pump raised.
+	requestLog *reqlog.Log
+}
+
+// SetRequestLog attaches the pump-side message record.
+func (qe *QualifyingEventsNotifier) SetRequestLog(l *reqlog.Log) {
+	qe.requestLog = l
+}
+
+// NotifyBitmask sends an arbitrary qualifying-event bitmask. A scenario uses
+// it to raise exactly the events a real pump would raise for a pump-initiated
+// change, including combinations the emulator has no internal trigger for.
+func (qe *QualifyingEventsNotifier) NotifyBitmask(bits uint32) error {
+	return qe.sendBitmask(bits)
 }
 
 // NewQualifyingEventsNotifier creates a new qualifying events notifier
@@ -116,7 +133,22 @@ func (qe *QualifyingEventsNotifier) sendBitmask(bits uint32) error {
 
 	log.Debugf("Sending qualifying event bitmask 0x%08x on %s", bits, bluetooth.CharQualifyingEvents)
 
-	if err := qe.ble.Notify(bluetooth.CharQualifyingEvents, buf); err != nil {
+	err := qe.ble.Notify(bluetooth.CharQualifyingEvents, buf)
+	if qe.requestLog != nil {
+		entry := reqlog.Entry{
+			Kind:           reqlog.KindNotification,
+			Characteristic: bluetooth.CharQualifyingEvents.String(),
+			Message:        fmt.Sprintf("QualifyingEvents(0x%08x)", bits),
+			Fragments:      []string{hex.EncodeToString(buf)},
+			FragmentsSent:  1,
+		}
+		if err != nil {
+			entry.FragmentsSent = 0
+			entry.Note = "send error: " + err.Error()
+		}
+		qe.requestLog.Append(entry)
+	}
+	if err != nil {
 		return fmt.Errorf("failed to send qualifying event notification: %w", err)
 	}
 

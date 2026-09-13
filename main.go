@@ -11,9 +11,12 @@ import (
 	"github.com/jwoglom/faketandem/pkg/api"
 	"github.com/jwoglom/faketandem/pkg/bluetooth"
 	"github.com/jwoglom/faketandem/pkg/config"
+	"github.com/jwoglom/faketandem/pkg/faults"
 	"github.com/jwoglom/faketandem/pkg/handler"
+	"github.com/jwoglom/faketandem/pkg/harness"
 	"github.com/jwoglom/faketandem/pkg/protocol"
 	"github.com/jwoglom/faketandem/pkg/pumpx2"
+	"github.com/jwoglom/faketandem/pkg/reqlog"
 	"github.com/jwoglom/faketandem/pkg/state"
 
 	log "github.com/sirupsen/logrus"
@@ -42,6 +45,7 @@ func main() {
 	var virtualAckAfterHandling = flag.Bool("virtual-ack-after-handling", false, "virtual transport only: run the write handler synchronously and ack the write afterwards, reproducing the Linux/gatt ordering instead of real-pump ordering")
 	var apiAddr = flag.String("api-addr", api.DefaultAddr, "address the HTTP/WebSocket API server listens on")
 	var uiDir = flag.String("ui-dir", "", "directory to serve the web UI from (default: the 'ui' directory beside the executable, else ./ui)")
+	var requestLogSize = flag.Int("request-log-size", reqlog.DefaultCapacity, "how many messages the integration-harness request log (GET /api/log) retains")
 
 	flag.Parse()
 
@@ -125,6 +129,15 @@ func main() {
 	router := handler.NewRouter(bridge, pumpState, ble, txManager, cfg.JPAKEMode, cfg.PumpX2Path, cfg.PumpX2Mode, cfg.GradleCmd, cfg.JavaCmd, cfg.PumpX2JarPath)
 	log.Info("Message router initialized")
 
+	// Integration-harness plumbing: the pump-side message record and the fault
+	// injector. Both are inert until a harness uses them -- an empty registry
+	// injects nothing, and the log only observes.
+	requestLog := reqlog.New(*requestLogSize)
+	requestLog.SetClock(pumpState.Now)
+	faultRegistry := faults.NewRegistry()
+	router.SetRequestLog(requestLog)
+	router.SetFaultRegistry(faultRegistry)
+
 	// Connect simulator with qualifying events notifier
 	simulator.SetEventNotifier(router.GetQualifyingEventsNotifier())
 	log.Info("Qualifying events notifier connected to simulator")
@@ -137,7 +150,18 @@ func main() {
 	server := api.New(ble)
 	server.SetUIDir(*uiDir)
 	server.SetSettingsManager(router.GetSettingsManager())
-	configureConnectionHandlers(ble, server, router, pumpState)
+
+	h := harness.New(harness.Options{
+		PumpState: pumpState,
+		Simulator: simulator,
+		Transport: ble,
+		Router:    router,
+		Requests:  requestLog,
+		Faults:    faultRegistry,
+	})
+	server.SetExtraRoutes(h.RegisterRoutes, h.Endpoints())
+
+	configureConnectionHandlers(ble, server, router, pumpState, requestLog)
 
 	// Set up write handler to log incoming data and notify websocket clients
 	ble.SetWriteHandler(func(charType bluetooth.CharacteristicType, data []byte) {
@@ -256,9 +280,12 @@ func isQualifyingEventAck(charType bluetooth.CharacteristicType, data []byte) bo
 	return true
 }
 
-func configureConnectionHandlers(ble bluetooth.Transport, server *api.Server, router *handler.Router, pumpState *state.PumpState) {
+func configureConnectionHandlers(ble bluetooth.Transport, server *api.Server, router *handler.Router, pumpState *state.PumpState, requestLog *reqlog.Log) {
 	ble.SetConnectionHandler(func(connected bool) {
 		server.SendPumpState()
+		if requestLog != nil {
+			requestLog.RecordConnection(connected, "")
+		}
 		if connected {
 			log.Info("BLE central connected; updated websocket clients.")
 			return
