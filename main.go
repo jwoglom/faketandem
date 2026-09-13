@@ -4,6 +4,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"flag"
+	"fmt"
+	"runtime"
 	"time"
 
 	"github.com/jwoglom/faketandem/pkg/api"
@@ -17,6 +19,12 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// Transport names accepted by the -transport flag.
+const (
+	transportBle     = "ble"
+	transportVirtual = "virtual"
+)
+
 func main() {
 	// if both verbose and quiet are chosen, e.g., -v -q, the verbose dominates
 	var traceLevel = flag.Bool("v", false, "verbose off by default, TraceLevel")
@@ -28,6 +36,12 @@ func main() {
 	var jpakeLongTermKey = flag.String("jpake-long-term-key", "", "hex-encoded JPAKE long-term key to pre-seed, letting a previously-paired client quick-pair (reconnect via Jpake3SessionKeyRequest directly) without a fresh full pairing; also displayed/settable in the web UI once derived from a completed pairing")
 	var gradleCmd = flag.String("gradle-cmd", "./gradlew", "gradle command to use")
 	var javaCmd = flag.String("java-cmd", "java", "java command to use")
+	var transportName = flag.String("transport", defaultTransport(), "transport to use: 'ble' (real BLE peripheral, Linux only) or 'virtual' (radio-free virtual GATT link over TCP)")
+	var virtualAddr = flag.String("virtual-addr", bluetooth.DefaultVirtualAddr, "address the virtual GATT transport listens on")
+	var virtualPeripheralID = flag.String("virtual-peripheral-id", "", "stable peripheral UUID reported by the virtual transport (default: derived deterministically from the pump serial number)")
+	var virtualAckAfterHandling = flag.Bool("virtual-ack-after-handling", false, "virtual transport only: run the write handler synchronously and ack the write afterwards, reproducing the Linux/gatt ordering instead of real-pump ordering")
+	var apiAddr = flag.String("api-addr", api.DefaultAddr, "address the HTTP/WebSocket API server listens on")
+	var uiDir = flag.String("ui-dir", "", "directory to serve the web UI from (default: the 'ui' directory beside the executable, else ./ui)")
 
 	flag.Parse()
 
@@ -102,9 +116,9 @@ func main() {
 	simulator := state.NewSimulator(pumpState, 1*time.Second)
 	defer simulator.Stop()
 
-	ble, err := bluetooth.New("hci0")
+	ble, err := newTransport(*transportName, *virtualAddr, *virtualPeripheralID, *virtualAckAfterHandling, pumpState.GetSerialNumber())
 	if err != nil {
-		log.Fatalf("Could not start BLE: %s", err)
+		log.Fatalf("Could not start transport: %s", err)
 	}
 
 	// Create message router
@@ -121,6 +135,7 @@ func main() {
 
 	// Create API server
 	server := api.New(ble)
+	server.SetUIDir(*uiDir)
 	server.SetSettingsManager(router.GetSettingsManager())
 	configureConnectionHandlers(ble, server, router)
 
@@ -175,11 +190,11 @@ func main() {
 	// Set up custom command handler for websocket commands
 	configureWebsocketCommands(server, ble, bridge, pumpState)
 
-	log.Info("Bluetooth device initialized, waiting for connections...")
-	log.Info("Starting API server on :8080")
+	log.Info("Transport initialized, waiting for connections...")
+	log.Infof("Starting API server on %s", *apiAddr)
 
 	// Start API server (blocking)
-	go server.Start()
+	go server.Start(*apiAddr)
 
 	// Keep the program running
 	for {
@@ -187,7 +202,36 @@ func main() {
 	}
 }
 
-func configureConnectionHandlers(ble *bluetooth.Ble, server *api.Server, router *handler.Router) {
+// defaultTransport picks the transport appropriate for the build platform:
+// real BLE on Linux (where the gatt peripheral implementation exists) and the
+// virtual link everywhere else.
+func defaultTransport() string {
+	if runtime.GOOS == "linux" {
+		return transportBle
+	}
+	return transportVirtual
+}
+
+// newTransport constructs the selected transport.
+func newTransport(name, virtualAddr, virtualPeripheralID string, virtualAckAfterHandling bool, serialNumber string) (bluetooth.Transport, error) {
+	switch name {
+	case transportBle:
+		log.Info("Using BLE transport (adapter hci0)")
+		return bluetooth.New("hci0")
+	case transportVirtual:
+		log.Infof("Using virtual GATT transport on %s", virtualAddr)
+		return bluetooth.NewVirtual(bluetooth.VirtualOptions{
+			Addr:             virtualAddr,
+			PeripheralID:     virtualPeripheralID,
+			SerialNumber:     serialNumber,
+			AckAfterHandling: virtualAckAfterHandling,
+		})
+	default:
+		return nil, fmt.Errorf("unknown transport %q (expected %q or %q)", name, transportBle, transportVirtual)
+	}
+}
+
+func configureConnectionHandlers(ble bluetooth.Transport, server *api.Server, router *handler.Router) {
 	ble.SetConnectionHandler(func(connected bool) {
 		server.SendPumpState()
 		if connected {
@@ -202,7 +246,7 @@ func configureConnectionHandlers(ble *bluetooth.Ble, server *api.Server, router 
 	})
 }
 
-func configureWebsocketCommands(server *api.Server, ble *bluetooth.Ble, bridge *pumpx2.Bridge, pumpState *state.PumpState) {
+func configureWebsocketCommands(server *api.Server, ble bluetooth.Transport, bridge *pumpx2.Bridge, pumpState *state.PumpState) {
 	server.SetCommandHandler(func(command string, params map[string]interface{}) {
 		log.Infof("Received command from websocket: %s, params: %v", command, params)
 		switch command {

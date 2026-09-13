@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -17,11 +19,15 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// DefaultAddr is the address the API server listens on when none is configured.
+const DefaultAddr = ":8080"
+
 // Server provides a WebSocket API for monitoring and controlling the pump emulator
 type Server struct {
 	http.Handler
 
 	ble             bluetooth.Transport
+	uiDir           string
 	conn            *websocket.Conn
 	mtx             sync.Mutex
 	settingsManager *settings.Manager
@@ -57,6 +63,12 @@ func New(ble bluetooth.Transport) *Server {
 	}
 }
 
+// SetUIDir sets the directory served at /ui/. When empty, the "ui" directory
+// next to the executable (falling back to ./ui) is used.
+func (s *Server) SetUIDir(dir string) {
+	s.uiDir = dir
+}
+
 // SetSettingsManager sets the settings manager for this server
 func (s *Server) SetSettingsManager(manager *settings.Manager) {
 	s.settingsManager = manager
@@ -67,13 +79,33 @@ func (s *Server) SetCommandHandler(handler CommandHandler) {
 	s.commandHandler = handler
 }
 
-// Start starts the HTTP/WebSocket server
-func (s *Server) Start() {
-	fmt.Println("Pump emulator web API listening on :8080")
-	s.setupRoutes()
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+// Start starts the HTTP/WebSocket server on addr (blocking).
+func (s *Server) Start(addr string) {
+	if addr == "" {
+		addr = DefaultAddr
+	}
+	fmt.Printf("Pump emulator web API listening on %s\n", addr)
+	mux := http.NewServeMux()
+	s.setupRoutes(mux)
+	if err := http.ListenAndServe(addr, mux); err != nil { //nolint:gosec // local development/emulator server, no timeouts needed
 		log.Fatalf("HTTP server failed: %v", err)
 	}
+}
+
+// resolveUIDir returns the directory to serve the web UI from: the explicitly
+// configured directory, else a "ui" directory beside the executable, else the
+// "ui" directory relative to the current working directory.
+func (s *Server) resolveUIDir() string {
+	if s.uiDir != "" {
+		return s.uiDir
+	}
+	if exe, err := os.Executable(); err == nil {
+		candidate := filepath.Join(filepath.Dir(exe), "ui")
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate
+		}
+	}
+	return "ui"
 }
 
 // SendEvent sends a BLE event to connected websocket clients
@@ -151,21 +183,23 @@ func (s *Server) SendPumpState() {
 	s.sendState()
 }
 
-func (s *Server) setupRoutes() {
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+func (s *Server) setupRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if _, err := fmt.Fprintf(w, "Pump Emulator API - Connect via WebSocket at /ws\n\nSettings API:\n  GET    /api/settings\n  GET    /api/settings/{messageType}\n  PUT    /api/settings/{messageType}\n  POST   /api/settings/{messageType}/reset\n\nBluetooth Pairing API:\n  GET    /api/bluetooth/pairingstate\n  POST   /api/bluetooth/pairingstate\n  States: NotDiscoverable, DiscoverableOnly, PairStep1, PairStep2"); err != nil {
 			log.Warnf("Failed to write response: %v", err)
 		}
 	})
-	uiHandler := http.FileServer(http.Dir("ui"))
-	http.Handle("/ui/", http.StripPrefix("/ui/", uiHandler))
-	http.HandleFunc("/ui", func(w http.ResponseWriter, r *http.Request) {
+	uiDir := s.resolveUIDir()
+	log.Infof("Serving web UI from %s", uiDir)
+	uiHandler := http.FileServer(http.Dir(uiDir))
+	mux.Handle("/ui/", http.StripPrefix("/ui/", uiHandler))
+	mux.HandleFunc("/ui", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/ui/", http.StatusMovedPermanently)
 	})
-	http.Handle("/ws", s)
-	http.HandleFunc("/api/settings", s.handleSettingsAPI)
-	http.HandleFunc("/api/settings/", s.handleSettingsAPI)
-	http.HandleFunc("/api/bluetooth/pairingstate", s.handlePairingStateAPI)
+	mux.Handle("/ws", s)
+	mux.HandleFunc("/api/settings", s.handleSettingsAPI)
+	mux.HandleFunc("/api/settings/", s.handleSettingsAPI)
+	mux.HandleFunc("/api/bluetooth/pairingstate", s.handlePairingStateAPI)
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -364,6 +398,7 @@ func (s *Server) handleSettingsAPI(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetAllSettings returns all registered settings configurations
+//
 //nolint:unparam // r is required by http.HandlerFunc interface
 func (s *Server) handleGetAllSettings(w http.ResponseWriter, _ *http.Request) {
 	configs := s.settingsManager.GetAllConfigs()
@@ -375,6 +410,7 @@ func (s *Server) handleGetAllSettings(w http.ResponseWriter, _ *http.Request) {
 }
 
 // handleGetSetting returns a specific settings configuration
+//
 //nolint:unparam // r is required by http.HandlerFunc interface
 func (s *Server) handleGetSetting(w http.ResponseWriter, _ *http.Request, messageType string) {
 	config, err := s.settingsManager.GetConfig(messageType)
@@ -432,6 +468,7 @@ func (s *Server) handleUpdateSetting(w http.ResponseWriter, r *http.Request, mes
 }
 
 // handleResetSetting resets the state for a settings configuration
+//
 //nolint:unparam // r is required by http.HandlerFunc interface
 func (s *Server) handleResetSetting(w http.ResponseWriter, _ *http.Request, messageType string) {
 	if messageType == "" {
