@@ -86,6 +86,10 @@ type PumpState struct {
 	// Alerts/Alarms
 	ActiveAlerts []Alert
 
+	// clearedAlerts is the log of alarms that have been raised and cleared,
+	// with the instant each was cleared. See ClearedAlert.
+	clearedAlerts []ClearedAlert
+
 	// AlarmBitmask is the pump's active-alarm set as AlarmStatusResponse
 	// carries it: a 64-bit mask where bit N is the alarm whose
 	// AlarmStatusResponse.AlarmResponseType raw value is N (bit 2 OCCLUSION_ALARM,
@@ -110,7 +114,13 @@ type PumpState struct {
 	// which is exactly how a real pump whose clock is set wrong behaves, and
 	// what makes a driver's pump-time drift handling testable.
 	pumpClockOffset time.Duration
-	clockMtx        sync.RWMutex
+	// pumpTimeZone is the zone the pump keeps its clock in. A real Tandem pump
+	// holds local time with no zone attached, and every consumer decodes the
+	// pump-epoch seconds on the wire on that assumption, so this zone -- not
+	// UTC -- is what PumpTimeFor encodes with. It defaults to the host's local
+	// zone and is settable with -pump-timezone or PUT /api/clock.
+	pumpTimeZone *time.Location
+	clockMtx     sync.RWMutex
 
 	// BolusRateUnitsPerSecond is the speed the simulator delivers a bolus at.
 	// Real pumps deliver far more slowly than the 0.05 U/s default (a Tandem
@@ -247,7 +257,16 @@ type HistoryLogEntry struct {
 	// controllable pump clock then cannot retroactively change the timestamp on
 	// records already written.
 	PumpTime uint32
-	Data     map[string]interface{}
+	// Data carries the record's own fields, named exactly as pumpX2 and
+	// TandemKit name them (see encodeHistoryPayload). Only these reach the
+	// wire.
+	Data map[string]interface{}
+	// Extra carries pump-side context that the record format has no room for
+	// -- a temp rate's delivered volume, the string reason behind a suspend,
+	// the alert type behind an alarm. It NEVER reaches the wire; it exists so
+	// the JSON snapshot and GET /api/history can say more than 26 bytes can,
+	// without a test mistaking invented fields for record fields.
+	Extra map[string]interface{}
 	// SourceNibble is the high nibble of the record's type-ID word. The driver
 	// masks it off when reading the type, so it only matters when reproducing a
 	// captured record byte-for-byte (Mobi captures carry 1, older ones 0).
@@ -301,6 +320,10 @@ func NewPumpState() *PumpState {
 
 func newDefaultPumpState(now time.Time) *PumpState {
 	return &PumpState{
+		// A real pump keeps local time, so the emulator's default zone is the
+		// host's. -pump-timezone overrides it.
+		pumpTimeZone: time.Local,
+
 		SerialNumber:    "11223344",
 		Model:           "Tandem Mobi",
 		FirmwareVersion: "1.0.0.0",
@@ -680,13 +703,31 @@ func (ps *PumpState) AddHistoryLogEntryWithTypeID(typeID int, entryType string, 
 // its log when a phone shows up. The record itself is built by AppendHistory
 // so the wire encoding and sequence allocation live in one place.
 func (ps *PumpState) AddHistoryLogEntryAt(typeID int, entryType string, when time.Time, data map[string]interface{}) uint32 {
+	return ps.AddHistoryLogEntryAtWithExtra(typeID, entryType, when, data, nil)
+}
+
+// AddHistoryLogEntryAtWithExtra is AddHistoryLogEntryAt plus the JSON-only
+// context fields (see HistoryLogEntry.Extra).
+//
+// `when` is a true instant on the pump's Clock: AppendHistory derives the wire
+// timestamp from it, applying the pump-clock skew and the pump's zone exactly
+// once. Passing an already-skewed value here would double-count the skew,
+// which is what the harness and simulator paths used to do.
+func (ps *PumpState) AddHistoryLogEntryAtWithExtra(typeID int, entryType string, when time.Time, data, extra map[string]interface{}) uint32 {
 	entry := ps.AppendHistory(HistoryEvent{
-		TypeID:   typeID,
-		Name:     entryType,
-		PumpTime: ps.PumpTimeFor(when),
-		Fields:   data,
+		TypeID: typeID,
+		Name:   entryType,
+		When:   when,
+		Fields: data,
+		Extra:  extra,
 	})
 	return entry.Sequence
+}
+
+// AddHistoryLogEntryWithExtra stamps a record with the pump's current clock,
+// carrying JSON-only context alongside its wire fields.
+func (ps *PumpState) AddHistoryLogEntryWithExtra(typeID int, entryType string, data, extra map[string]interface{}) uint32 {
+	return ps.AddHistoryLogEntryAtWithExtra(typeID, entryType, ps.Now(), data, extra)
 }
 
 // GetHistoryLogEntries returns history log entries in a sequence range
@@ -784,6 +825,52 @@ func (ps *PumpState) AddAlert(alert Alert) {
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
 	ps.ActiveAlerts = append(ps.ActiveAlerts, alert)
+}
+
+// ClearedAlert is an alarm that stood on the pump and has since been cleared.
+//
+// A cleared alarm disappears from ActiveAlerts, and until this existed the only
+// trace it left was an AlarmCleared history record with no link back to what
+// had been raised. A timeline needs both ends -- when the alarm came up and
+// when it went away -- to place an alarm interval, so the pump keeps its own
+// list of them (reported as `alarms_history` in the snapshot).
+type ClearedAlert struct {
+	Alert
+	// ClearedAt is the instant the alarm stopped standing, on the pump's Clock.
+	ClearedAt time.Time
+}
+
+// ClearAlerts drops every active alert, moving each into the cleared-alarm log
+// stamped at `when` (the pump's current clock when zero), and returns what it
+// cleared in the order they were raised.
+func (ps *PumpState) ClearAlerts(when time.Time) []ClearedAlert {
+	if when.IsZero() {
+		when = ps.Now()
+	}
+
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+
+	if len(ps.ActiveAlerts) == 0 {
+		return nil
+	}
+	cleared := make([]ClearedAlert, 0, len(ps.ActiveAlerts))
+	for _, a := range ps.ActiveAlerts {
+		cleared = append(cleared, ClearedAlert{Alert: a, ClearedAt: when})
+	}
+	ps.clearedAlerts = append(ps.clearedAlerts, cleared...)
+	ps.ActiveAlerts = nil
+	return cleared
+}
+
+// GetClearedAlerts returns the alarms that have been raised and cleared, oldest
+// first.
+func (ps *PumpState) GetClearedAlerts() []ClearedAlert {
+	ps.mutex.RLock()
+	defer ps.mutex.RUnlock()
+	out := make([]ClearedAlert, len(ps.clearedAlerts))
+	copy(out, ps.clearedAlerts)
+	return out
 }
 
 // SetAlarmBitmask replaces the pump's active-alarm bitmask wholesale.

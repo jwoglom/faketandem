@@ -118,7 +118,7 @@ func TestSuspendActionIsVisibleToTheDriver(t *testing.T) {
 	bolus := readBack(t, bridge, handler.NewCurrentBolusStatusHandler(bridge), ps)
 	assertCargo(t, bolus, "statusId", 1)
 	assertCargo(t, bolus, "bolusId", bolusID)
-	assertCargo(t, bolus, "timestamp", int64(state.PumpTimeSeconds(testInstant)))
+	assertCargo(t, bolus, "timestamp", int64(ps.PumpTimeFor(testInstant)))
 
 	temp := readBack(t, bridge, handler.NewTempRateHandler(bridge), ps)
 	if got := cargoInt(t, temp, "percentage"); got != 150 {
@@ -151,7 +151,7 @@ func TestSuspendActionIsVisibleToTheDriver(t *testing.T) {
 	}
 	// The end timestamp is the pump's, in pump-epoch seconds, taken from the
 	// controllable clock.
-	assertCargo(t, last, "timestamp", int64(state.PumpTimeSeconds(testInstant.Add(10e9))))
+	assertCargo(t, last, "timestamp", int64(ps.PumpTimeFor(testInstant.Add(10e9))))
 
 	historyAfter := readBack(t, bridge, handler.NewHistoryLogStatusHandler(bridge), ps)
 	if got := cargoInt(t, historyAfter, "numEntries"); got <= countBefore {
@@ -202,7 +202,7 @@ func TestBolusCompletionIsVisibleToTheDriver(t *testing.T) {
 	assertCargo(t, last, "deliveredVolume", 3000)
 	assertCargo(t, last, "bolusStatusId", state.BolusEndReasonCompleted)
 	assertCargo(t, last, "bolusSourceId", state.BolusSourceQuickBolus)
-	assertCargo(t, last, "timestamp", int64(state.PumpTimeSeconds(testInstant.Add(30e9))))
+	assertCargo(t, last, "timestamp", int64(ps.PumpTimeFor(testInstant.Add(30e9))))
 }
 
 // TestPumpClockSkewShiftsEveryEmittedTimestamp checks that the offset is a
@@ -217,13 +217,13 @@ func TestPumpClockSkewShiftsEveryEmittedTimestamp(t *testing.T) {
 	mustDo(t, mux, http.MethodPost, "/api/state/bolus/start", `{"units":3,"rate":0.1}`)
 
 	bolus := readBack(t, bridge, handler.NewCurrentBolusStatusHandler(bridge), ps)
-	assertCargo(t, bolus, "timestamp", int64(state.PumpTimeSeconds(testInstant))+8)
+	assertCargo(t, bolus, "timestamp", int64(state.PumpTimeSecondsIn(testInstant, ps.GetPumpTimeZone()))+8)
 
 	timeMsg := readBack(t, bridge, handler.NewTimeSinceResetHandler(bridge), ps)
-	assertCargo(t, timeMsg, "currentTime", int64(state.PumpTimeSeconds(testInstant))+8)
+	assertCargo(t, timeMsg, "currentTime", int64(state.PumpTimeSecondsIn(testInstant, ps.GetPumpTimeZone()))+8)
 
 	mustDo(t, mux, http.MethodPost, "/api/clock/advance", `{"seconds":30}`)
 	last := readBack(t, bridge, handler.NewLastBolusStatusHandler(bridge, "LastBolusStatusV2Request"), ps)
-	assertCargo(t, last, "timestamp", int64(state.PumpTimeSeconds(testInstant.Add(30e9)))+8)
+	assertCargo(t, last, "timestamp", int64(state.PumpTimeSecondsIn(testInstant.Add(30e9), ps.GetPumpTimeZone()))+8)
 	assertCargo(t, last, "deliveredVolume", 3000)
 }

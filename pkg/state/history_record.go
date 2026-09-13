@@ -44,13 +44,22 @@ type HistoryEvent struct {
 	TypeID int
 	// Name is a human-readable label, used for logging and the state snapshot.
 	Name string
-	// PumpTime is the record's timestamp in seconds since the Tandem epoch.
-	// Zero means "stamp it with the pump's current clock", which is what live
-	// events want; a scenario backdating history sets it explicitly (see
-	// PumpTimeSeconds).
+	// When is the record's instant on the pump's Clock -- a true instant, with
+	// no skew and no zone folded into it. Zero means "now". This is the field
+	// to set when backdating history: the wire value is derived from it, so a
+	// record staged this way and a live record agree under any clock skew.
+	When time.Time
+	// PumpTime is the record's timestamp as the wire carries it: seconds since
+	// the Tandem epoch on the pump's own (skewed, zoned) clock. Zero means
+	// "derive it from When", which is what every caller inside the emulator
+	// wants. Set it only to reproduce a captured record's literal wire value;
+	// When is then derived back from it.
 	PumpTime uint32
-	// Fields carries the event payload.
+	// Fields carries the event payload -- the record's own wire fields.
 	Fields map[string]interface{}
+	// Extra carries pump-side context with nowhere to go in a 26-byte record.
+	// It is reported in JSON and never encoded. See HistoryLogEntry.Extra.
+	Extra map[string]interface{}
 	// SourceNibble is the high nibble of the type ID word. Real captures carry
 	// 1 on a Mobi and 0 on older pumps; it does not affect decoding, since the
 	// driver masks it off. Leave it 0 unless reproducing a capture byte-exactly.
@@ -64,16 +73,33 @@ type HistoryEvent struct {
 // HistoryLogStatusResponse reports and what a HistoryLogRequest addresses.
 // Appending is the only way entries enter the log, so the stored order is
 // always ascending by sequence.
+// One rule governs both timestamps a stored entry carries, and every path --
+// protocol, harness, simulator -- obeys it:
+//
+//	Timestamp is the TRUE instant on the pump's Clock. No skew, no zone.
+//	PumpTime is what went on the WIRE: skew and pump zone applied.
+//
+// So a record backdated by a scenario and a record written live by the
+// protocol handler are directly comparable, and a test can convert between the
+// two with the offsets /api/clock reports.
 func (ps *PumpState) AppendHistory(event HistoryEvent) HistoryLogEntry {
+	timestamp := event.When
 	pumpTime := event.PumpTime
-	var timestamp time.Time
-	if pumpTime == 0 {
-		// Live events are stamped from the pump's clock, including any
-		// pump-clock skew, so they line up with every other wire timestamp.
+	switch {
+	case !timestamp.IsZero():
+		// An instant was given: the wire value is derived from it, so the
+		// skew and the pump's zone are applied exactly once.
+		if pumpTime == 0 {
+			pumpTime = ps.PumpTimeFor(timestamp)
+		}
+	case pumpTime != 0:
+		// A literal wire value was given (a replayed capture): recover the
+		// instant it stands for rather than storing the wire value twice.
+		timestamp = ps.WallClockForPumpTime(pumpTime)
+	default:
+		// Live event: stamp it from the pump's clock now.
 		timestamp = ps.Now()
 		pumpTime = ps.PumpTimeFor(timestamp)
-	} else {
-		timestamp = PumpTimeToWallClock(pumpTime)
 	}
 
 	ps.HistoryLog.mutex.Lock()
@@ -86,6 +112,7 @@ func (ps *PumpState) AppendHistory(event HistoryEvent) HistoryLogEntry {
 		Timestamp:    timestamp,
 		PumpTime:     pumpTime,
 		Data:         event.Fields,
+		Extra:        event.Extra,
 		SourceNibble: event.SourceNibble,
 	}
 	ps.HistoryLog.Entries = append(ps.HistoryLog.Entries, entry)
@@ -134,7 +161,11 @@ func encodeHistoryPayload(payload []byte, typeID int, fields map[string]interfac
 	case HistoryBolusCompleted:
 		// completionStatusId u16 @0, bolusId u16 @2, iob f32 @4,
 		// insulinDelivered f32 @8, insulinRequested f32 @12
-		binary.LittleEndian.PutUint16(payload[0:2], uint16(fieldIntDefault(fields, 3, "completionStatusId")))
+		// completionStatusId IS the end reason a driver reads back (pumpX2
+		// LastBolusStatusAbstractResponse.BolusStatus), so "endReasonId" is
+		// accepted as a decoding alias for records written before the two were
+		// unified.
+		binary.LittleEndian.PutUint16(payload[0:2], uint16(fieldIntDefault(fields, 3, "completionStatusId", "endReasonId")))
 		binary.LittleEndian.PutUint16(payload[2:4], uint16(fieldInt(fields, "bolusId", "bolusID")))
 		putFloat32(payload[4:8], fieldFloat(fields, "iob"))
 		putFloat32(payload[8:12], fieldFloat(fields, "insulinDelivered", "unitsDelivered"))
@@ -153,6 +184,17 @@ func encodeHistoryPayload(payload []byte, typeID int, fields map[string]interfac
 		binary.LittleEndian.PutUint16(payload[0:2], uint16(fieldInt(fields, "unknown")))
 		binary.LittleEndian.PutUint16(payload[2:4], uint16(fieldInt(fields, "tempRateId")))
 		binary.LittleEndian.PutUint32(payload[4:8], uint32(fieldInt(fields, "timeLeft")))
+
+	case HistoryAlarmActivated:
+		// alarmId u32 @0, faultLocatorData u32 @4, param1 u32 @8, param2 f32 @12
+		binary.LittleEndian.PutUint32(payload[0:4], uint32(fieldInt(fields, "alarmId")))
+		binary.LittleEndian.PutUint32(payload[4:8], uint32(fieldInt(fields, "faultLocatorData")))
+		binary.LittleEndian.PutUint32(payload[8:12], uint32(fieldInt(fields, "param1")))
+		putFloat32(payload[12:16], fieldFloat(fields, "param2"))
+
+	case HistoryAlarmCleared:
+		// alarmId u32 @0 -- the same id the matching AlarmActivated carried.
+		binary.LittleEndian.PutUint32(payload[0:4], uint32(fieldInt(fields, "alarmId")))
 
 	case HistoryPumpingSuspended:
 		// preSuspendState u32 @0, insulinAmount u16 @4, reasonId u8 @6,

@@ -87,7 +87,7 @@ func TestPumpStateUsesInjectedClock(t *testing.T) {
 	if !entries[0].Timestamp.Equal(testInstant) {
 		t.Errorf("history Timestamp = %v, want %v", entries[0].Timestamp, testInstant)
 	}
-	if want := PumpTimeSeconds(testInstant); entries[0].PumpTime != want {
+	if want := ps.PumpTimeFor(testInstant); entries[0].PumpTime != want {
 		t.Errorf("history PumpTime = %d, want %d", entries[0].PumpTime, want)
 	}
 }
@@ -112,7 +112,7 @@ func TestPumpClockOffsetSkewsEmittedTimestamps(t *testing.T) {
 	c := NewFrozenClock(testInstant)
 	ps.SetClock(c)
 
-	if got, want := ps.PumpTimeNow(), PumpTimeSeconds(testInstant); got != want {
+	if got, want := ps.PumpTimeNow(), ps.PumpTimeFor(testInstant); got != want {
 		t.Fatalf("PumpTimeNow() = %d, want %d with no offset", got, want)
 	}
 
@@ -121,10 +121,10 @@ func TestPumpClockOffsetSkewsEmittedTimestamps(t *testing.T) {
 	if got := ps.GetPumpClockOffset(); got != 8*time.Second {
 		t.Errorf("GetPumpClockOffset() = %v", got)
 	}
-	if got, want := ps.PumpTimeNow(), PumpTimeSeconds(testInstant.Add(8*time.Second)); got != want {
+	if got, want := ps.PumpTimeNow(), PumpTimeSecondsIn(testInstant.Add(8*time.Second), ps.GetPumpTimeZone()); got != want {
 		t.Errorf("PumpTimeNow() = %d, want %d with an 8 s skew", got, want)
 	}
-	if got, want := ps.PumpTimeFor(testInstant), PumpTimeSeconds(testInstant)+8; got != want {
+	if got, want := ps.PumpTimeFor(testInstant), PumpTimeSecondsIn(testInstant, ps.GetPumpTimeZone())+8; got != want {
 		t.Errorf("PumpTimeFor() = %d, want %d", got, want)
 	}
 	// The skew is a pump-clock lie, not a change to the emulator's own time:

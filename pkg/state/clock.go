@@ -170,13 +170,57 @@ func (ps *PumpState) PumpNow() time.Time {
 	return ps.Now().Add(ps.GetPumpClockOffset())
 }
 
+// SetPumpTimeZone sets the zone the pump keeps its clock in. A nil location
+// restores UTC; time.Local is the default.
+func (ps *PumpState) SetPumpTimeZone(loc *time.Location) {
+	if loc == nil {
+		loc = time.UTC
+	}
+	ps.clockMtx.Lock()
+	defer ps.clockMtx.Unlock()
+	ps.pumpTimeZone = loc
+}
+
+// GetPumpTimeZone returns the zone the pump keeps its clock in.
+func (ps *PumpState) GetPumpTimeZone() *time.Location {
+	ps.clockMtx.RLock()
+	defer ps.clockMtx.RUnlock()
+	if ps.pumpTimeZone == nil {
+		return time.UTC
+	}
+	return ps.pumpTimeZone
+}
+
+// PumpTimeZoneOffsetSeconds is the pump zone's UTC offset in force at t, in
+// seconds -- the quantity a decoder has to subtract back out to recover t. It
+// is reported on /api/clock so a test never has to guess which side of a DST
+// transition the pump is on.
+func (ps *PumpState) PumpTimeZoneOffsetSeconds(t time.Time) int {
+	_, offset := t.In(ps.GetPumpTimeZone()).Zone()
+	return offset
+}
+
 // PumpTimeFor converts an instant on this pump's Clock into the pump-epoch
-// seconds the wire carries, applying the pump-clock skew. Every emitted
-// timestamp (bolus start and end, temp-rate start, history pumpTimeSec,
-// TimeSinceResetResponse.currentTime) goes through here, so one offset moves
-// all of them together.
+// seconds the wire carries, applying the pump-clock skew and encoding in the
+// pump's own time zone. Every emitted timestamp (bolus start and end,
+// temp-rate start, history pumpTimeSec, TimeSinceResetResponse.currentTime)
+// goes through here, so one offset and one zone move all of them together.
+//
+// The formula is the inverse of TandemKit's Dates.fromJan12008ToUnixEpochSeconds:
+//
+//	wire = (t + skew).Unix() - 1199145600 + zoneOffsetAt(t + skew)
+//
+// so a driver in the same zone decodes exactly t back out when the skew is 0.
 func (ps *PumpState) PumpTimeFor(t time.Time) uint32 {
-	return PumpTimeSeconds(t.Add(ps.GetPumpClockOffset()))
+	return PumpTimeSecondsIn(t.Add(ps.GetPumpClockOffset()), ps.GetPumpTimeZone())
+}
+
+// WallClockForPumpTime is the inverse of PumpTimeFor: the true instant on this
+// pump's Clock that a wire value of pumpSeconds stands for. It is what turns a
+// wire timestamp back into the snapshot's wall-clock field, so a record staged
+// by pump seconds and a record staged by instant agree.
+func (ps *PumpState) WallClockForPumpTime(pumpSeconds uint32) time.Time {
+	return PumpTimeToWallClockIn(pumpSeconds, ps.GetPumpTimeZone()).Add(-ps.GetPumpClockOffset())
 }
 
 // GetBolusRate returns the simulated bolus delivery speed in units/second.

@@ -45,6 +45,7 @@ Flags:
 | `-virtual-ack-after-handling` | `false` | Acknowledge a write only after its handler has run, reproducing the Linux/gatt ordering instead of real-pump ordering (ack first). |
 | `-api-addr` | `:8080` | Address of the HTTP/WebSocket API and web UI. |
 | `-ui-dir` | `ui` beside the executable, else `./ui` | Where the web UI is served from. |
+| `-pump-timezone` | the host's local zone | IANA zone the emulated pump keeps its clock in, e.g. `America/New_York`. A Tandem pump holds local time with no zone attached and every consumer decodes its wire timestamps on that assumption, so this is the zone pump-epoch seconds are encoded in. `UTC` turns the convention off. Changeable at runtime via `PUT /api/clock`. |
 | `-request-log-size` | `4096` | How many messages the harness request log (`GET /api/log`) retains. |
 
 ## Integration harness API
@@ -66,12 +67,48 @@ it, step it, and skew the pump's own clock away from it — so a bolus that take
 driver assertion about a dose's start or end second is exact rather than
 "within a tolerance".
 
-`pump_offset_seconds` is a lie the pump tells about the time, not a change to
-the emulator's clock: it shifts every timestamp on the wire
+There are two separate offsets between the emulator's clock and what goes on
+the wire, and they mean different things.
+
+**`pump_timezone` is the pump's local-time convention, not a lie.** A Tandem
+pump keeps its clock in local time with no zone attached: its pump-epoch
+seconds count from 2008-01-01 00:00:00 *as read on the pump's own clock*, and
+every consumer decodes on that assumption — TandemKit's
+`Dates.fromJan12008ToUnixEpochSeconds` subtracts `TimeZone.current.secondsFromGMT()`.
+The emulator therefore encodes with
+
+```
+pump_time_seconds = unix(instant) - 1199145600 + pump_timezone_offset_seconds + pump_offset_seconds
+```
+
+and a driver in the same zone decodes exactly the original instant back out.
+Emitting UTC-based seconds instead (which this emulator used to do) puts every
+timestamp one UTC offset from the pump's own record — four hours in EDT —
+which is invisible until something compares a dose's second. The zone defaults
+to the host's (or `-pump-timezone`); a `PUT` moves the pump to any zone, which
+is how a test reproduces a traveling pump or a DST boundary. `UTC` turns the
+convention off. `pump_timezone_offset_seconds` is read-only: the zone's offset
+in force at `pump_now`, so a test never has to work out which side of a DST
+transition the pump is on.
+
+**`pump_offset_seconds` is a lie the pump tells about the time**, not a change
+to the emulator's clock: it shifts every timestamp on the wire
 (`TimeSinceResetResponse.currentTime`, `CurrentBolusStatus.timestamp`,
 `LastBolusStatus*.timestamp`, `TempRateResponse.startTimeRaw`, history
 `pumpTimeSec`) while leaving delivery arithmetic untouched. It applies in both
-modes.
+modes and stacks on top of the zone.
+
+**One rule governs every time field the harness API reports:**
+
+- wall-clock fields (`time`, `start_time`, `end_time`, `temp_start`,
+  `temp_end`, `cleared_time`) are **true instants** on the pump's Clock, RFC3339
+  in UTC, with no skew and no zone folded in;
+- `*_pump_seconds` / `pump_seconds` / `pump_time` fields are **what went on the
+  wire**, with both offsets applied.
+
+Either is derivable from the other with the two offsets `/api/clock` reports,
+and every path — protocol handler, harness action, simulator tick, backdated
+staged record — obeys it.
 
 ```bash
 # What the clock is doing now
@@ -88,9 +125,17 @@ curl -X POST http://127.0.0.1:8080/api/clock/advance -d '{"seconds":30}'
 # through the jump (a temp rate expiring mid-bolus) happens in order
 curl -X POST http://127.0.0.1:8080/api/clock/advance -d '{"seconds":30,"ticks":6}'
 
+# Move the pump's clock to another zone (wire timestamps move, delivery does not)
+curl -X PUT http://127.0.0.1:8080/api/clock -d '{"pump_timezone":"America/New_York"}'
+
 # Back to the host wall clock
 curl -X PUT http://127.0.0.1:8080/api/clock -d '{"mode":"real","pump_offset_seconds":0}'
 ```
+
+`GET /api/clock` reports `mode`, `now`, `frozen`, `pump_now`,
+`pump_time_seconds`, `pump_offset_seconds`, `pump_timezone`,
+`pump_timezone_offset_seconds` and `time_since_reset`. An unknown
+`pump_timezone` returns `400`.
 
 `POST /api/clock/advance` returns `409` while the pump is on the real clock.
 
@@ -99,8 +144,10 @@ curl -X PUT http://127.0.0.1:8080/api/clock -d '{"mode":"real","pump_offset_seco
 `GET /api/state` returns everything a driver could observe plus the pump-side
 truth behind it: identity, clock, auth and pairing, connection and radio, basal
 (profile, current, suspend reason, temp rate), the bolus in progress, the last
-bolus record, Control-IQ, reservoir, battery, CGM, alerts, the tail of the
-history log, and the request log's current sequence number.
+bolus record, Control-IQ, reservoir, battery, CGM, standing alerts,
+`alarms_history` (every alarm that has been raised *and cleared*, with both
+ends of the interval, which `alerts` cannot show), the tail of the history log,
+and the request log's current sequence number.
 
 `PUT` (or `PATCH`) sets named fields and nothing else. It is deliberately dumb:
 it raises no qualifying events and writes no history, because setting a field is
@@ -169,6 +216,40 @@ curl -X POST http://127.0.0.1:8080/api/state/qualifyingevent -d '{"bitmask":2621
 Every action returns the full state snapshot, so a test rarely needs a second
 call. An action that cannot apply (a second concurrent bolus, resuming an
 unsuspended pump) returns `409`.
+
+### History log
+
+`GET /api/history?since=<sequence>&limit=N` is the full history feed. The
+50-record tail in `GET /api/state` is a convenience and stays as it was, but a
+scenario that runs for a while loses records off the front of it without being
+told; this endpoint does not.
+
+`since` is exclusive — the last sequence you already have — so a poller hands
+back the previous page's `next_since` unchanged. `limit` defaults to 200 and is
+capped at 5000; `truncated` says the limit cut the page short.
+
+```bash
+curl http://127.0.0.1:8080/api/history
+curl 'http://127.0.0.1:8080/api/history?since=120&limit=500'
+```
+
+Each entry carries:
+
+| Field | Meaning |
+|---|---|
+| `sequence` | The record's sequence number, as `HistoryLogStatusResponse` reports it. |
+| `type_id` / `type` | The pumpX2 numeric type id and its name. |
+| `time` | The record's **true instant** on the pump's Clock (RFC3339, UTC). |
+| `pump_seconds` | The same instant **as it went on the wire**: pump-epoch seconds with the skew and the pump's zone applied. `pump_time` is the same value under the name the state snapshot has always used. |
+| `data` | The record's own **wire fields**, named exactly as pumpX2 and TandemKit name them. Nothing else is in here. |
+| `extra` | Pump-side context the 26-byte record format has no room for — a temp rate's delivered volume, the reason string behind a suspend, the alert type behind an alarm. It never reaches the wire, and is kept separate so it cannot be mistaken for a record field. |
+| `source_nibble` | The high nibble of the record's type-id word (1 on Mobi captures, 0 on older ones). The driver masks it off. |
+
+Records are written by one writer per type, whichever path produced them, so a
+consumer never has to know whether a record came from the protocol handler, a
+harness action or a simulator tick. Old field names (`units`, `minutes`,
+`unitsDelivered`, `endReasonId`, …) are still accepted as **input** aliases when
+staging history, so existing scenario files keep working.
 
 ### Request log
 

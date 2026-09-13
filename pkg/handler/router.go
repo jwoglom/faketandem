@@ -788,16 +788,7 @@ func (r *Router) applyBolusChange(change StateChange) {
 	if bolusState.Active {
 		r.pumpState.StartBolusWithSource(
 			bolusState.UnitsTotal, bolusState.BolusID, bolusState.SourceID, bolusState.TypeBitmask)
-		r.pumpState.AppendHistory(state.HistoryEvent{
-			TypeID: state.HistoryBolusActivated,
-			Name:   "BolusActivated",
-			Fields: map[string]interface{}{
-				"bolusId":     bolusState.BolusID,
-				"selectedIob": 0,
-				"iob":         r.pumpState.GetIOB(),
-				"bolusSize":   bolusState.UnitsTotal,
-			},
-		})
+		r.pumpState.RecordBolusActivated(bolusState.BolusID, bolusState.UnitsTotal, bolusState.SourceID)
 		if r.qeNotifier != nil {
 			if err := r.qeNotifier.NotifyBolusStart(bolusState.BolusID, bolusState.UnitsTotal); err != nil {
 				log.Warnf("Failed to notify bolus start: %v", err)
@@ -822,6 +813,11 @@ func (r *Router) applyBolusChange(change StateChange) {
 		TypeBitmask:    currentBolus.TypeBitmask,
 		EndReasonID:    state.BolusEndReasonStopped,
 	})
+	// ... and in the history log, which is the other half of the same record.
+	// This path used to write the last-bolus record but no history record, so a
+	// bolus canceled over the protocol had a start in the log and no end.
+	r.pumpState.RecordBolusCompleted(
+		currentBolus.BolusID, currentBolus.UnitsDelivered, currentBolus.UnitsTotal, state.BolusEndReasonStopped)
 
 	if r.qeNotifier != nil {
 		if err := r.qeNotifier.NotifyBolusCanceled(
@@ -838,21 +834,22 @@ func (r *Router) applyBasalChange(change StateChange) {
 		return
 	}
 	oldRate := r.pumpState.GetBasalRate()
+	previousTemp := r.pumpState.GetTempRate()
+	previousProfile := r.pumpState.GetProfileBasalRate()
 	r.pumpState.SetBasalState(basalState)
 	newRate := r.pumpState.GetBasalRate()
+	// A temp rate that was running and is no longer has ended, whether it was
+	// canceled outright or replaced: record its completion before the record
+	// for whatever replaced it, so the log reads in the order it happened.
+	if previousTemp.Active && previousTemp.TempRateID != basalState.TempRateID {
+		r.pumpState.RecordTempRateCompleted(previousTemp, previousProfile, r.pumpState.Now())
+	}
 	if basalState.TempBasalActive {
 		// The record's own fields are the commanded percentage, the duration in
 		// milliseconds and the temp rate id -- the same three the driver reads
-		// back out of TempRateActivatedHistoryLog.
-		r.pumpState.AppendHistory(state.HistoryEvent{
-			TypeID: state.HistoryTempRateActivated,
-			Name:   "TempRateActivated",
-			Fields: map[string]interface{}{
-				"percent":              basalState.TempBasalPercent,
-				"durationMilliseconds": basalState.TempBasalEnd.Sub(basalState.TempBasalStart).Seconds() * 1000,
-				"tempRateId":           basalState.TempRateID,
-			},
-		})
+		// back out of TempRateActivatedHistoryLog. RecordTempRateActivated is
+		// the single writer the harness path uses too, so the two agree.
+		r.pumpState.RecordTempRateActivated(basalState, r.pumpState.GetProfileBasalRate())
 	}
 	if r.qeNotifier != nil {
 		if err := r.qeNotifier.NotifyBasalRateChange(oldRate, newRate, basalState.TempBasalActive); err != nil {
@@ -882,28 +879,13 @@ func (r *Router) applySuspendChange(change StateChange) {
 	// Both records carry the reservoir's remaining whole units at the moment of
 	// the change: on real pumps this field tracks
 	// InsulinStatusResponse.currentInsulinAmount to the unit, and it used to be
-	// emitted as an empty payload here.
-	insulinAmount := int(r.pumpState.GetReservoirLevel())
+	// emitted as an empty payload here. A suspend commanded over the protocol
+	// is user-aborted (reason id 0); a pump-raised one goes through the
+	// harness's suspend action, which names its own reason.
 	if suspended {
-		r.pumpState.AppendHistory(state.HistoryEvent{
-			TypeID: state.HistoryPumpingSuspended,
-			Name:   "PumpingSuspended",
-			Fields: map[string]interface{}{
-				"preSuspendState": 106,
-				"insulinAmount":   insulinAmount,
-				"reasonId":        0, // user-aborted; a pump-raised suspend uses 1
-				"rpaTimeout":      15,
-			},
-		})
+		r.pumpState.RecordPumpingSuspended("user")
 	} else {
-		r.pumpState.AppendHistory(state.HistoryEvent{
-			TypeID: state.HistoryPumpingResumed,
-			Name:   "PumpingResumed",
-			Fields: map[string]interface{}{
-				"preResumeState": 100,
-				"insulinAmount":  insulinAmount,
-			},
-		})
+		r.pumpState.RecordPumpingResumed()
 	}
 	if r.qeNotifier == nil {
 		return

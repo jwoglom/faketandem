@@ -46,6 +46,7 @@ func main() {
 	var virtualAckAfterHandling = flag.Bool("virtual-ack-after-handling", false, "virtual transport only: run the write handler synchronously and ack the write afterwards, reproducing the Linux/gatt ordering instead of real-pump ordering")
 	var apiAddr = flag.String("api-addr", api.DefaultAddr, "address the HTTP/WebSocket API server listens on")
 	var uiDir = flag.String("ui-dir", "", "directory to serve the web UI from (default: the 'ui' directory beside the executable, else ./ui)")
+	var pumpTimeZone = flag.String("pump-timezone", "", "IANA time zone the emulated pump keeps its clock in, e.g. 'America/New_York' (default: the host's local zone; 'UTC' disables the local-time convention). A Tandem pump holds local time with no zone attached and every consumer decodes its wire timestamps on that assumption, so this is the zone pump-epoch seconds are encoded in. Changeable at runtime via PUT /api/clock.")
 	var requestLogSize = flag.Int("request-log-size", reqlog.DefaultCapacity, "how many messages the integration-harness request log (GET /api/log) retains")
 
 	flag.Parse()
@@ -108,6 +109,8 @@ func main() {
 		pumpState.GetSerialNumber(), pumpState.Model, pumpState.GetAPIVersionMajor(), pumpState.GetAPIVersionMinor())
 	log.Infof("Initial state: reservoir=%.1f units, battery=%d%%, basal rate=%.2f U/hr",
 		pumpState.GetReservoirLevel(), pumpState.GetBatteryLevel(), pumpState.GetBasalRate())
+
+	applyPumpTimeZone(pumpState, *pumpTimeZone)
 
 	// Keep the pumpX2 bridge's copy of the pairing code in step with pump
 	// state, whichever API changes it: the websocket setPairingCode command,
@@ -375,4 +378,23 @@ func configureWebsocketCommands(server *api.Server, ble bluetooth.Transport, pum
 			log.Warnf("Unhandled websocket command: %s", command)
 		}
 	})
+}
+
+// applyPumpTimeZone puts the pump's clock in the zone named by -pump-timezone,
+// or leaves it in the host's, and says which.
+//
+// A Tandem pump keeps local time with no zone attached: the pump-epoch seconds
+// it puts on the wire count from 2008-01-01 00:00:00 as read on its own clock,
+// and every consumer decodes them that way. Emitting UTC-based seconds instead
+// lands every timestamp one UTC offset from the pump's own record.
+func applyPumpTimeZone(pumpState *state.PumpState, zone string) {
+	if zone != "" {
+		loc, err := time.LoadLocation(zone)
+		if err != nil {
+			log.Fatalf("Invalid -pump-timezone %q: %s", zone, err)
+		}
+		pumpState.SetPumpTimeZone(loc)
+	}
+	log.Infof("Pump clock: local time in %s (UTC offset %+d s right now); wire timestamps are seconds since 2008-01-01 as read on that clock",
+		pumpState.GetPumpTimeZone(), pumpState.PumpTimeZoneOffsetSeconds(pumpState.PumpNow()))
 }

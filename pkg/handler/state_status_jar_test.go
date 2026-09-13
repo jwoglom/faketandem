@@ -60,7 +60,7 @@ func TestPumpTimestampsUsePumpEpoch(t *testing.T) {
 		t.Fatalf("parsed back as %q", parsed.MessageType)
 	}
 
-	wantTimestamp := int64(state.PumpTimeSeconds(bolusStart))
+	wantTimestamp := int64(pumpState.PumpTimeFor(bolusStart))
 	assertCargoInt(t, parsed, wantTimestamp, "timestamp")
 	assertCargoInt(t, parsed, 42, "bolusId")
 	assertCargoInt(t, parsed, 2500, "requestedVolume")
@@ -74,8 +74,8 @@ func TestPumpTimestampsUsePumpEpoch(t *testing.T) {
 	}
 
 	// Round-tripping through the epoch helpers must land back on the same second.
-	if got := state.PumpTimeToWallClock(uint32(wantTimestamp)).Unix(); got != bolusStart.Unix() {
-		t.Errorf("PumpTimeToWallClock round-trip = %d, want %d", got, bolusStart.Unix())
+	if got := pumpState.WallClockForPumpTime(uint32(wantTimestamp)).Unix(); got != bolusStart.Unix() {
+		t.Errorf("WallClockForPumpTime round-trip = %d, want %d", got, bolusStart.Unix())
 	}
 
 	// TimeSinceResetResponse.currentTime is the same epoch.
@@ -90,7 +90,7 @@ func TestPumpTimestampsUsePumpEpoch(t *testing.T) {
 	if currentTime >= time.Now().Unix() {
 		t.Errorf("currentTime %d looks like a Unix timestamp, not pump-epoch seconds", currentTime)
 	}
-	if delta := currentTime - int64(state.PumpTimeSeconds(time.Now())); delta > 5 || delta < -5 {
+	if delta := currentTime - int64(pumpState.PumpTimeFor(time.Now())); delta > 5 || delta < -5 {
 		t.Errorf("currentTime %d is %ds away from the expected pump-epoch now", currentTime, delta)
 	}
 }
@@ -115,7 +115,7 @@ func TestLastBolusStatus_DerivedFromState(t *testing.T) {
 		EndReasonID:    state.BolusEndReasonCompleted,
 		EndTime:        endTime,
 	})
-	wantTimestamp := int64(state.PumpTimeSeconds(endTime))
+	wantTimestamp := int64(pumpState.PumpTimeFor(endTime))
 
 	t.Run("V2", func(t *testing.T) {
 		parsed := handleAndParse(t, bridge, NewLastBolusStatusHandler(bridge, "LastBolusStatusV2Request"), pumpState)
@@ -190,7 +190,7 @@ func TestTempRateResponse_DerivedFromState(t *testing.T) {
 		t.Errorf("expected active=true after setting a temp rate, got %v (ok=%v)", active, ok)
 	}
 	assertCargoInt(t, parsed, 150, "percentage")
-	assertCargoInt(t, parsed, int64(state.PumpTimeSeconds(start)), "startTimeRaw")
+	assertCargoInt(t, parsed, int64(pumpState.PumpTimeFor(start)), "startTimeRaw")
 	assertCargoInt(t, parsed, 3600, "duration")
 }
 
