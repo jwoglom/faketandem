@@ -208,6 +208,10 @@ type HistoryLogEntry struct {
 	// records already written.
 	PumpTime uint32
 	Data     map[string]interface{}
+	// SourceNibble is the high nibble of the record's type-ID word. The driver
+	// masks it off when reading the type, so it only matters when reproducing a
+	// captured record byte-for-byte (Mobi captures carry 1, older ones 0).
+	SourceNibble uint8
 }
 
 // HistoryLogState represents history log storage
@@ -587,22 +591,12 @@ func (ps *PumpState) AddHistoryLogEntry(entryType string, data map[string]interf
 	ps.AddHistoryLogEntryWithTypeID(0, entryType, data)
 }
 
-// AddHistoryLogEntryWithTypeID adds a history log entry with a specific type ID.
+// AddHistoryLogEntryWithTypeID adds a history log entry with a specific type ID,
+// stamped with the pump's current clock. It is a thin wrapper over
+// AppendHistory, which is the API to use when the timestamp or the assigned
+// sequence number matters.
 func (ps *PumpState) AddHistoryLogEntryWithTypeID(typeID int, entryType string, data map[string]interface{}) {
-	ps.HistoryLog.mutex.Lock()
-	defer ps.HistoryLog.mutex.Unlock()
-
-	now := time.Now()
-	entry := HistoryLogEntry{
-		Sequence:  ps.HistoryLog.NextSequence,
-		TypeID:    typeID,
-		Type:      entryType,
-		Timestamp: now,
-		PumpTime:  PumpTimeSeconds(now),
-		Data:      data,
-	}
-	ps.HistoryLog.Entries = append(ps.HistoryLog.Entries, entry)
-	ps.HistoryLog.NextSequence++
+	ps.AppendHistory(HistoryEvent{TypeID: typeID, Name: entryType, Fields: data})
 }
 
 // GetHistoryLogEntries returns history log entries in a sequence range
