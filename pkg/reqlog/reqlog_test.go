@@ -143,3 +143,28 @@ func TestRecordRequestCopiesCargo(t *testing.T) {
 		t.Errorf("logged cargo changed under us: units = %v, want 1", got)
 	}
 }
+
+// TestOpcodesAreLoggedUnsigned pins the log's opcode convention.
+//
+// The emulator carries opcodes the way pumpX2 spells them, as signed Java
+// bytes, so a response opcode above 127 arrives here negative --
+// HistoryLogStreamResponse's 0x81 as -127. The log is what a harness asserts
+// against, so it normalizes to the unsigned byte that actually went on the
+// wire rather than making every reader undo the sign extension.
+func TestOpcodesAreLoggedUnsigned(t *testing.T) {
+	l := New(8)
+
+	l.RecordRequest("HistoryLog", "HistoryLogRequest", 60, 1, nil, []string{"aa"})
+	l.RecordResponse("HistoryLog", "HistoryLogStreamResponse", -127, 1, []string{"bb"}, 1, "", "")
+
+	entries := l.All()
+	if len(entries) != 2 {
+		t.Fatalf("got %d entries, want 2", len(entries))
+	}
+	if entries[0].Opcode == nil || *entries[0].Opcode != 60 {
+		t.Errorf("request opcode = %v, want 60 (an opcode below 128 is unchanged)", entries[0].Opcode)
+	}
+	if entries[1].Opcode == nil || *entries[1].Opcode != 0x81 {
+		t.Errorf("response opcode = %v, want 129 (0x81), not the signed -127", entries[1].Opcode)
+	}
+}

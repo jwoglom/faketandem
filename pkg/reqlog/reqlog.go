@@ -49,7 +49,13 @@ type Entry struct {
 
 	Characteristic string `json:"characteristic,omitempty"`
 	Message        string `json:"message,omitempty"`
-	Opcode         *int   `json:"opcode,omitempty"`
+	// Opcode is the message opcode as an UNSIGNED byte, 0-255. Internally the
+	// emulator carries opcodes the way pumpX2 spells them, as signed Java
+	// bytes, so the ones above 127 arrive here negative
+	// (HistoryLogStreamResponse's 0x81 as -127). A log a harness asserts
+	// against should not make its reader undo that, so it is normalized on the
+	// way in -- see normalizeOpcode.
+	Opcode *int `json:"opcode,omitempty"`
 	TxID           *int   `json:"tx_id,omitempty"`
 
 	// Cargo is the decoded field map, for inbound messages.
@@ -176,8 +182,16 @@ func (l *Log) Clear() {
 	l.entries = l.entries[:0]
 }
 
+// normalizeOpcode renders an opcode as the unsigned byte that actually went on
+// the wire, whether the caller spelled it signed (pumpX2's convention, where
+// 0x81 is -127) or unsigned.
+func normalizeOpcode(opcode int) int {
+	return opcode & 0xFF
+}
+
 // RecordRequest logs a parsed inbound message.
 func (l *Log) RecordRequest(characteristic, message string, opcode, txID int, cargo map[string]interface{}, fragments []string) int {
+	opcode = normalizeOpcode(opcode)
 	return l.Append(Entry{
 		Kind:           KindRequest,
 		Characteristic: characteristic,
@@ -192,6 +206,7 @@ func (l *Log) RecordRequest(characteristic, message string, opcode, txID int, ca
 // RecordResponse logs an outbound response: what was encoded, how many
 // fragments actually went out, and any fault note explaining a difference.
 func (l *Log) RecordResponse(characteristic, message string, opcode, txID int, fragments []string, fragmentsSent int, fault, note string) int {
+	opcode = normalizeOpcode(opcode)
 	return l.Append(Entry{
 		Kind:           KindResponse,
 		Characteristic: characteristic,
