@@ -295,13 +295,23 @@ func registerNotificationDefaults(manager *Manager) {
 	})
 }
 
+// NOTE: ControlIQInfoV1Request/V2Request, TempRateRequest,
+// LastBolusStatusRequest, LastBolusStatusV2Request and LastBolusStatusV3Request
+// are no longer served from this table -- they are answered by dedicated
+// handlers that derive their response from live PumpState (see
+// pkg/handler/state_status.go). The entries below are kept registered so the
+// settings HTTP API still enumerates and validates them, and so a scenario can
+// re-register a static override, but the router does not read them.
+
 // registerControlIQDefaults registers defaults for ControlIQ info and sleep schedule
 func registerControlIQDefaults(manager *Manager) {
 	// ControlIQInfoV1Response(boolean closedLoopEnabled, int weight, int weightUnit,
 	// int totalDailyInsulin, int currentUserModeType, int byte6, int byte7,
 	// int byte8, int controlStateType)
 	registerConstant(manager, "ControlIQInfoV1Request", map[string]interface{}{
-		"closedLoopEnabled":   true,
+		// closedLoopEnabled defaults to false: a driver that sees closed loop
+		// enabled refuses to enact temp basals and manual boluses at all.
+		"closedLoopEnabled":   false,
 		"weight":              70,
 		"weightUnit":          0,
 		"totalDailyInsulin":   40,
@@ -314,7 +324,8 @@ func registerControlIQDefaults(manager *Manager) {
 
 	// ControlIQInfoV2Response — same 9 fields as V1 plus exercise fields
 	registerConstant(manager, "ControlIQInfoV2Request", map[string]interface{}{
-		"closedLoopEnabled":     true,
+		// closedLoopEnabled defaults to false; see ControlIQInfoV1Request above.
+		"closedLoopEnabled":     false,
 		"weight":                70,
 		"weightUnit":            0,
 		"totalDailyInsulin":     40,

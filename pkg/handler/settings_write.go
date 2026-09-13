@@ -95,8 +95,11 @@ func (h *SetModesHandler) RequiresAuth() bool { return true }
 func (h *SetModesHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling SetModesRequest: txID=%d cargo=%v", msg.TxID, msg.Cargo)
 
-	if mode, ok := msg.Cargo["mode"].(float64); ok {
-		pumpState.SetControlIQMode(int(mode))
+	// pumpX2's SetModesRequest field is "bitmap" (it also prints a derived
+	// "command" enum name); there is no "mode" field, so the mode was never
+	// actually applied.
+	if bitmap, ok := cargoInt(msg, "bitmap", "mode"); ok {
+		pumpState.SetControlIQMode(int(bitmap))
 	}
 
 	// SetModesResponse has no int-status constructor, only a raw byte[] one (size=1).

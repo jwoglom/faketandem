@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -122,45 +123,62 @@ func (h *SetTempRateHandler) RequiresAuth() bool {
 func (h *SetTempRateHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling SetTempRateRequest: txID=%d cargo=%v", msg.TxID, msg.Cargo)
 
+	// pumpX2's SetTempRateRequest fields are "minutes" and "percent" -- not
+	// "duration"/"percentage". Reading the wrong names meant every request
+	// applied 100%% for 0 minutes, which the simulator then expired on its very
+	// next tick.
 	percentage := 100
-	if val, ok := msg.Cargo["percentage"].(float64); ok {
+	if val, ok := cargoInt(msg, "percent", "percentage"); ok {
 		percentage = int(val)
 	}
 	durationMinutes := 0
-	if val, ok := msg.Cargo["duration"].(float64); ok {
+	if val, ok := cargoInt(msg, "minutes", "duration"); ok {
 		durationMinutes = int(val)
 	}
 
-	basalRate := pumpState.GetBasalRate()
-	tempRate := basalRate * float64(percentage) / 100.0
-	tempEnd := time.Now().Add(time.Duration(durationMinutes) * time.Minute)
+	// A percentage temp rate applies to the PROFILE basal rate, not to whatever
+	// rate happens to be running: using GetBasalRate() here compounded
+	// percentages whenever one temp rate replaced another.
+	profileRate := pumpState.GetProfileBasalRate()
+	tempRate := profileRate * float64(percentage) / 100.0
+	tempStart := time.Now()
+	tempEnd := tempStart.Add(time.Duration(durationMinutes) * time.Minute)
+	tempRateID := pumpState.NextTempRateID()
 
-	log.Infof("Setting temp rate: %d%% (%.3f U/hr) for %d minutes", percentage, tempRate, durationMinutes)
+	log.Infof("Setting temp rate: %d%% of profile %.3f U/hr = %.3f U/hr for %d minutes (tempRateId=%d)",
+		percentage, profileRate, tempRate, durationMinutes, tempRateID)
 
 	stateChanges := []StateChange{
 		{
 			Type: StateChangeBasal,
 			Data: &state.BasalState{
-				CurrentRate:     basalRate,
-				TempBasalActive: true,
-				TempBasalRate:   tempRate,
-				TempBasalEnd:    tempEnd,
+				CurrentRate:      profileRate,
+				TempBasalActive:  true,
+				TempBasalRate:    tempRate,
+				TempBasalEnd:     tempEnd,
+				TempBasalPercent: percentage,
+				TempBasalStart:   tempStart,
+				TempRateID:       tempRateID,
 			},
 		},
 	}
 
-	// SetTempRateResponse(int status, int tempRateId). Note: as of pumpX2
-	// v1.9.0 this message's own @MessageProps(size=4) doesn't match what its
-	// buildCargo() actually emits (3 bytes), so Validate.isTrue always fails
-	// inside cliparser regardless of params -- an upstream library bug, not
-	// fixable from here. Kept semantically correct for clarity even though
-	// it's known to still fail.
+	// SetTempRateResponse must be encoded through the raw-cargo escape hatch.
+	// Its pumpX2 @MessageProps declares size=4 while buildCargo(status,
+	// tempRateId) emits only 3 bytes, so cliparser's
+	// Validate.isTrue(raw.length == props().size()) throws for *any* arguments
+	// passed to the named (int status, int tempRateId) constructor -- an
+	// upstream bug still present at pumpX2 HEAD. The byte[] constructor takes
+	// the same 4-byte layout the message's own parse() reads back, and
+	// TandemKit decodes identically: [status][tempRateId u16 LE][pad].
+	// Without this the handler returned an error, the router sent nothing at
+	// all, and every temp-basal enact died on the driver's 30 s response
+	// timeout.
 	response, err := h.bridge.EncodeMessage(
 		msg.TxID,
 		"SetTempRateResponse",
 		map[string]interface{}{
-			"status":     0,
-			"tempRateId": 1,
+			"raw": setTempRateResponseRawCargo(0, tempRateID),
 		},
 	)
 	if err != nil {
@@ -198,13 +216,15 @@ func (h *StopTempRateHandler) RequiresAuth() bool {
 func (h *StopTempRateHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling StopTempRateRequest: txID=%d", msg.TxID)
 
-	basalRate := pumpState.GetBasalRate()
+	// Returning to the profile rate, not to whatever temp rate was running.
+	profileRate := pumpState.GetProfileBasalRate()
+	tempRateID := pumpState.GetTempRate().TempRateID
 
 	stateChanges := []StateChange{
 		{
 			Type: StateChangeBasal,
 			Data: &state.BasalState{
-				CurrentRate:     basalRate,
+				CurrentRate:     profileRate,
 				TempBasalActive: false,
 			},
 		},
@@ -216,7 +236,7 @@ func (h *StopTempRateHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState
 		"StopTempRateResponse",
 		map[string]interface{}{
 			"status":     0,
-			"tempRateId": 1,
+			"tempRateId": tempRateID,
 		},
 	)
 	if err != nil {
@@ -228,6 +248,22 @@ func (h *StopTempRateHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState
 		Immediate:       true,
 		StateChanges:    stateChanges,
 	}, nil
+}
+
+// setTempRateResponseRawCargo builds SetTempRateResponse's 4-byte cargo by
+// hand: [status][tempRateId uint16 little-endian][reserved]. This mirrors the
+// message's own parse() (status = raw[0], tempRateId = readShort(raw, 1)) and
+// TandemKit's SetTempRateResponse decoding, and is needed because pumpX2's
+// named constructor cannot produce a cargo of the declared size (see the call
+// site in SetTempRateHandler.HandleMessage).
+func setTempRateResponseRawCargo(status, tempRateID int) string {
+	cargo := []byte{
+		byte(status),
+		byte(tempRateID & 0xFF),
+		byte((tempRateID >> 8) & 0xFF),
+		0,
+	}
+	return hex.EncodeToString(cargo)
 }
 
 // simpleControlResponseParamsOverrides provides response params for the

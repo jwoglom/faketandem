@@ -154,37 +154,47 @@ func (h *InitiateBolusHandler) RequiresAuth() bool {
 func (h *InitiateBolusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling InitiateBolusRequest: txID=%d", msg.TxID)
 
-	// Extract bolus parameters
-	bolusUnits := 0.0
-	bolusID := uint32(0)
+	// Field names below are pumpX2's own (InitiateBolusRequest.java): the
+	// request carries "totalVolume" in MILLIunits and "bolusID" (capital D),
+	// plus optional metadata. Reading "insulin"/"units"/"bolusId" instead --
+	// as this handler used to -- always left bolusUnits at 0, failed the
+	// validation below, and sent no response at all, so no bolus could ever be
+	// started through faketandem.
+	totalVolumeMilliunits, _ := cargoInt(msg, "totalVolume")
+	bolusUnits := float64(totalVolumeMilliunits) / 1000.0
 
-	if val, ok := msg.Cargo["insulin"].(float64); ok {
-		bolusUnits = val
-	} else if val, ok := msg.Cargo["units"].(float64); ok {
-		bolusUnits = val
-	}
+	rawBolusID, _ := cargoInt(msg, "bolusID", "bolusId")
+	bolusID := uint32(rawBolusID)
 
-	if val, ok := msg.Cargo["bolusId"].(float64); ok {
-		bolusID = uint32(val)
-	} else if val, ok := msg.Cargo["bolusID"].(float64); ok {
-		bolusID = uint32(val)
-	}
+	bolusTypeBitmask, _ := cargoInt(msg, "bolusTypeBitmask")
+	foodVolume, _ := cargoInt(msg, "foodVolume")
+	correctionVolume, _ := cargoInt(msg, "correctionVolume")
+	bolusCarbs, _ := cargoInt(msg, "bolusCarbs")
+	bolusBG, _ := cargoInt(msg, "bolusBG")
 
 	if bolusUnits <= 0 {
-		return nil, fmt.Errorf("invalid bolus units: %.2f", bolusUnits)
+		return nil, fmt.Errorf("invalid bolus units: %.2f (totalVolume=%d mU)", bolusUnits, totalVolumeMilliunits)
 	}
 
-	log.Infof("Initiating bolus: %.2f units, bolusID=%d", bolusUnits, bolusID)
+	log.Infof("Initiating bolus: %.2f units (%d mU), bolusID=%d, typeBitmask=%d, food=%d mU, correction=%d mU, carbs=%dg, bg=%d",
+		bolusUnits, totalVolumeMilliunits, bolusID, bolusTypeBitmask, foodVolume, correctionVolume, bolusCarbs, bolusBG)
 
-	// Start the bolus
+	// Start the bolus. A bolus commanded over BLE reports
+	// BolusSource.BLUETOOTH_REMOTE_BOLUS (8), not the quickBolus default (0) --
+	// drivers use bolusSourceId to tell an app-commanded bolus from one
+	// programmed on the pump's own UI.
 	stateChanges := []StateChange{
 		{
 			Type: StateChangeBolus,
 			Data: &state.BolusState{
-				Active:         true,
-				UnitsDelivered: 0,
-				UnitsTotal:     bolusUnits,
-				BolusID:        bolusID,
+				Active:           true,
+				UnitsDelivered:   0,
+				UnitsTotal:       bolusUnits,
+				BolusID:          bolusID,
+				SourceID:         state.BolusSourceBluetoothRemote,
+				TypeBitmask:      int(bolusTypeBitmask),
+				FoodVolume:       float64(foodVolume) / 1000.0,
+				CorrectionVolume: float64(correctionVolume) / 1000.0,
 			},
 		},
 	}
@@ -236,12 +246,8 @@ func (h *RemoteBgEntryHandler) RequiresAuth() bool {
 func (h *RemoteBgEntryHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling RemoteBgEntryRequest: txID=%d", msg.TxID)
 
-	bgValue := 0.0
-	if val, ok := msg.Cargo["bgValue"].(float64); ok {
-		bgValue = val
-	} else if val, ok := msg.Cargo["bg"].(float64); ok {
-		bgValue = val
-	}
+	// pumpX2's RemoteBgEntryRequest field is "bg" (mg/dL).
+	bgValue, _ := cargoFloat(msg, "bg", "bgValue")
 
 	log.Infof("Remote BG entry: %.0f mg/dL", bgValue)
 
@@ -289,12 +295,8 @@ func (h *RemoteCarbEntryHandler) RequiresAuth() bool {
 func (h *RemoteCarbEntryHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling RemoteCarbEntryRequest: txID=%d", msg.TxID)
 
-	carbGrams := 0.0
-	if val, ok := msg.Cargo["carbs"].(float64); ok {
-		carbGrams = val
-	} else if val, ok := msg.Cargo["carbGrams"].(float64); ok {
-		carbGrams = val
-	}
+	// pumpX2's RemoteCarbEntryRequest field is "carbs" (grams).
+	carbGrams, _ := cargoFloat(msg, "carbs", "carbGrams")
 
 	log.Infof("Remote carb entry: %.0f grams", carbGrams)
 
