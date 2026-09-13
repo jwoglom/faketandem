@@ -96,10 +96,12 @@ func (h *Harness) applyClock(body clockBody) error {
 			h.manual = state.NewManualClock(now)
 			h.pumpState.SetClock(h.manual)
 			log.Infof("harness: pump switched to a manual clock at %s", now.Format(time.RFC3339))
-		} else {
-			h.manual.Set(now)
 		}
+		// Freeze before setting: freezing captures the clock's current
+		// reading, and doing it afterwards would fold the microseconds spent
+		// getting here into a time the caller asked to be exact.
 		h.manual.Freeze(body.Frozen)
+		h.manual.Set(now)
 
 	default:
 		return fmt.Errorf("unknown clock mode %q (expected %q or %q)", body.Mode, ClockModeReal, ClockModeManual)

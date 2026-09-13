@@ -2,6 +2,7 @@ package harness
 
 import (
 	"fmt"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -327,7 +328,9 @@ func (h *Harness) actionTempBasalStart(w http.ResponseWriter, r *http.Request) {
 	rate := body.Rate
 	switch {
 	case rate > 0 && profileRate > 0:
-		percent = int(rate / profileRate * 100)
+		// Rounded, not truncated: 1.2 U/hr against a 0.8 U/hr profile is 150%,
+		// and float division alone reports 149.
+		percent = int(math.Round(rate / profileRate * 100))
 	case percent > 0:
 		rate = profileRate * float64(percent) / 100.0
 	default:
