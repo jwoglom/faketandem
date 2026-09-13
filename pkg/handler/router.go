@@ -416,9 +416,57 @@ func (r *Router) sendResponse(requestCharType bluetooth.CharacteristicType, resp
 	return nil
 }
 
+// resign rebuilds the signed trailer of a response the pumpX2 cliparser
+// encoded, with this pump's real authentication key and time since reset.
+//
+// It is needed because the cliparser subprocess has neither. Its signing
+// inputs arrive only through the environment, and it uses the raw ASCII bytes
+// of PUMP_AUTHENTICATION_KEY as the HMAC key rather than decoding it -- so a
+// binary JPAKE-derived session key cannot be handed to it at all, and with no
+// key set it signs every signed message with the ASCII of its own
+// "IGNORE_HMAC_SIGNATURE_EXCEPTION" placeholder. The cargo cliparser produced
+// is kept verbatim; only the last 24 payload bytes and the CRC are recomputed,
+// so this is a re-signing step and not a second encoder.
+//
+// Messages the catalog does not mark signed are returned untouched, byte for
+// byte. So is a signed message the pump cannot sign yet: before
+// authentication there is no session key, and every signed message is on a
+// characteristic that requires authentication anyway, so this only arises for
+// a handler answering out of turn -- worth a warning, not worth inventing a
+// key for.
+func (r *Router) resign(msg *pumpx2.EncodedMessage) *pumpx2.EncodedMessage {
+	if msg == nil || !protocol.IsSignedMessage(msg.MessageType) {
+		return msg
+	}
+
+	authKey := r.pumpState.GetAuthKey()
+	if len(authKey) == 0 {
+		log.Warnf("Cannot re-sign %s txID=%d: the pump has no authentication key; "+
+			"sending the cliparser signature, which no driver will accept", msg.MessageType, msg.TxID)
+		return msg
+	}
+
+	timeSinceReset := r.pumpState.GetTimeSinceReset()
+	packets, err := protocol.ResignFragmentsHex(msg.Packets, authKey, timeSinceReset)
+	if err != nil {
+		log.Errorf("Cannot re-sign %s txID=%d: %v; sending it as cliparser encoded it",
+			msg.MessageType, msg.TxID, err)
+		return msg
+	}
+
+	log.Debugf("Re-signed %s txID=%d with the pump's own key (timeSinceReset=%d)",
+		msg.MessageType, msg.TxID, timeSinceReset)
+
+	resigned := *msg
+	resigned.Packets = packets
+	return &resigned
+}
+
 // sendWithFaults applies any armed fault to one outgoing message and then
 // sends whatever is left to send.
 func (r *Router) sendWithFaults(charType bluetooth.CharacteristicType, msg *pumpx2.EncodedMessage) error {
+	msg = r.resign(msg)
+
 	fault := r.matchResponseFault(charType, msg)
 	if fault == nil {
 		return r.sendAndRecord(charType, msg, -1, "", "")
