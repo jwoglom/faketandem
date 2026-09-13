@@ -49,11 +49,30 @@ are opaque bytes.
 - {"type":"disconnect","reason":"<string>"} followed by socket close (pump-initiated drop,
   e.g. ShutdownConnection / fault injection).
 
-## Sizes
+## Sizes and the ATT MTU
 The link is transparent: a `write` value is delivered as one ATT write of that exact length; a `notify`
-is one notification. No MTU enforcement in v1 (real Mobi negotiates a large MTU; the app-level
-fragmenting into 18/40-byte packets happens above this layer on both sides and is exercised as-is).
-Optional later: `-virtual-max-att` to truncate/reject oversize payloads.
+is one notification.
+
+The peripheral announces the ATT MTU in force as `att_mtu` on the `hello` message. It defaults to 23,
+the Bluetooth spec minimum, which allows 20-byte notifications: 2 bytes of `[remainingPackets][txId]`
+framing plus 18 bytes of message, exactly what pumpX2's `Packetize` and the cliparser jar produce. Set
+it with `-virtual-mtu`, or at runtime with `PUT /api/transport {"att_mtu":247}`.
+
+A real Mobi paired with the official iOS app negotiates a much larger MTU, so most responses reach the
+phone as a **single** notification with `remaining=0` rather than a run of 18-byte fragments. Raising
+the MTU here reproduces that: the pump re-frames each response (cliparser-encoded and natively encoded
+alike) to the largest chunk the MTU allows, keeping the message bytes identical. Both receivers handle
+either framing without a special case -- TandemKit's `BTResponseParser` and pumpX2's `PacketArrayList`
+read the remaining-fragment counter (`data[0] & 0x0F`) and never a fragment's length, stripping 5 bytes
+from the first fragment and 2 from each continuation. A driver's reassembler should be exercised
+against both.
+
+The peripheral will not send a notification larger than the announced MTU allows: an oversized notify
+fails with an error rather than going out, so a fragmentation bug cannot pass here and then fail
+against real hardware.
+
+`att_mtu` is an additive, optional field; a v1 client that ignores it still works, since the peripheral
+never sends more than it announces.
 
 ## Errors / lifecycle
 - Unknown `type` -> {"type":"error","id":N?,"error":"unknown type"}; connection stays up.

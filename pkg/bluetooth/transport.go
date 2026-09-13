@@ -1,6 +1,9 @@
 package bluetooth
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // PumpName is the advertised BLE device name of the emulated pump. It is also
 // the source of the Device Information Service serial number string (a real
@@ -155,3 +158,55 @@ type NotifyFilterer interface {
 
 // Compile-time assertion that the virtual transport can filter notifications.
 var _ NotifyFilterer = (*VirtualTransport)(nil)
+
+// ATT MTU bounds.
+//
+// A BLE link negotiates an ATT MTU at connection time; every notification
+// after that carries at most MTU-3 bytes (one byte of ATT opcode plus a
+// two-byte attribute handle). The Bluetooth spec's floor is 23, which every
+// peripheral must support and which is what an un-negotiated link uses.
+const (
+	// DefaultATTMTU is the spec minimum, and the emulator's default: a 23-byte
+	// MTU means 20-byte notifications, which is exactly how pumpX2's own
+	// Packetize fragments and what the cliparser jar emits. Keeping it as the
+	// default means the wire bytes do not move unless a test asks them to.
+	DefaultATTMTU = 23
+	// MaxATTMTU is the largest ATT MTU the spec allows.
+	MaxATTMTU = 517
+	// ATTNotificationOverhead is the ATT header on every notification: one
+	// opcode byte plus a two-byte attribute handle.
+	ATTNotificationOverhead = 3
+)
+
+// MaxNotificationBytes returns how many bytes one notification can carry at
+// the given ATT MTU.
+func MaxNotificationBytes(mtu int) int {
+	return mtu - ATTNotificationOverhead
+}
+
+// ValidateATTMTU rejects an MTU outside what the spec allows.
+func ValidateATTMTU(mtu int) error {
+	if mtu < DefaultATTMTU || mtu > MaxATTMTU {
+		return fmt.Errorf("ATT MTU %d is outside the permitted range %d-%d", mtu, DefaultATTMTU, MaxATTMTU)
+	}
+	return nil
+}
+
+// MTUNegotiator is implemented by transports whose ATT MTU can be inspected
+// and changed.
+//
+// A real Mobi paired with the official iOS app negotiates a large MTU, so most
+// responses arrive as a single notification rather than a run of 20-byte
+// fragments. The virtual transport can be told to do either, so a harness can
+// exercise a driver's reassembler against both. The Linux GATT transport
+// cannot: gatt negotiates its own MTU with the connecting central and does not
+// expose it, so a caller must check the assertion before offering the control.
+type MTUNegotiator interface {
+	// ATTMTU returns the ATT MTU in force on this link.
+	ATTMTU() int
+	// SetATTMTU changes the ATT MTU, rejecting a value outside the spec range.
+	SetATTMTU(mtu int) error
+}
+
+// Compile-time assertion that the virtual transport can set its ATT MTU.
+var _ MTUNegotiator = (*VirtualTransport)(nil)

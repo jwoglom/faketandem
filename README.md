@@ -41,6 +41,7 @@ Flags:
 | `-transport` | `ble` on Linux, `virtual` elsewhere | Which link to use. |
 | `-virtual-addr` | `127.0.0.1:8081` | Address the virtual link listens on. |
 | `-virtual-peripheral-id` | derived from the pump serial number | Stable peripheral UUID reported in `hello`. |
+| `-virtual-mtu` | `23` | Virtual transport only: the ATT MTU to announce and fragment responses to. 23 is the Bluetooth spec minimum and gives the 20-byte notifications pumpX2 and the cliparser jar produce; a real Mobi over iOS negotiates a much larger MTU, so most responses arrive in a single notification. Changeable at runtime via `PUT /api/transport`. |
 | `-virtual-ack-after-handling` | `false` | Acknowledge a write only after its handler has run, reproducing the Linux/gatt ordering instead of real-pump ordering (ack first). |
 | `-api-addr` | `:8080` | Address of the HTTP/WebSocket API and web UI. |
 | `-ui-dir` | `ui` beside the executable, else `./ui` | Where the web UI is served from. |
@@ -187,6 +188,41 @@ curl http://127.0.0.1:8080/api/log
 curl 'http://127.0.0.1:8080/api/log?since=42'
 curl -X DELETE http://127.0.0.1:8080/api/log
 ```
+
+### Link parameters (ATT MTU)
+
+`GET /api/transport` reports the ATT MTU in force and what it lets one
+notification carry; `PUT` (or `PATCH`) changes it.
+
+The emulator defaults to 23, the Bluetooth spec minimum, which allows 20-byte
+notifications: 2 bytes of `[remainingPackets][txId]` framing plus 18 bytes of
+message, exactly what pumpX2's `Packetize` and the cliparser jar produce. A real
+Mobi paired with the official iOS app negotiates a much larger MTU, so most
+responses reach the phone as a **single** notification with `remaining=0`
+instead of a run of 18-byte fragments.
+
+Raising the MTU here reproduces that: responses are re-framed to the largest
+chunk it allows, with the message bytes unchanged. Both receivers handle either
+framing without a special case — TandemKit's `BTResponseParser` and pumpX2's
+`PacketArrayList` read the remaining-fragment counter and never a fragment's
+length — so this is the knob for exercising a driver's reassembler against both
+the fragmented and the unfragmented case.
+
+```bash
+curl http://127.0.0.1:8080/api/transport
+# {"att_mtu":23,"max_notification_bytes":20,"max_message_bytes_per_notification":18,"mtu_configurable":true}
+
+# What a real Mobi over iOS looks like: most responses in one notification.
+curl -X PUT http://127.0.0.1:8080/api/transport -d '{"att_mtu":247}'
+
+# Back to the fragmented default.
+curl -X PUT http://127.0.0.1:8080/api/transport -d '{"att_mtu":23}'
+```
+
+Only the virtual transport supports this (`mtu_configurable` says so): the Linux
+GATT transport lets gatt negotiate the MTU with the connecting central and does
+not expose the result, so a `PUT` there returns 501. Set the starting value with
+`-virtual-mtu`.
 
 ### Fault injection
 

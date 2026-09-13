@@ -32,6 +32,49 @@ const (
 	ControlMaxChunkPayload = 40
 )
 
+// ChunkPayloadForMTU returns the per-fragment payload size an ATT MTU allows:
+// the notification carries MTU-3 bytes, of which the first two are this
+// protocol's own [remainingPackets][txId] framing.
+//
+// At the 23-byte spec minimum this is exactly DefaultMaxChunkPayload (18),
+// which is what pumpX2's Packetize and the cliparser jar produce. A real Mobi
+// paired with the official iOS app negotiates a much larger MTU, so most
+// responses arrive in a single notification with remaining=0 -- which both
+// receivers handle without any special case, since TandemKit's BTResponseParser
+// and pumpX2's PacketArrayList key off that remaining counter and never off a
+// fragment's length.
+func ChunkPayloadForMTU(mtu int) int {
+	payload := bluetooth.MaxNotificationBytes(mtu) - 2
+	if payload < DefaultMaxChunkPayload {
+		return DefaultMaxChunkPayload
+	}
+	return payload
+}
+
+// RefragmentHex takes a hex-encoded fragment sequence apart and rebuilds it at
+// a different per-fragment payload size, preserving the message bytes exactly.
+//
+// It is how a response the pumpX2 cliparser encoded (always at 18-byte chunks)
+// is re-framed for a link that negotiated a larger MTU. A chunkPayload that
+// already matches what the message uses returns it untouched, byte for byte.
+func RefragmentHex(packetsHex []string, txID uint8, chunkPayload int) ([]string, error) {
+	body, err := MessageBodyFromFragmentsHex(packetsHex)
+	if err != nil {
+		return nil, err
+	}
+
+	fragments, err := FragmentMessage(body, txID, chunkPayload)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]string, 0, len(fragments))
+	for _, f := range fragments {
+		out = append(out, hex.EncodeToString(f))
+	}
+	return out, nil
+}
+
 // SignedTrailerLength is the size of the trailer appended to signed messages:
 // a 4-byte little-endian timeSinceReset followed by a 20-byte HMAC-SHA1.
 const SignedTrailerLength = 24
