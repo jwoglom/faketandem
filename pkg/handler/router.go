@@ -462,10 +462,57 @@ func (r *Router) resign(msg *pumpx2.EncodedMessage) *pumpx2.EncodedMessage {
 	return &resigned
 }
 
+// chunkPayload is the per-fragment payload size responses are framed to, from
+// the ATT MTU the transport reports. A transport that cannot report one (the
+// Linux GATT transport, which lets gatt negotiate the MTU with the central and
+// does not expose the result) gets the 23-byte-MTU default, which is the
+// 18-byte chunking the emulator has always used.
+func (r *Router) chunkPayload() int {
+	if negotiator, ok := r.ble.(bluetooth.MTUNegotiator); ok {
+		return protocol.ChunkPayloadForMTU(negotiator.ATTMTU())
+	}
+	return protocol.DefaultMaxChunkPayload
+}
+
+// refragment re-frames a response for the link's negotiated ATT MTU.
+//
+// The pumpX2 cliparser always emits 18-byte payload chunks, the most a 23-byte
+// ATT MTU allows, and so does the native encoder by default. A real Mobi paired
+// with the official iOS app negotiates a much larger MTU, so most responses
+// reach the phone as a single notification. Both receivers read the
+// remaining-fragment counter and never a fragment's length, so the larger
+// framing is the same message in fewer packets -- a one-packet response simply
+// arrives with remaining=0.
+//
+// At the default MTU this is a no-op and the bytes are untouched. It runs after
+// re-signing, so the signature covers the message body rather than any
+// particular framing of it, and before the fault path, so the request log and
+// a partial-response fault both count the fragments that actually go out.
+func (r *Router) refragment(msg *pumpx2.EncodedMessage) *pumpx2.EncodedMessage {
+	chunkPayload := r.chunkPayload()
+	if msg == nil || len(msg.Packets) == 0 || chunkPayload == protocol.DefaultMaxChunkPayload {
+		return msg
+	}
+
+	packets, err := protocol.RefragmentHex(msg.Packets, uint8(msg.TxID), chunkPayload)
+	if err != nil {
+		log.Errorf("Cannot re-fragment %s txID=%d for a %d-byte payload chunk: %v; sending it as encoded",
+			msg.MessageType, msg.TxID, chunkPayload, err)
+		return msg
+	}
+
+	log.Debugf("Re-fragmented %s txID=%d from %d to %d fragment(s) for a %d-byte payload chunk",
+		msg.MessageType, msg.TxID, len(msg.Packets), len(packets), chunkPayload)
+
+	refragmented := *msg
+	refragmented.Packets = packets
+	return &refragmented
+}
+
 // sendWithFaults applies any armed fault to one outgoing message and then
 // sends whatever is left to send.
 func (r *Router) sendWithFaults(charType bluetooth.CharacteristicType, msg *pumpx2.EncodedMessage) error {
-	msg = r.resign(msg)
+	msg = r.refragment(r.resign(msg))
 
 	fault := r.matchResponseFault(charType, msg)
 	if fault == nil {
@@ -633,10 +680,12 @@ func (r *Router) SendNative(msg *protocol.NativeMessage) error {
 		return nil
 	}
 
-	log.Infof("Sending native %s on %s: txID=%d, %d packet(s)",
-		msg.MessageType, msg.Characteristic, msg.TxID, len(msg.Fragments))
+	fragments := r.refragmentNative(msg)
 
-	for i, fragment := range msg.Fragments {
+	log.Infof("Sending native %s on %s: txID=%d, %d packet(s)",
+		msg.MessageType, msg.Characteristic, msg.TxID, len(fragments))
+
+	for i, fragment := range fragments {
 		protocol.LogPacket("TX", msg.Characteristic, fragment)
 		if err := r.ble.Notify(msg.Characteristic, fragment); err != nil {
 			return fmt.Errorf("failed to send %s fragment %d: %w", msg.MessageType, i, err)
@@ -644,6 +693,29 @@ func (r *Router) SendNative(msg *protocol.NativeMessage) error {
 	}
 
 	return nil
+}
+
+// refragmentNative re-frames a natively-encoded message for the link's ATT
+// MTU, the same way refragment does for a cliparser-encoded one.
+func (r *Router) refragmentNative(msg *protocol.NativeMessage) [][]byte {
+	chunkPayload := r.chunkPayload()
+	if chunkPayload == protocol.DefaultMaxChunkPayload || len(msg.Fragments) == 0 {
+		return msg.Fragments
+	}
+
+	body, err := protocol.MessageBodyFromFragmentsHex(msg.PacketsHex())
+	if err == nil {
+		var fragments [][]byte
+		if fragments, err = protocol.FragmentMessage(body, msg.TxID, chunkPayload); err == nil {
+			log.Debugf("Re-fragmented native %s txID=%d from %d to %d fragment(s) for a %d-byte payload chunk",
+				msg.MessageType, msg.TxID, len(msg.Fragments), len(fragments), chunkPayload)
+			return fragments
+		}
+	}
+
+	log.Errorf("Cannot re-fragment native %s txID=%d for a %d-byte payload chunk: %v; sending it as encoded",
+		msg.MessageType, msg.TxID, chunkPayload, err)
+	return msg.Fragments
 }
 
 // SendErrorResponse sends the ErrorResponse a real pump returns in place of the

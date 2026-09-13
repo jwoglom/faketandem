@@ -42,6 +42,7 @@ func main() {
 	var transportName = flag.String("transport", defaultTransport(), "transport to use: 'ble' (real BLE peripheral, Linux only) or 'virtual' (radio-free virtual GATT link over TCP)")
 	var virtualAddr = flag.String("virtual-addr", bluetooth.DefaultVirtualAddr, "address the virtual GATT transport listens on")
 	var virtualPeripheralID = flag.String("virtual-peripheral-id", "", "stable peripheral UUID reported by the virtual transport (default: derived deterministically from the pump serial number)")
+	var virtualMTU = flag.Int("virtual-mtu", bluetooth.DefaultATTMTU, "virtual transport only: ATT MTU to report and fragment responses to. The default 23 is the spec minimum and gives the 20-byte notifications pumpX2 and the cliparser jar produce; a real Mobi over iOS negotiates a much larger one, so most responses arrive in a single notification. Changeable at runtime via PUT /api/transport.")
 	var virtualAckAfterHandling = flag.Bool("virtual-ack-after-handling", false, "virtual transport only: run the write handler synchronously and ack the write afterwards, reproducing the Linux/gatt ordering instead of real-pump ordering")
 	var apiAddr = flag.String("api-addr", api.DefaultAddr, "address the HTTP/WebSocket API server listens on")
 	var uiDir = flag.String("ui-dir", "", "directory to serve the web UI from (default: the 'ui' directory beside the executable, else ./ui)")
@@ -108,8 +109,14 @@ func main() {
 	log.Infof("Initial state: reservoir=%.1f units, battery=%d%%, basal rate=%.2f U/hr",
 		pumpState.GetReservoirLevel(), pumpState.GetBatteryLevel(), pumpState.GetBasalRate())
 
-	// Set pairing code in bridge
+	// Keep the pumpX2 bridge's copy of the pairing code in step with pump
+	// state, whichever API changes it: the websocket setPairingCode command,
+	// the harness's PUT/PATCH /api/state, or anything else that reaches
+	// PumpState.SetPairingCode. The bridge hands the code to the cliparser
+	// subprocess as the JPAKE password, so a stale copy means pairing fails
+	// against the code the emulator claims to be using.
 	bridge.SetPairingCode(pumpState.GetPairingCode())
+	pumpState.OnPairingCodeChange(bridge.SetPairingCode)
 
 	if len(cfg.JPAKELongTermKey) > 0 {
 		pumpState.SetLongTermKey(cfg.JPAKELongTermKey)
@@ -120,7 +127,14 @@ func main() {
 	simulator := state.NewSimulator(pumpState, 1*time.Second)
 	defer simulator.Stop()
 
-	ble, err := newTransport(*transportName, *virtualAddr, *virtualPeripheralID, *virtualAckAfterHandling, pumpState.GetSerialNumber())
+	ble, err := newTransport(transportConfig{
+		name:             *transportName,
+		virtualAddr:      *virtualAddr,
+		peripheralID:     *virtualPeripheralID,
+		ackAfterHandling: *virtualAckAfterHandling,
+		attMTU:           *virtualMTU,
+		serialNumber:     pumpState.GetSerialNumber(),
+	})
 	if err != nil {
 		log.Fatalf("Could not start transport: %s", err)
 	}
@@ -222,7 +236,7 @@ func main() {
 	})
 
 	// Set up custom command handler for websocket commands
-	configureWebsocketCommands(server, ble, bridge, pumpState)
+	configureWebsocketCommands(server, ble, pumpState)
 
 	log.Info("Transport initialized, waiting for connections...")
 	log.Infof("Starting API server on %s", *apiAddr)
@@ -246,22 +260,35 @@ func defaultTransport() string {
 	return transportVirtual
 }
 
+// transportConfig is the transport half of the command line, grouped so
+// newTransport does not take a half-dozen positional strings and bools.
+type transportConfig struct {
+	name             string
+	virtualAddr      string
+	peripheralID     string
+	ackAfterHandling bool
+	attMTU           int
+	serialNumber     string
+}
+
 // newTransport constructs the selected transport.
-func newTransport(name, virtualAddr, virtualPeripheralID string, virtualAckAfterHandling bool, serialNumber string) (bluetooth.Transport, error) {
-	switch name {
+func newTransport(cfg transportConfig) (bluetooth.Transport, error) {
+	switch cfg.name {
 	case transportBle:
 		log.Info("Using BLE transport (adapter hci0)")
 		return bluetooth.New("hci0")
 	case transportVirtual:
-		log.Infof("Using virtual GATT transport on %s", virtualAddr)
+		log.Infof("Using virtual GATT transport on %s (ATT MTU %d, %d-byte notifications)",
+			cfg.virtualAddr, cfg.attMTU, bluetooth.MaxNotificationBytes(cfg.attMTU))
 		return bluetooth.NewVirtual(bluetooth.VirtualOptions{
-			Addr:             virtualAddr,
-			PeripheralID:     virtualPeripheralID,
-			SerialNumber:     serialNumber,
-			AckAfterHandling: virtualAckAfterHandling,
+			Addr:             cfg.virtualAddr,
+			PeripheralID:     cfg.peripheralID,
+			SerialNumber:     cfg.serialNumber,
+			AckAfterHandling: cfg.ackAfterHandling,
+			ATTMTU:           cfg.attMTU,
 		})
 	default:
-		return nil, fmt.Errorf("unknown transport %q (expected %q or %q)", name, transportBle, transportVirtual)
+		return nil, fmt.Errorf("unknown transport %q (expected %q or %q)", cfg.name, transportBle, transportVirtual)
 	}
 }
 
@@ -309,7 +336,7 @@ func configureConnectionHandlers(ble bluetooth.Transport, server *api.Server, ro
 	})
 }
 
-func configureWebsocketCommands(server *api.Server, ble bluetooth.Transport, bridge *pumpx2.Bridge, pumpState *state.PumpState) {
+func configureWebsocketCommands(server *api.Server, ble bluetooth.Transport, pumpState *state.PumpState) {
 	server.SetCommandHandler(func(command string, params map[string]interface{}) {
 		log.Infof("Received command from websocket: %s, params: %v", command, params)
 		switch command {
@@ -321,9 +348,10 @@ func configureWebsocketCommands(server *api.Server, ble bluetooth.Transport, bri
 				log.Warn("Pairing code missing from setPairingCode command")
 				return
 			}
+			// The bridge is updated by the observer main() registered on
+			// PumpState, so every route that sets the code gets it.
 			pumpState.SetPairingCode(pairingCode)
 			pumpState.ResetAuthentication()
-			bridge.SetPairingCode(pairingCode)
 			server.SendPairingState(pumpState.GetPairingCode(), pumpState.IsAuthenticated, pumpState.GetLongTermKey())
 		case "resetPairing":
 			pumpState.ResetAuthentication()

@@ -679,3 +679,85 @@ func TestNormalizeUUID(t *testing.T) {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+// TestVirtualATTMTUDefaultsToTheSpecFloor guards the default: an emulator
+// nobody configured must keep the 20-byte notifications it has always sent.
+func TestVirtualATTMTUDefaultsToTheSpecFloor(t *testing.T) {
+	v := newTestTransport(t, VirtualOptions{SerialNumber: "11223344"})
+	if err := v.SetPairingState(PairingStatePairStep1); err != nil {
+		t.Fatalf("SetPairingState: %v", err)
+	}
+
+	if got := v.ATTMTU(); got != DefaultATTMTU {
+		t.Errorf("ATTMTU() = %d, want %d", got, DefaultATTMTU)
+	}
+	if got := MaxNotificationBytes(v.ATTMTU()); got != 20 {
+		t.Errorf("a %d-byte MTU allows %d-byte notifications, want 20", v.ATTMTU(), got)
+	}
+
+	// The hello message must tell a central what the link can carry.
+	if hello := dialTransport(t, v).hello(); hello.ATTMTU != DefaultATTMTU {
+		t.Errorf("hello att_mtu = %d, want %d", hello.ATTMTU, DefaultATTMTU)
+	}
+}
+
+// TestVirtualRejectsAnMTUOutsideTheSpecRange covers both the constructor and
+// the setter, so a bad value can never reach the wire.
+func TestVirtualRejectsAnMTUOutsideTheSpecRange(t *testing.T) {
+	for _, mtu := range []int{22, 1, -5, MaxATTMTU + 1} {
+		if _, err := NewVirtual(VirtualOptions{Addr: "127.0.0.1:0", ATTMTU: mtu}); err == nil {
+			t.Errorf("NewVirtual with ATT MTU %d succeeded, want an error", mtu)
+		}
+	}
+
+	v := newTestTransport(t, VirtualOptions{})
+
+	for _, mtu := range []int{22, 0, MaxATTMTU + 1} {
+		if err := v.SetATTMTU(mtu); err == nil {
+			t.Errorf("SetATTMTU(%d) succeeded, want an error", mtu)
+		}
+	}
+	if got := v.ATTMTU(); got != DefaultATTMTU {
+		t.Errorf("ATTMTU() = %d after rejected updates, want it unchanged at %d", got, DefaultATTMTU)
+	}
+
+	if err := v.SetATTMTU(247); err != nil {
+		t.Fatalf("SetATTMTU(247): %v", err)
+	}
+	if got := v.ATTMTU(); got != 247 {
+		t.Errorf("ATTMTU() = %d, want 247", got)
+	}
+}
+
+// TestVirtualRejectsAnOversizedNotification is the safety net under the
+// fragmentation path: a notification a real link could never carry must fail
+// loudly here rather than pass on the virtual link and then break against
+// hardware.
+func TestVirtualRejectsAnOversizedNotification(t *testing.T) {
+	v := newTestTransport(t, VirtualOptions{SerialNumber: "11223344"})
+	if err := v.SetPairingState(PairingStatePairStep1); err != nil {
+		t.Fatalf("SetPairingState: %v", err)
+	}
+
+	c := dialTransport(t, v)
+	c.hello()
+	c.attach()
+	c.subscribe(CurrentStatusCharUUID, true)
+
+	if err := v.Notify(CharCurrentStatus, make([]byte, 20)); err != nil {
+		t.Fatalf("a 20-byte notification must be accepted at the default MTU: %v", err)
+	}
+	if err := v.Notify(CharCurrentStatus, make([]byte, 21)); err == nil {
+		t.Error("a 21-byte notification was accepted at a 23-byte ATT MTU, want an error")
+	}
+
+	if err := v.SetATTMTU(247); err != nil {
+		t.Fatalf("SetATTMTU: %v", err)
+	}
+	if err := v.Notify(CharCurrentStatus, make([]byte, 244)); err != nil {
+		t.Fatalf("a 244-byte notification must be accepted at a 247-byte MTU: %v", err)
+	}
+	if err := v.Notify(CharCurrentStatus, make([]byte, 245)); err == nil {
+		t.Error("a 245-byte notification was accepted at a 247-byte ATT MTU, want an error")
+	}
+}

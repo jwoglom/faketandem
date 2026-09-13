@@ -120,6 +120,7 @@ func (h *Harness) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/clock/advance", h.handleClockAdvance)
 	mux.HandleFunc("/api/state", h.handleState)
 	mux.HandleFunc("/api/state/", h.handleStateAction)
+	mux.HandleFunc("/api/transport", h.handleTransport)
 	mux.HandleFunc("/api/log", h.handleLog)
 	mux.HandleFunc("/api/faults", h.handleFaults)
 	mux.HandleFunc("/api/faults/", h.handleFaults)
@@ -145,6 +146,8 @@ func (h *Harness) Endpoints() []string {
 		"POST   /api/state/resume",
 		"POST   /api/state/history/append     {type, type_id, seconds_ago, data}",
 		"POST   /api/state/qualifyingevent    {bitmask}",
+		"GET    /api/transport",
+		"PUT    /api/transport                (also PATCH) {att_mtu}",
 		"GET    /api/log?since=N",
 		"DELETE /api/log",
 		"GET    /api/faults",

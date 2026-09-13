@@ -287,3 +287,88 @@ func TestAPIVersionResponse_DefaultsToMobi(t *testing.T) {
 	assertCargoInt(t, parsed, 3, "majorVersion")
 	assertCargoInt(t, parsed, 5, "minorVersion")
 }
+
+// TestInsulinStatusReportsWholeUnits pins the reservoir scale.
+//
+// InsulinStatusResponse.currentInsulinAmount is whole units. Both decoders read
+// it straight through with no scaling (TandemKit's fetchReservoirStatus is
+// literally "Double(response.currentInsulinAmount)"), and the real captures in
+// TandemKit's PumpingSuspendedHistoryLogTests -- whose insulinAmount field is
+// documented as byte-identical to this one -- carry values like 31/150/180 for
+// a 200-unit cartridge.
+//
+// The handler used to multiply by 100, so a 137 U reservoir reached the driver
+// as 13699 U: not an error anywhere, just a reservoir reading two orders of
+// magnitude too large, which a host app would treat as a full cartridge that
+// never empties.
+func TestInsulinStatusReportsWholeUnits(t *testing.T) {
+	bridge := testBridge(t)
+
+	for _, units := range []float64{200, 137, 31, 0} {
+		pumpState := state.NewPumpState()
+		pumpState.SetReservoirLevel(units)
+
+		parsed := handleAndParse(t, bridge, NewInsulinStatusHandler(bridge), pumpState)
+		if parsed.MessageType != "InsulinStatusResponse" {
+			t.Fatalf("parsed back as %q", parsed.MessageType)
+		}
+		assertCargoInt(t, parsed, int64(units), "currentInsulinAmount")
+	}
+}
+
+// TestCurrentBasalStatusReportsMilliunits is the counterpart to the reservoir
+// check above: the basal rates on this message ARE scaled, by 1000, which is
+// what TandemKit's CurrentBasalStatusResponse divides by to get U/hr. The two
+// conventions sit next to each other in the same handler file, so a test that
+// pins only one of them invites "fixing" the other.
+func TestCurrentBasalStatusReportsMilliunits(t *testing.T) {
+	bridge := testBridge(t)
+
+	pumpState := state.NewPumpState()
+	pumpState.SetBasalState(&state.BasalState{CurrentRate: 0.85})
+
+	parsed := handleAndParse(t, bridge, NewCurrentBasalStatusHandler(bridge), pumpState)
+	if parsed.MessageType != "CurrentBasalStatusResponse" {
+		t.Fatalf("parsed back as %q", parsed.MessageType)
+	}
+	assertCargoInt(t, parsed, 850, "profileBasalRate")
+	assertCargoInt(t, parsed, 850, "currentBasalRate")
+}
+
+// TestControlIQIOBReportsMilliunits pins the other scaled field a driver reads
+// off the status messages: TandemKit documents ControlIQIOBResponse's
+// pumpDisplayedIOB as milliunits.
+func TestControlIQIOBReportsMilliunits(t *testing.T) {
+	bridge := testBridge(t)
+
+	pumpState := state.NewPumpState()
+	pumpState.Lock()
+	pumpState.IOB = 2.5
+	pumpState.Unlock()
+
+	parsed := handleAndParse(t, bridge, NewControlIQIOBHandler(bridge, "ControlIQIOBRequest"), pumpState)
+	if parsed.MessageType != "ControlIQIOBResponse" {
+		t.Fatalf("parsed back as %q", parsed.MessageType)
+	}
+	assertCargoInt(t, parsed, 2500, "mudaliarIOB")
+	assertCargoInt(t, parsed, 2500, "mudaliarTotalIOB")
+}
+
+// TestCurrentBatteryReportsPercent guards the remaining number on these
+// messages that is neither units nor milliunits: battery is a plain percentage
+// on both V1 and V2.
+func TestCurrentBatteryReportsPercent(t *testing.T) {
+	bridge := testBridge(t)
+
+	pumpState := state.NewPumpState()
+	pumpState.SetBatteryLevel(85)
+
+	for _, version := range []string{"V1", "V2"} {
+		parsed := handleAndParse(t, bridge, NewCurrentBatteryHandler(bridge, version), pumpState)
+		if parsed.MessageType != "CurrentBattery"+version+"Response" {
+			t.Fatalf("parsed back as %q", parsed.MessageType)
+		}
+		assertCargoInt(t, parsed, 85, "currentBatteryAbc")
+		assertCargoInt(t, parsed, 85, "currentBatteryIbc")
+	}
+}

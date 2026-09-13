@@ -68,6 +68,11 @@ type virtualMessage struct {
 	ManufacturerData string           `json:"manufacturer_data,omitempty"`
 	PairingState     PairingState     `json:"pairing_state,omitempty"`
 	Services         []virtualService `json:"services,omitempty"`
+	// ATTMTU is the ATT MTU in force, so a central knows the largest
+	// notification it can receive without having to negotiate one. Additive
+	// and optional: a v1 client that ignores it still works, since the
+	// emulator never sends a notification larger than the MTU it announces.
+	ATTMTU int `json:"att_mtu,omitempty"`
 }
 
 // VirtualOptions configures a VirtualTransport.
@@ -85,6 +90,10 @@ type VirtualOptions struct {
 	// (false) acknowledges immediately and dispatches asynchronously, which is
 	// how a real pump behaves.
 	AckAfterHandling bool
+	// ATTMTU is the ATT MTU the link reports and fragments to. Zero means
+	// DefaultATTMTU (23), which keeps the 20-byte notifications the emulator
+	// has always sent.
+	ATTMTU int
 }
 
 // VirtualTransport is a radio-free Transport: it speaks the virtual GATT link
@@ -117,6 +126,13 @@ type VirtualTransport struct {
 
 	pairingState    PairingState
 	pairingStateMtx sync.RWMutex
+
+	// attMTU is the ATT MTU the link reports and the pump fragments to. A real
+	// Mobi over iOS negotiates a large one, so most responses fit in a single
+	// notification; the default here is the 23-byte spec floor, which is the
+	// 20-byte-notification behavior this transport has always had.
+	attMTU    int
+	attMTUMtx sync.RWMutex
 
 	// radioOff models a pump whose BLE radio has gone away: the listener
 	// keeps running (so a harness can turn it back on) but every connection
@@ -153,10 +169,19 @@ func NewVirtual(opts VirtualOptions) (*VirtualTransport, error) {
 		peripheralID = derivePeripheralID(seed)
 	}
 
+	attMTU := opts.ATTMTU
+	if attMTU == 0 {
+		attMTU = DefaultATTMTU
+	}
+	if err := ValidateATTMTU(attMTU); err != nil {
+		return nil, fmt.Errorf("virtual transport: %w", err)
+	}
+
 	v := &VirtualTransport{
 		addr:             addr,
 		peripheralID:     peripheralID,
 		ackAfterHandling: opts.AckAfterHandling,
+		attMTU:           attMTU,
 		charData:         make(map[CharacteristicType][]byte),
 		extraCharData:    make(map[string][]byte),
 		pairingState:     PairingStateNotDiscoverable,
@@ -341,6 +366,7 @@ func (v *VirtualTransport) handleConn(conn net.Conn) {
 		ManufacturerData: hex.EncodeToString(ManufacturerData(state)),
 		PairingState:     state,
 		Services:         v.services,
+		ATTMTU:           v.ATTMTU(),
 	}); err != nil {
 		log.Warnf("pkg bluetooth; virtual transport failed to send hello: %v", err)
 		c.close()
@@ -711,6 +737,15 @@ func (v *VirtualTransport) Notify(charType CharacteristicType, data []byte) erro
 		return nil
 	}
 
+	// A notification larger than the link's MTU allows could never be
+	// delivered by a real stack, and silently letting one through here would
+	// let a fragmentation bug pass unnoticed on the virtual link and then fail
+	// against real hardware.
+	if maxBytes := MaxNotificationBytes(v.ATTMTU()); len(data) > maxBytes {
+		return fmt.Errorf("notification of %d bytes on %s exceeds the %d bytes an ATT MTU of %d allows",
+			len(data), charType, maxBytes, v.ATTMTU())
+	}
+
 	log.Debugf("pkg bluetooth; virtual transport sending notification on %s: %s", charType, hex.EncodeToString(data))
 	return c.send(virtualMessage{Type: "notify", Characteristic: uuid, Value: hex.EncodeToString(data)})
 }
@@ -756,6 +791,33 @@ func (v *VirtualTransport) GetPairingState() PairingState {
 	v.pairingStateMtx.RLock()
 	defer v.pairingStateMtx.RUnlock()
 	return v.pairingState
+}
+
+// ATTMTU returns the ATT MTU in force on this link.
+func (v *VirtualTransport) ATTMTU() int {
+	v.attMTUMtx.RLock()
+	defer v.attMTUMtx.RUnlock()
+	return v.attMTU
+}
+
+// SetATTMTU changes the ATT MTU.
+//
+// A real link only negotiates its MTU at connection time, so changing this
+// mid-connection is not something a real central would see. It is allowed
+// anyway, because the point of the control is letting a test switch between
+// fragmented and unfragmented delivery without rebuilding the rig; a test that
+// cares about the negotiation itself should set it before the central attaches.
+func (v *VirtualTransport) SetATTMTU(mtu int) error {
+	if err := ValidateATTMTU(mtu); err != nil {
+		return err
+	}
+
+	v.attMTUMtx.Lock()
+	v.attMTU = mtu
+	v.attMTUMtx.Unlock()
+
+	log.Infof("pkg bluetooth; virtual transport ATT MTU set to %d (%d-byte notifications)", mtu, MaxNotificationBytes(mtu))
+	return nil
 }
 
 // SetRadioEnabled turns the virtual radio on or off. Turning it off drops the

@@ -30,6 +30,11 @@ type PumpState struct {
 	PairingCode     string
 	IsAuthenticated bool
 
+	// pairingCodeObservers are notified after every pairing code change, so
+	// components holding their own copy of it (the pumpX2 bridge) stay in
+	// step no matter which API set it. See SetPairingCode.
+	pairingCodeObservers []func(string)
+
 	// LongTermKey is the JPAKE-derived secret from a completed full pairing
 	// (rounds 1a/1b/2/3/4). Real Tandem apps cache this on the phone and, on a
 	// later BLE reconnect, skip straight to a "quick pair" that only re-runs
@@ -405,15 +410,44 @@ func (ps *PumpState) ResetAuthentication() {
 	log.Info("Pump authentication reset")
 }
 
-// SetPairingCode updates the pairing code
+// SetPairingCode updates the pairing code and tells every registered observer.
+//
+// Every route that changes the pairing code goes through here -- the websocket
+// setPairingCode command, the harness's PUT/PATCH /api/state, and the CLI seed
+// at startup -- because the pumpX2 bridge keeps its own copy (it passes the
+// code to the cliparser subprocess as the JPAKE password) and must be told.
+// Only the websocket command used to tell it, so a code set through
+// /api/state changed what the pump reported but not what JPAKE actually
+// authenticated against, and pairing failed with the code the harness had just
+// set.
 func (ps *PumpState) SetPairingCode(code string) {
 	ps.mutex.Lock()
-	defer ps.mutex.Unlock()
-
 	ps.PairingCode = code
 	// A new pairing code means a new JPAKE password, so any previously cached
 	// long-term key is no longer valid for a quick-pair reconnect.
 	ps.LongTermKey = nil
+	observers := make([]func(string), len(ps.pairingCodeObservers))
+	copy(observers, ps.pairingCodeObservers)
+	ps.mutex.Unlock()
+
+	// Observers run outside the lock: they call into other components (the
+	// bridge), and holding the state lock across that is how deadlocks start.
+	for _, observe := range observers {
+		observe(code)
+	}
+}
+
+// OnPairingCodeChange registers a callback invoked, outside the state lock,
+// after every pairing code change. It is not called for the code the pump
+// starts with, so a caller that needs the initial value reads it directly.
+func (ps *PumpState) OnPairingCodeChange(observe func(code string)) {
+	if observe == nil {
+		return
+	}
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+
+	ps.pairingCodeObservers = append(ps.pairingCodeObservers, observe)
 }
 
 // GetLongTermKey returns the cached JPAKE long-term key, if any

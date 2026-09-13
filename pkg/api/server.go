@@ -26,9 +26,18 @@ const DefaultAddr = ":8080"
 type Server struct {
 	http.Handler
 
-	ble             bluetooth.Transport
-	uiDir           string
-	conn            *websocket.Conn
+	ble   bluetooth.Transport
+	uiDir string
+
+	// clients is every websocket currently connected. Events are broadcast to
+	// all of them and a reply to a command goes back to the socket that sent
+	// it, so the web UI, a harness and an ad-hoc debugging client can all be
+	// attached at once.
+	//
+	// This replaced a single shared *websocket.Conn whose reader cleared the
+	// field on ANY socket closing: opening a second client and closing it
+	// silently killed the first one's event stream.
+	clients         map[*websocket.Conn]*wsClient
 	mtx             sync.Mutex
 	settingsManager *settings.Manager
 
@@ -64,11 +73,62 @@ type BleEvent struct {
 	LongTermKey    string `json:"long_term_key,omitempty"`
 }
 
+// wsClient is one connected websocket. Its writeMtx serializes writes to that
+// socket, which gorilla/websocket requires and which a shared server-wide lock
+// would only accidentally provide.
+type wsClient struct {
+	conn     *websocket.Conn
+	writeMtx sync.Mutex
+}
+
+// send writes one already-marshaled frame to this client.
+func (c *wsClient) send(data []byte) error {
+	c.writeMtx.Lock()
+	defer c.writeMtx.Unlock()
+	return c.conn.WriteMessage(websocket.TextMessage, data)
+}
+
 // New creates a new API server
 func New(ble bluetooth.Transport) *Server {
 	return &Server{
-		ble: ble,
+		ble:     ble,
+		clients: make(map[*websocket.Conn]*wsClient),
 	}
+}
+
+// snapshotClients returns the currently connected clients, so a broadcast can
+// write without holding the server lock (a slow or wedged socket must not
+// block the emulator's message path).
+func (s *Server) snapshotClients() []*wsClient {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+
+	if len(s.clients) == 0 {
+		return nil
+	}
+	out := make([]*wsClient, 0, len(s.clients))
+	for _, c := range s.clients {
+		out = append(out, c)
+	}
+	return out
+}
+
+// broadcast sends data to every connected client.
+func (s *Server) broadcast(data []byte) {
+	for _, c := range s.snapshotClients() {
+		if err := c.send(data); err != nil {
+			log.Errorf("Failed to send websocket message: %v", err)
+		}
+	}
+}
+
+// removeClient drops conn from the client set. It is a no-op for a socket that
+// was already removed, and it never touches any other client -- which is the
+// whole point of the change away from a single shared connection.
+func (s *Server) removeClient(conn *websocket.Conn) {
+	s.mtx.Lock()
+	defer s.mtx.Unlock()
+	delete(s.clients, conn)
 }
 
 // SetUIDir sets the directory served at /ui/. When empty, the "ui" directory
@@ -123,24 +183,15 @@ func (s *Server) resolveUIDir() string {
 	return "ui"
 }
 
-// SendEvent sends a BLE event to connected websocket clients
+// SendEvent sends a BLE event to every connected websocket client.
 func (s *Server) SendEvent(event BleEvent) {
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-
-	if s.conn == nil {
-		return
-	}
-
 	data, err := json.Marshal(event)
 	if err != nil {
 		log.Errorf("Failed to marshal event: %v", err)
 		return
 	}
 
-	if err := s.conn.WriteMessage(websocket.TextMessage, data); err != nil {
-		log.Errorf("Failed to send websocket message: %v", err)
-	}
+	s.broadcast(data)
 }
 
 // SendWriteEvent sends a notification that data was written to a characteristic
@@ -251,61 +302,73 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	client := &wsClient{conn: ws}
+
 	s.mtx.Lock()
-	s.conn = ws
+	s.clients[ws] = client
+	count := len(s.clients)
 	s.mtx.Unlock()
 
-	// Send initial state
-	s.sendState()
+	log.Debugf("WebSocket client attached (%d connected)", count)
+
+	// Send initial state to the socket that just connected, not to everyone.
+	s.sendStateTo(client)
 
 	// Listen for messages
-	s.reader(ws)
+	s.reader(client)
 }
 
-func (s *Server) sendState() {
-	state := PumpState{
+// stateFrame marshals the current pump connection status.
+func (s *Server) stateFrame() ([]byte, error) {
+	return json.Marshal(PumpState{
 		Connected:       s.ble.IsConnected(),
 		Characteristics: make(map[string]string),
-	}
+	})
+}
 
-	data, err := json.Marshal(state)
+// sendState broadcasts the pump connection status to every client.
+func (s *Server) sendState() {
+	data, err := s.stateFrame()
 	if err != nil {
 		log.Errorf("Failed to marshal state: %v", err)
 		return
 	}
+	s.broadcast(data)
+}
 
-	s.mtx.Lock()
-	defer s.mtx.Unlock()
-
-	if s.conn != nil {
-		if err := s.conn.WriteMessage(websocket.TextMessage, data); err != nil {
-			log.Errorf("Failed to send state: %v", err)
-		}
+// sendStateTo answers one client, so a getState command replies to whoever
+// asked rather than to whichever socket happened to connect last.
+func (s *Server) sendStateTo(c *wsClient) {
+	data, err := s.stateFrame()
+	if err != nil {
+		log.Errorf("Failed to marshal state: %v", err)
+		return
+	}
+	if err := c.send(data); err != nil {
+		log.Errorf("Failed to send state: %v", err)
 	}
 }
 
-func (s *Server) reader(conn *websocket.Conn) {
+func (s *Server) reader(c *wsClient) {
 	defer func() {
-		s.mtx.Lock()
-		s.conn = nil
-		s.mtx.Unlock()
-		if err := conn.Close(); err != nil {
+		s.removeClient(c.conn)
+		if err := c.conn.Close(); err != nil {
 			log.Debugf("Error closing websocket: %v", err)
 		}
 	}()
 
 	for {
-		_, p, err := conn.ReadMessage()
+		_, p, err := c.conn.ReadMessage()
 		if err != nil {
 			log.Infof("WebSocket read error: %v", err)
 			return
 		}
 		log.Debugf("Received WebSocket message: %s", string(p))
-		s.handleCommand(p)
+		s.handleCommand(c, p)
 	}
 }
 
-func (s *Server) handleCommand(data []byte) {
+func (s *Server) handleCommand(c *wsClient, data []byte) {
 	var msg map[string]interface{}
 	if err := json.Unmarshal(data, &msg); err != nil {
 		log.Errorf("Failed to parse command: %v", err)
@@ -321,7 +384,7 @@ func (s *Server) handleCommand(data []byte) {
 	// Handle built-in commands
 	switch command {
 	case "getState":
-		s.sendState()
+		s.sendStateTo(c)
 		return
 	case "notify":
 		// Send a notification on a characteristic
