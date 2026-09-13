@@ -218,6 +218,15 @@ curl -X POST http://127.0.0.1:8080/api/faults \
 curl -X POST http://127.0.0.1:8080/api/faults \
   -d '{"kind":"disconnect","message":"BolusCalcDataSnapshotRequest","after":"partial_response","fragments_sent":2}'
 
+# Drop the second fragment of every multi-fragment response on CurrentStatus,
+# so the central sees a message that starts and never finishes (virtual only)
+curl -X POST http://127.0.0.1:8080/api/faults \
+  -d '{"kind":"drop_fragment","characteristic":"CurrentStatus","index":1,"every":true}'
+
+# Or thin the stream: lose every 5th notification fragment, wherever it falls
+curl -X POST http://127.0.0.1:8080/api/faults \
+  -d '{"kind":"drop_fragment","every_nth":5,"every":true}'
+
 # Refuse the next quick-pair reconnect even though a long-term key is cached,
 # forcing the client back into a full pairing
 curl -X POST http://127.0.0.1:8080/api/faults -d '{"kind":"reject_quick_pair"}'
@@ -234,16 +243,63 @@ curl -X DELETE http://127.0.0.1:8080/api/faults
 ```
 
 Fault fields: `kind` (required), `message`, `opcode`, `characteristic`, `count`
-(default 1), `every`, `delay_ms`, `error_code`, `after`, `fragments_sent`.
+(default 1), `every`, `delay_ms`, `error_code`, `after`, `fragments_sent`,
+`index`, `every_nth`.
 Radio faults are applied immediately rather than stored — "the radio is off" is
 a condition, not something that happens to the next message — and return `501`
 on a transport that cannot switch its radio (i.e. the real BLE one).
 
-**`error_response` caveat.** `ErrorResponse` (opcode 77) cannot be produced
-through cliparser: pumpX2 has no encodable `ErrorResponse` class, so the bytes
-have to be framed natively. The router calls the
-`handler.ErrorResponseEncoder` hook, which the native packet encoder fills in;
-until it does, an armed `error_response` fault behaves as a drop and says so in
+**`drop_fragment`.** The other fault kinds work in whole messages; this one
+works in single BLE notifications, which is the loss a real radio actually
+produces. Take either `index` — the fragment's position within its own message,
+so `0` is the first notification of every message and `1` the second — or
+`every_nth`, which drops every Nth fragment seen on the characteristic
+regardless of where message boundaries fall. It cannot be scoped by `message`
+or `opcode` (a fragment on the wire carries neither; such a request is refused
+with `400`), and it returns `501` on a transport that cannot filter
+notifications. Arming one restarts the fragment counting. The pump's own
+request log still records the response as fully sent — the loss happens below
+the router, which is exactly the asymmetry a driver has to cope with.
+
+**`error_response`.** `ErrorResponse` (opcode 77) cannot be produced through
+cliparser — pumpX2 has no encodable `ErrorResponse` class — so it is framed by
+the native encoder in `pkg/protocol` and sent on `CurrentStatus`, where the
+driver looks for it, whatever characteristic the rejected request arrived on.
+The cargo is `[requestCodeId][errorCodeId]`: the opcode of the request being
+rejected and the `error_code` the fault carries. Clearing
+`handler.ErrorResponseEncoder` makes the fault behave as a drop and say so in
 the emulator log and in the request log's `note` field, rather than letting a
-harness believe it exercised an error path it did not. Note also that a driver
-may treat an `ErrorResponse` on a control characteristic as no response at all.
+harness believe it exercised an error path it did not. Note that a driver may
+treat an `ErrorResponse` on a control characteristic as no response at all.
+
+### Signed responses
+
+Most `Control` responses — `SuspendPumpingResponse`, `InitiateBolusResponse`,
+`SetTempRateResponse`, `BolusPermissionResponse` and the rest of the set pumpX2
+marks `signed` — carry a 24-byte trailer: a little-endian `timeSinceReset`
+followed by an HMAC-SHA1 over every preceding byte of the message, keyed with
+the session key derived during JPAKE.
+
+These are now signed correctly. The cliparser subprocess cannot do it: its
+signing inputs arrive only through the environment, and it uses the raw ASCII
+bytes of `PUMP_AUTHENTICATION_KEY` as the HMAC key rather than decoding it, so a
+binary JPAKE-derived key cannot be handed to it at all — left alone it signs
+every signed message with the ASCII of its own `IGNORE_HMAC_SIGNATURE_EXCEPTION`
+placeholder, which no driver will accept. The router therefore re-signs: the
+cargo cliparser produced is kept verbatim, and only the trailer and the CRC are
+rebuilt, with the pump's real key and its current time since reset. Responses
+that are not signed go out exactly as cliparser encoded them, byte for byte.
+
+Which messages are signed comes from `pkg/protocol/signed_messages.go`, a table
+generated from TandemKit's `MessageProps` declarations. Regenerate it with:
+
+```bash
+go test ./pkg/protocol -run TestSignedMessageTableMatchesTandemKit -update
+```
+
+That test also runs as a check: with a TandemKit checkout present (beside this
+repo, or at `FAKETANDEM_TANDEMKIT_CORE`) it fails if the table and the catalog
+have drifted apart in either direction. A jar-gated test in `pkg/pumpx2`
+independently cross-checks the table against pumpX2 itself, by encoding the
+same message twice under different keys and seeing whether cliparser's output
+changes.
