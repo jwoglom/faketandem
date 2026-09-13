@@ -3,6 +3,8 @@ package harness
 import (
 	"encoding/hex"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -470,6 +472,116 @@ func TestNotifyFilterDropsIndividualFragments(t *testing.T) {
 	got := rig.client.CollectNotifications(3, 500*time.Millisecond)
 	if len(got) != 1 || got[0] != rig.fragments[2] {
 		t.Errorf("central received %v, want only the short third fragment", got)
+	}
+}
+
+func TestDropFragmentByIndexRemovesTheSamePositionOfEveryMessage(t *testing.T) {
+	rig := newFaultRig(t)
+
+	mustDo(t, rig.mux, http.MethodPost, "/api/faults",
+		`{"kind":"drop_fragment","characteristic":"CurrentStatus","index":1,"every":true}`)
+
+	// Two messages, so the position is shown to reset at each message
+	// boundary rather than running on across the stream.
+	for i := 0; i < 2; i++ {
+		if err := rig.route(t); err != nil {
+			t.Fatalf("RouteMessage %d: %v", i, err)
+		}
+	}
+
+	got := rig.client.CollectNotifications(6, time.Second)
+	want := []string{rig.fragments[0], rig.fragments[2], rig.fragments[0], rig.fragments[2]}
+	if len(got) != len(want) {
+		t.Fatalf("central received %d fragments, want %d (the middle one of each message dropped)", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("fragment %d = %s, want %s", i, got[i], want[i])
+		}
+	}
+
+	// The pump still believes it sent everything: fragment loss happens below
+	// the router, so the request log records a fully sent response.
+	if resp := rig.lastResponseEntry(t); resp.FragmentsSent != 3 || resp.Fault != "" {
+		t.Errorf("response entry = %+v, want the pump's own record of a complete send", resp)
+	}
+}
+
+func TestDropFragmentEveryNthThinsTheStream(t *testing.T) {
+	rig := newFaultRig(t)
+
+	mustDo(t, rig.mux, http.MethodPost, "/api/faults",
+		`{"kind":"drop_fragment","every_nth":2,"every":true}`)
+
+	for i := 0; i < 2; i++ {
+		if err := rig.route(t); err != nil {
+			t.Fatalf("RouteMessage %d: %v", i, err)
+		}
+	}
+
+	// Six fragments go out; every second one is lost, regardless of where the
+	// message boundaries fall.
+	got := rig.client.CollectNotifications(6, time.Second)
+	want := []string{rig.fragments[0], rig.fragments[2], rig.fragments[1]}
+	if len(got) != len(want) {
+		t.Fatalf("central received %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("fragment %d = %s, want %s", i, got[i], want[i])
+		}
+	}
+}
+
+func TestDropFragmentCountExpires(t *testing.T) {
+	rig := newFaultRig(t)
+
+	// No count and no every: the default "next one only".
+	mustDo(t, rig.mux, http.MethodPost, "/api/faults", `{"kind":"drop_fragment","index":0}`)
+
+	for i := 0; i < 2; i++ {
+		if err := rig.route(t); err != nil {
+			t.Fatalf("RouteMessage %d: %v", i, err)
+		}
+	}
+
+	got := rig.client.CollectNotifications(6, time.Second)
+	want := []string{
+		rig.fragments[1], rig.fragments[2],
+		rig.fragments[0], rig.fragments[1], rig.fragments[2],
+	}
+	if len(got) != len(want) {
+		t.Fatalf("central received %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("fragment %d = %s, want %s", i, got[i], want[i])
+		}
+	}
+
+	body := mustDo(t, rig.mux, http.MethodGet, "/api/faults", "")
+	if armed, ok := body["faults"].([]interface{}); !ok || len(armed) != 0 {
+		t.Errorf("the spent fault is still armed: %v", body["faults"])
+	}
+}
+
+func TestDropFragmentRejectsScopingItCannotHonor(t *testing.T) {
+	rig := newFaultRig(t)
+
+	// A fragment carries no message identity, so a message- or opcode-scoped
+	// drop_fragment must be refused rather than quietly applied to everything.
+	for _, body := range []string{
+		`{"kind":"drop_fragment","index":0,"message":"FaultProbeRequest"}`,
+		`{"kind":"drop_fragment","index":0,"opcode":61}`,
+		`{"kind":"drop_fragment"}`,
+		`{"kind":"drop_fragment","index":0,"every_nth":2}`,
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/api/faults", strings.NewReader(body))
+		rec := httptest.NewRecorder()
+		rig.mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("arming %s returned %d, want 400", body, rec.Code)
+		}
 	}
 }
 

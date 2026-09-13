@@ -49,12 +49,24 @@ func (h *Harness) armFault(w http.ResponseWriter, r *http.Request) {
 	case faults.KindRadioOff, faults.KindRadioOn:
 		h.applyRadioFault(w, f.Kind)
 		return
+	case faults.KindDropFragment:
+		if h.fragments == nil {
+			writeError(w, http.StatusNotImplemented,
+				"this transport cannot drop individual notification fragments (only the virtual transport can)")
+			return
+		}
 	}
 
 	armed, err := h.registry.Arm(f)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "%v", err)
 		return
+	}
+
+	if armed.Kind == faults.KindDropFragment {
+		// Count fragments from here, not from whatever went out earlier in the
+		// connection -- see FragmentDropper.Reset.
+		h.fragments.Reset()
 	}
 
 	log.Infof("harness: armed fault %d: kind=%s message=%q opcode=%d every=%v count=%d",
