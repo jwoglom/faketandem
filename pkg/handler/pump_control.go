@@ -141,7 +141,7 @@ func (h *SetTempRateHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState 
 	// percentages whenever one temp rate replaced another.
 	profileRate := pumpState.GetProfileBasalRate()
 	tempRate := profileRate * float64(percentage) / 100.0
-	tempStart := time.Now()
+	tempStart := pumpState.Now()
 	tempEnd := tempStart.Add(time.Duration(durationMinutes) * time.Minute)
 	tempRateID := pumpState.NextTempRateID()
 

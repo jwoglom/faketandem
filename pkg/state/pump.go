@@ -81,6 +81,24 @@ type PumpState struct {
 	// nextTempRateID backs NextTempRateID's monotonic allocator.
 	nextTempRateID int
 
+	// clock is the source of every "now" this state derives (see Clock). It
+	// has its own mutex so Now() can be called with the main state mutex
+	// already held, which the simulator does on every tick.
+	clock Clock
+	// pumpClockOffset skews the pump's own clock away from the clock's time.
+	// Every timestamp put on the wire in pump-epoch seconds is shifted by it,
+	// while internal durations (bolus progress, temp-rate expiry) are not --
+	// which is exactly how a real pump whose clock is set wrong behaves, and
+	// what makes a driver's pump-time drift handling testable.
+	pumpClockOffset time.Duration
+	clockMtx        sync.RWMutex
+
+	// BolusRateUnitsPerSecond is the speed the simulator delivers a bolus at.
+	// Real pumps deliver far more slowly than the 0.05 U/s default (a Tandem
+	// Mobi is roughly 1/28.7 U/s under 10 U), so a harness that wants driver
+	// timing behavior to match hardware sets this explicitly.
+	BolusRateUnitsPerSecond float64
+
 	mutex sync.RWMutex
 }
 
@@ -135,6 +153,18 @@ type BolusState struct {
 	// client attributed to carbs and to a correction, in units.
 	FoodVolume       float64
 	CorrectionVolume float64
+
+	// Stalled freezes delivery progress without ending the bolus: the pump
+	// still reports the bolus as in progress and still answers
+	// CurrentBolusStatus for it, but no further insulin goes in. It models a
+	// pump that has stopped making progress (occlusion detection pending, a
+	// paused delivery) and gives a harness a way to hold a bolus open for as
+	// long as a test needs.
+	Stalled bool
+	// StalledAt records when Stalled was set, so resuming can shift StartTime
+	// forward by the stall duration and keep delivered-volume arithmetic
+	// continuous.
+	StalledAt time.Time
 }
 
 // LastBolusRecord is the pump's record of the most recently finished bolus,
@@ -241,6 +271,7 @@ const (
 // NewPumpState creates a new pump state with default values
 func NewPumpState() *PumpState {
 	ps := newDefaultPumpState(time.Now())
+	ps.clock = RealClock{}
 	ps.applyAPIVersionOverride()
 	return ps
 }
@@ -276,7 +307,9 @@ func newDefaultPumpState(now time.Time) *PumpState {
 
 		ClosedLoopEnabled: false,
 		Weight:            70,
-		TotalDailyInsulin: 40,
+
+		BolusRateUnitsPerSecond: DefaultBolusRateUnitsPerSecond,
+		TotalDailyInsulin:       40,
 
 		IOB: 0.0,
 		TDD: 0.0,
@@ -326,9 +359,10 @@ func (ps *PumpState) UpdateTimeSinceReset() {
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
 
-	elapsed := time.Since(ps.StartTime)
+	now := ps.Now()
+	elapsed := now.Sub(ps.StartTime)
 	ps.TimeSinceReset = uint32(elapsed.Seconds())
-	ps.CurrentTime = time.Now()
+	ps.CurrentTime = now
 }
 
 // SetAuthenticated marks the pump as authenticated
@@ -484,10 +518,12 @@ func (ps *PumpState) StartBolusWithSource(units float64, bolusID uint32, sourceI
 	ps.Bolus.Active = true
 	ps.Bolus.UnitsTotal = units
 	ps.Bolus.UnitsDelivered = 0
-	ps.Bolus.StartTime = time.Now()
+	ps.Bolus.StartTime = ps.Now()
 	ps.Bolus.BolusID = bolusID
 	ps.Bolus.SourceID = sourceID
 	ps.Bolus.TypeBitmask = typeBitmask
+	ps.Bolus.Stalled = false
+	ps.Bolus.StalledAt = time.Time{}
 
 	// Keep the allocator ahead of any externally supplied ID so a later
 	// permission grant can never reissue one already in use.
@@ -576,13 +612,13 @@ func (ps *PumpState) AddHistoryLogEntryWithTypeID(typeID int, entryType string, 
 	ps.HistoryLog.mutex.Lock()
 	defer ps.HistoryLog.mutex.Unlock()
 
-	now := time.Now()
+	now := ps.Now()
 	entry := HistoryLogEntry{
 		Sequence:  ps.HistoryLog.NextSequence,
 		TypeID:    typeID,
 		Type:      entryType,
 		Timestamp: now,
-		PumpTime:  PumpTimeSeconds(now),
+		PumpTime:  ps.PumpTimeFor(now),
 		Data:      data,
 	}
 	ps.HistoryLog.Entries = append(ps.HistoryLog.Entries, entry)
@@ -679,7 +715,7 @@ func (ps *PumpState) RecordLastBolus(record LastBolusRecord) {
 
 	record.Valid = true
 	if record.EndTime.IsZero() {
-		record.EndTime = time.Now()
+		record.EndTime = ps.Now()
 	}
 	record.SecondsSinceReset = ps.TimeSinceReset
 	ps.LastBolus = &record
