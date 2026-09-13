@@ -2,6 +2,7 @@ package handler
 
 import (
 	"github.com/jwoglom/faketandem/pkg/bluetooth"
+	"github.com/jwoglom/faketandem/pkg/protocol"
 	"github.com/jwoglom/faketandem/pkg/pumpx2"
 	"github.com/jwoglom/faketandem/pkg/state"
 )
@@ -22,6 +23,21 @@ type MessageHandler interface {
 type Response struct {
 	// Response message to send (if any)
 	ResponseMessage *pumpx2.EncodedMessage
+
+	// NativeResponse is a response built by the Go encoder in pkg/protocol
+	// instead of by the pumpX2 cliparser, for messages cliparser cannot encode
+	// (HistoryLogStreamResponse, ErrorResponse, AlarmStatusResponse). It carries
+	// its own characteristic, so it is sent there regardless of Characteristic
+	// below. A handler may set this instead of, or in addition to,
+	// ResponseMessage.
+	NativeResponse *protocol.NativeMessage
+
+	// NativeNotifications are further natively-encoded messages to notify after
+	// the main response has gone out, in order. This is how a handler answers a
+	// request and then streams: HistoryLogRequest replies with a
+	// HistoryLogResponse on CURRENT_STATUS and puts the
+	// HistoryLogStreamResponse messages here.
+	NativeNotifications []*protocol.NativeMessage
 
 	// Characteristic to send on (defaults to same as request)
 	Characteristic bluetooth.CharacteristicType

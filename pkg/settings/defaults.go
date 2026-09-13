@@ -157,8 +157,12 @@ func registerQualifyingEventDefaults(manager *Manager) {
 
 	// AlarmStatusResponse's real "data" constructor takes an AlarmResponseType...
 	// varargs enum array, which cliparser cannot construct from JSON at all (no
-	// enum support) -- no 1-param JSON input can ever succeed. Fall back to the
-	// no-arg constructor (empty/zeroed cargo).
+	// enum support) -- no 1-param JSON input can ever succeed, and the no-arg
+	// fallback emits a zero-length cargo where the driver expects an eight-byte
+	// bitmask. AlarmStatusRequest is therefore served by AlarmStatusHandler,
+	// which builds the response with the native encoder from
+	// PumpState.AlarmBitmask; this entry is kept only so the settings API still
+	// knows the message name.
 	registerConstant(manager, "AlarmStatusRequest", map[string]interface{}{})
 
 	// LoadStatusResponse has two real "data" constructors with the same 3-param

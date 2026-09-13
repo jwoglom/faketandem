@@ -121,7 +121,10 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "HomeScreenMirrorRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMStatusRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "AlertStatusRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "AlarmStatusRequest", true))
+	// AlarmStatusRequest gets a dedicated handler rather than a static one:
+	// cliparser cannot construct AlarmStatusResponse at all (see
+	// alarm_status.go), so this one is built natively from PumpState.
+	r.RegisterHandler(NewAlarmStatusHandler())
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "LoadStatusRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ProfileStatusRequest", true))
 	r.RegisterHandler(NewLastBolusStatusHandler(r.bridge, "LastBolusStatusV2Request"))
@@ -336,11 +339,28 @@ func (r *Router) sendResponse(requestCharType bluetooth.CharacteristicType, resp
 		}
 	}
 
+	// Send a natively-encoded response, if the handler built one. It carries
+	// its own characteristic (pkg/protocol pins each message to the
+	// characteristic pumpX2 declares for it), so charType is not consulted.
+	if response.NativeResponse != nil {
+		if err := r.SendNative(response.NativeResponse); err != nil {
+			return fmt.Errorf("failed to send native response: %w", err)
+		}
+	}
+
 	// Send notifications
 	for _, notification := range response.Notifications {
 		if err := r.sendMessage(notification.Characteristic, notification.Message); err != nil {
 			log.Errorf("Failed to send notification on %s: %v", notification.Characteristic, err)
 			// Continue with other notifications
+		}
+	}
+
+	// Send natively-encoded follow-up notifications (history log streams).
+	for _, native := range response.NativeNotifications {
+		if err := r.SendNative(native); err != nil {
+			log.Errorf("Failed to send native notification %s: %v", native.MessageType, err)
+			// Continue with the rest of the stream.
 		}
 	}
 
@@ -374,6 +394,53 @@ func (r *Router) sendMessage(charType bluetooth.CharacteristicType, msg *pumpx2.
 	}
 
 	return nil
+}
+
+// SendNative notifies a message built by the Go encoder in pkg/protocol,
+// bypassing the pumpX2 cliparser entirely. This is the escape hatch for
+// messages cliparser cannot encode and for fault injection that needs to put
+// specific bytes on a characteristic.
+func (r *Router) SendNative(msg *protocol.NativeMessage) error {
+	if msg == nil {
+		return nil
+	}
+
+	log.Infof("Sending native %s on %s: txID=%d, %d packet(s)",
+		msg.MessageType, msg.Characteristic, msg.TxID, len(msg.Fragments))
+
+	for i, fragment := range msg.Fragments {
+		protocol.LogPacket("TX", msg.Characteristic, fragment)
+		if err := r.ble.Notify(msg.Characteristic, fragment); err != nil {
+			return fmt.Errorf("failed to send %s fragment %d: %w", msg.MessageType, i, err)
+		}
+	}
+
+	return nil
+}
+
+// SendErrorResponse sends the ErrorResponse a real pump returns in place of the
+// response to a request it rejects: opcode 77 with a two-byte cargo of the
+// rejected request's opcode and a pumpX2 error code.
+//
+// charType is the characteristic to notify on; pass bluetooth.CharCurrentStatus
+// for the normal case, which is where the driver looks for it. The response is
+// left unsigned so it fits one fragment, matching how the driver reads it.
+//
+// Note that TandemKit only logs an ErrorResponse and does not release the
+// pending write it answers, so injecting one makes the driver stall until its
+// 30-second timeout rather than fail fast. That is a driver conformance gap,
+// not a bug in this path.
+func (r *Router) SendErrorResponse(charType bluetooth.CharacteristicType, txID, requestOpcode, errorCode uint8) error {
+	msg, err := protocol.BuildErrorResponse(txID, requestOpcode, errorCode, protocol.ErrorResponseOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to build ErrorResponse: %w", err)
+	}
+	msg.Characteristic = charType
+
+	log.Warnf("Sending ErrorResponse on %s: txID=%d, requestOpcode=%d, errorCode=%d",
+		charType, txID, requestOpcode, errorCode)
+
+	return r.SendNative(msg)
 }
 
 // applyStateChange applies a state change
