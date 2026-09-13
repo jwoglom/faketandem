@@ -207,7 +207,7 @@ func TestAppendHistory_ExplicitPumpTimeIsPreserved(t *testing.T) {
 	if entry.PumpTime != 446158750 {
 		t.Errorf("PumpTime = %d, want 446158750", entry.PumpTime)
 	}
-	if want := PumpTimeToWallClock(446158750); !entry.Timestamp.Equal(want) {
+	if want := ps.WallClockForPumpTime(446158750); !entry.Timestamp.Equal(want) {
 		t.Errorf("Timestamp = %v, want %v", entry.Timestamp, want)
 	}
 }

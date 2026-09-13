@@ -3,6 +3,7 @@ package harness
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/jwoglom/faketandem/pkg/state"
@@ -28,7 +29,25 @@ type clockBody struct {
 	// PumpOffsetSeconds skews the pump's own clock away from Now. It applies
 	// in both modes: a pump whose clock is 8 s fast is a real scenario that
 	// has nothing to do with whether the harness is stepping time.
+	//
+	// It is a *skew* only. The pump's local-time convention is not a skew and
+	// is not expressed here -- see PumpTimeZone.
 	PumpOffsetSeconds float64 `json:"pump_offset_seconds"`
+	// PumpTimeZone is the IANA zone the pump keeps its clock in ("America/New_York").
+	//
+	// A Tandem pump holds local time with no zone attached, and every consumer
+	// decodes its pump-epoch seconds on that assumption, so this is what the
+	// wire timestamps are encoded in. It defaults to the host's zone (or
+	// -pump-timezone) and a PUT can move the pump to any zone, which is how a
+	// test reproduces a traveling pump or a DST boundary. "UTC" turns the
+	// convention off.
+	PumpTimeZone string `json:"pump_timezone"`
+	// PumpTimeZoneOffsetSeconds is that zone's UTC offset in force at PumpNow,
+	// read-only. It is the quantity a decoder subtracts back out, so a test
+	// never has to work out which side of a DST transition the pump is on:
+	//
+	//	unix = pump_time_seconds + 1199145600 - pump_timezone_offset_seconds - pump_offset_seconds
+	PumpTimeZoneOffsetSeconds int `json:"pump_timezone_offset_seconds"`
 	// Frozen stops a manual clock where it is.
 	Frozen bool `json:"frozen"`
 	// PumpNow is the pump's own reading (Now plus the skew), read-only.
@@ -107,6 +126,13 @@ func (h *Harness) applyClock(body clockBody) error {
 		return fmt.Errorf("unknown clock mode %q (expected %q or %q)", body.Mode, ClockModeReal, ClockModeManual)
 	}
 
+	if zone := strings.TrimSpace(body.PumpTimeZone); zone != "" {
+		loc, err := time.LoadLocation(zone)
+		if err != nil {
+			return fmt.Errorf("unknown pump_timezone %q: %w", zone, err)
+		}
+		h.pumpState.SetPumpTimeZone(loc)
+	}
 	h.pumpState.SetPumpClockOffset(secondsToDuration(body.PumpOffsetSeconds))
 	// Refresh the derived uptime counter so a GET right after a PUT is
 	// consistent with the new clock.
@@ -188,13 +214,16 @@ func (h *Harness) clockSnapshot() clockBody {
 		frozen = manual.Frozen()
 	}
 
+	pumpNow := h.pumpState.PumpNow()
 	return clockBody{
-		Mode:              mode,
-		Now:               h.pumpState.Now().UTC().Format(time.RFC3339Nano),
-		PumpOffsetSeconds: h.pumpState.GetPumpClockOffset().Seconds(),
-		Frozen:            frozen,
-		PumpNow:           h.pumpState.PumpNow().UTC().Format(time.RFC3339Nano),
-		PumpTimeSeconds:   h.pumpState.PumpTimeNow(),
-		TimeSinceReset:    h.pumpState.GetTimeSinceReset(),
+		Mode:                      mode,
+		Now:                       h.pumpState.Now().UTC().Format(time.RFC3339Nano),
+		PumpOffsetSeconds:         h.pumpState.GetPumpClockOffset().Seconds(),
+		PumpTimeZone:              h.pumpState.GetPumpTimeZone().String(),
+		PumpTimeZoneOffsetSeconds: h.pumpState.PumpTimeZoneOffsetSeconds(pumpNow),
+		Frozen:                    frozen,
+		PumpNow:                   pumpNow.UTC().Format(time.RFC3339Nano),
+		PumpTimeSeconds:           h.pumpState.PumpTimeNow(),
+		TimeSinceReset:            h.pumpState.GetTimeSinceReset(),
 	}
 }

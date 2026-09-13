@@ -188,11 +188,20 @@ func TestClockPutSwitchesToManualAndSkews(t *testing.T) {
 	if got := body["pump_now"].(string); !strings.HasPrefix(got, "2024-03-05T12:00:08") {
 		t.Errorf("pump_now = %q, want now plus the 8 s skew", got)
 	}
-	if got, want := uint32(body["pump_time_seconds"].(float64)), state.PumpTimeSeconds(testInstant)+8; got != want {
-		t.Errorf("pump_time_seconds = %d, want %d", got, want)
+	// The wire value is local time in the pump's zone, so it is not
+	// PumpTimeSeconds (which is UTC) unless the pump is in UTC.
+	wantWire := state.PumpTimeSecondsIn(testInstant, ps.GetPumpTimeZone()) + 8
+	if got := uint32(body["pump_time_seconds"].(float64)); got != wantWire {
+		t.Errorf("pump_time_seconds = %d, want %d", got, wantWire)
 	}
-	if got := ps.PumpTimeNow(); got != state.PumpTimeSeconds(testInstant)+8 {
+	if got := ps.PumpTimeNow(); got != wantWire {
 		t.Errorf("the pump state itself reports %d", got)
+	}
+	if got, want := body["pump_timezone"], ps.GetPumpTimeZone().String(); got != want {
+		t.Errorf("pump_timezone = %v, want %q", got, want)
+	}
+	if got, want := int(body["pump_timezone_offset_seconds"].(float64)), ps.PumpTimeZoneOffsetSeconds(ps.PumpNow()); got != want {
+		t.Errorf("pump_timezone_offset_seconds = %d, want %d", got, want)
 	}
 
 	// A frozen clock stands still between reads.
@@ -678,8 +687,8 @@ func TestHistoryAppendBackdates(t *testing.T) {
 	if !entries[0].Timestamp.Equal(want) {
 		t.Errorf("record time = %v, want the backdated %v", entries[0].Timestamp, want)
 	}
-	if entries[0].PumpTime != state.PumpTimeSeconds(want) {
-		t.Errorf("record pump time = %d, want %d", entries[0].PumpTime, state.PumpTimeSeconds(want))
+	if wantWire := ps.PumpTimeFor(want); entries[0].PumpTime != wantWire {
+		t.Errorf("record pump time = %d, want %d", entries[0].PumpTime, wantWire)
 	}
 
 	if code, _ := do(t, mux, http.MethodPost, "/api/state/history/append", `{}`); code != http.StatusBadRequest {
