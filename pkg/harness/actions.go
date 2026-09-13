@@ -233,62 +233,31 @@ func (h *Harness) actionBolusEnd(w http.ResponseWriter, r *http.Request, endReas
 		return
 	}
 
-	h.pumpState.Lock()
-	if !h.pumpState.Bolus.Active {
-		h.pumpState.Unlock()
+	// EndBolus settles the delivered volume (the full request for a completion,
+	// what went in so far for an abort, or the explicit volume this request
+	// named), takes the difference out of the reservoir, and writes both halves
+	// of the ending under one lock -- so this cannot race the simulator
+	// finishing the same bolus into a second BolusCompleted record.
+	record, ended := h.pumpState.EndBolus(endReason, body.DeliveredUnits)
+	if !ended {
 		writeError(w, http.StatusConflict, "no bolus is in progress")
 		return
 	}
 
-	bolus := *h.pumpState.Bolus
-	delivered := bolus.UnitsDelivered
-	if endReason == state.BolusEndReasonCompleted {
-		delivered = bolus.UnitsTotal
-	}
-	if body.DeliveredUnits != nil {
-		delivered = *body.DeliveredUnits
-	}
-
-	// Account for the insulin this end actually puts in beyond what the
-	// simulator had already counted.
-	if extra := delivered - bolus.UnitsDelivered; extra > 0 {
-		h.pumpState.Reservoir.CurrentUnits -= extra
-		if h.pumpState.Reservoir.CurrentUnits < 0 {
-			h.pumpState.Reservoir.CurrentUnits = 0
-		}
-		h.pumpState.IOB += extra
-		h.pumpState.TDD += extra
-	}
-
-	h.pumpState.Bolus.UnitsDelivered = delivered
-	h.pumpState.Bolus.Active = false
-	h.pumpState.Bolus.Stalled = false
-	h.pumpState.Unlock()
-
-	h.pumpState.RecordLastBolus(state.LastBolusRecord{
-		BolusID:        bolus.BolusID,
-		RequestedUnits: bolus.UnitsTotal,
-		DeliveredUnits: delivered,
-		SourceID:       bolus.SourceID,
-		TypeBitmask:    bolus.TypeBitmask,
-		EndReasonID:    endReason,
-	})
-	h.pumpState.RecordBolusCompleted(bolus.BolusID, delivered, bolus.UnitsTotal, endReason)
-
 	if n := h.notifier(); n != nil {
 		if endReason == state.BolusEndReasonCompleted {
 			h.emit("bolus complete", func() error {
-				return n.NotifyBolusComplete(bolus.BolusID, delivered, bolus.UnitsTotal)
+				return n.NotifyBolusComplete(record.BolusID, record.DeliveredUnits, record.RequestedUnits)
 			})
 		} else {
 			h.emit("bolus canceled", func() error {
-				return n.NotifyBolusCanceled(bolus.BolusID, delivered, bolus.UnitsTotal)
+				return n.NotifyBolusCanceled(record.BolusID, record.DeliveredUnits, record.RequestedUnits)
 			})
 		}
 	}
 
 	log.Infof("harness: bolus %d ended (reason %d) with %.3f of %.3f units delivered",
-		bolus.BolusID, endReason, delivered, bolus.UnitsTotal)
+		record.BolusID, endReason, record.DeliveredUnits, record.RequestedUnits)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"state": h.Snapshot()})
 }
 
@@ -336,9 +305,15 @@ func (h *Harness) actionTempBasalStart(w http.ResponseWriter, r *http.Request) {
 	}
 
 	start := h.pumpState.Now()
-	tempRateID := h.pumpState.NextTempRateID()
 	oldRate := h.pumpState.GetBasalRate()
 
+	// A temp rate started while another is running replaces it, and the one it
+	// replaces ends HERE -- at the replacement instant, with its own
+	// TempRateCompleted record written before the new rate's activation, so a
+	// timeline can close it instead of leaving it open forever.
+	h.stopTempRate(start)
+
+	tempRateID := h.pumpState.NextTempRateID()
 	basal := &state.BasalState{
 		CurrentRate:      profileRate,
 		TempBasalActive:  true,
@@ -372,34 +347,33 @@ func (h *Harness) actionTempBasalStop(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	temp := h.pumpState.GetTempRate()
-	if !temp.Active {
+	temp, ok := h.stopTempRate(h.pumpState.Now())
+	if !ok {
 		writeError(w, http.StatusConflict, "no temp rate is running")
 		return
 	}
 
-	profileRate := h.pumpState.GetProfileBasalRate()
-	h.stopTempRate(profileRate, temp)
-
-	log.Infof("harness: temp rate %d stopped, back to profile %.3f U/hr", temp.TempRateID, profileRate)
+	log.Infof("harness: temp rate %d stopped, back to profile %.3f U/hr",
+		temp.TempRateID, h.pumpState.GetProfileBasalRate())
 	writeJSON(w, http.StatusOK, map[string]interface{}{"state": h.Snapshot()})
 }
 
-// stopTempRate clears a running temp rate and emits its history record and
-// qualifying event. Shared by the stop action and by a suspend.
+// stopTempRate ends a running temp rate at `when` and emits the basal-change
+// qualifying event for it. Shared by the stop action and by a temp rate that
+// replaces another; a suspend ends its temp rate through SuspendDelivery.
 //
-// The whole snapshot goes in rather than just the old rate, because the
-// TempRateCompleted record has to name the temp rate id it closes and report
-// how much of the programmed duration was left -- which a bare rate cannot say.
-func (h *Harness) stopTempRate(profileRate float64, temp state.TempRateSnapshot) {
-	h.pumpState.SetBasalState(&state.BasalState{
-		CurrentRate:     profileRate,
-		TempBasalActive: false,
-	})
-	h.pumpState.RecordTempRateCompleted(temp, profileRate, h.pumpState.Now())
+// PumpState.EndTempRate writes the one TempRateCompleted record, naming the
+// temp rate id it closes and how much of the programmed duration was left.
+// ok is false when no temp rate was running.
+func (h *Harness) stopTempRate(when time.Time) (state.TempRateSnapshot, bool) {
+	temp, profileRate, ok := h.pumpState.EndTempRate(when)
+	if !ok {
+		return temp, false
+	}
 	if n := h.notifier(); n != nil {
 		h.emit("basal change", func() error { return n.NotifyBasalRateChange(temp.Rate, profileRate, false) })
 	}
+	return temp, true
 }
 
 // ---------------------------------------------------------------------------
@@ -443,59 +417,41 @@ func (h *Harness) actionSuspend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Stop the bolus first: its end is caused by the suspend, so it must be
-	// recorded before the suspend itself.
-	h.stopBolusForSuspend()
-
-	if temp := h.pumpState.GetTempRate(); temp.Active {
-		h.stopTempRate(h.pumpState.GetProfileBasalRate(), temp)
+	// One transition: SuspendDelivery ends an in-progress bolus and any running
+	// temp rate -- each with its own record, written before the
+	// PumpingSuspended record that caused them -- and is the same call the
+	// protocol path makes, so a pump-initiated stop and a driver-commanded one
+	// leave identical logs.
+	outcome := h.pumpState.SuspendDelivery(reason)
+	if !outcome.Changed {
+		writeError(w, http.StatusConflict, "delivery is already suspended")
+		return
 	}
-
-	h.pumpState.SetPumpingSuspendedWithReason(true, reason)
-	h.pumpState.RecordPumpingSuspended(reason)
 
 	if reason != SuspendReasonUser {
 		h.raiseSuspendAlarm(reason, body.Message)
 	}
 
 	if n := h.notifier(); n != nil {
+		if outcome.Bolus != nil {
+			bolus := outcome.Bolus
+			h.emit("bolus canceled", func() error {
+				return n.NotifyBolusCanceled(bolus.BolusID, bolus.DeliveredUnits, bolus.RequestedUnits)
+			})
+			log.Infof("harness: suspend stopped bolus %d after %.3f of %.3f units",
+				bolus.BolusID, bolus.DeliveredUnits, bolus.RequestedUnits)
+		}
+		if outcome.TempRate != nil {
+			temp := outcome.TempRate
+			h.emit("basal change", func() error {
+				return n.NotifyBasalRateChange(temp.Rate, outcome.ProfileRate, false)
+			})
+		}
 		h.emit("pump suspend", func() error { return n.NotifyPumpSuspended(reason) })
 	}
 
 	log.Infof("harness: pump-initiated suspend (%s)", reason)
 	writeJSON(w, http.StatusOK, map[string]interface{}{"state": h.Snapshot()})
-}
-
-// stopBolusForSuspend ends an in-progress bolus because delivery stopped,
-// recording the partial delivery a driver will reconcile against.
-func (h *Harness) stopBolusForSuspend() {
-	h.pumpState.Lock()
-	if !h.pumpState.Bolus.Active {
-		h.pumpState.Unlock()
-		return
-	}
-	bolus := *h.pumpState.Bolus
-	h.pumpState.Bolus.Active = false
-	h.pumpState.Bolus.Stalled = false
-	h.pumpState.Unlock()
-
-	h.pumpState.RecordLastBolus(state.LastBolusRecord{
-		BolusID:        bolus.BolusID,
-		RequestedUnits: bolus.UnitsTotal,
-		DeliveredUnits: bolus.UnitsDelivered,
-		SourceID:       bolus.SourceID,
-		TypeBitmask:    bolus.TypeBitmask,
-		EndReasonID:    state.BolusEndReasonStopped,
-	})
-	h.pumpState.RecordBolusCompleted(bolus.BolusID, bolus.UnitsDelivered, bolus.UnitsTotal, state.BolusEndReasonStopped)
-
-	if n := h.notifier(); n != nil {
-		h.emit("bolus canceled", func() error {
-			return n.NotifyBolusCanceled(bolus.BolusID, bolus.UnitsDelivered, bolus.UnitsTotal)
-		})
-	}
-	log.Infof("harness: suspend stopped bolus %d after %.3f of %.3f units",
-		bolus.BolusID, bolus.UnitsDelivered, bolus.UnitsTotal)
 }
 
 // raiseSuspendAlarm records the alarm behind an alarm-driven stop, so
@@ -566,8 +522,10 @@ func (h *Harness) actionResume(w http.ResponseWriter, r *http.Request) {
 		h.clearAlerts()
 	}
 
-	h.pumpState.SetPumpingSuspendedWithReason(false, "")
-	h.pumpState.RecordPumpingResumed()
+	if !h.pumpState.ResumeDelivery() {
+		writeError(w, http.StatusConflict, "delivery is not suspended")
+		return
+	}
 
 	if n := h.notifier(); n != nil {
 		h.emit("pump resume", func() error { return n.NotifyPumpResumed() })

@@ -133,6 +133,10 @@ func (s *Simulator) update() {
 			completed.BolusID, completed.DeliveredUnits, completed.RequestedUnits, completed.EndReasonID)
 	}
 
+	// End a temp rate whose time is up before delivering any basal, so the
+	// insulin for this interval goes in at the rate that was actually running.
+	s.expireTempRate()
+
 	// Update basal delivery
 	s.updateBasalDelivery(elapsed)
 
@@ -233,6 +237,36 @@ func (s *Simulator) updateBolusDelivery() *LastBolusRecord {
 	return nil
 }
 
+// expireTempRate ends a temp rate whose programmed duration has run out.
+//
+// PumpState.EndTempRate writes the one TempRateCompleted record, stamped at the
+// programmed end rather than at the tick that noticed it: a coarse tick must
+// not move a temp rate's recorded end second. It reports false when something
+// else -- a driver's StopTempRate, a replacement temp rate, a suspend -- ended
+// this temp rate first, in which case that path already wrote the record and
+// this tick writes nothing.
+func (s *Simulator) expireTempRate() {
+	temp := s.pumpState.GetTempRate()
+	if !temp.Active || !s.pumpState.Now().After(temp.EndTime) {
+		return
+	}
+
+	ended, profileRate, ok := s.pumpState.EndTempRate(temp.EndTime)
+	if !ok {
+		return
+	}
+	log.Info("Temp basal expired, returning to normal basal rate")
+
+	s.mutex.Lock()
+	notifier := s.eventNotifier
+	s.mutex.Unlock()
+	if notifier != nil {
+		if err := notifier.NotifyBasalRateChange(ended.Rate, profileRate, false); err != nil {
+			log.Warnf("Failed to notify temp rate expired: %v", err)
+		}
+	}
+}
+
 // updateBasalDelivery simulates basal insulin delivery over elapsed pump time.
 func (s *Simulator) updateBasalDelivery(elapsed time.Duration) {
 	s.pumpState.mutex.Lock()
@@ -242,32 +276,6 @@ func (s *Simulator) updateBasalDelivery(elapsed time.Duration) {
 	basalRate := s.pumpState.Basal.CurrentRate
 	if s.pumpState.Basal.TempBasalActive {
 		basalRate = s.pumpState.Basal.TempBasalRate
-
-		// Check if temp basal has expired
-		if s.pumpState.Now().After(s.pumpState.Basal.TempBasalEnd) {
-			log.Info("Temp basal expired, returning to normal basal rate")
-			oldRate := s.pumpState.Basal.TempBasalRate
-			expired := TempRateSnapshot{
-				Active:     true,
-				Percent:    s.pumpState.Basal.TempBasalPercent,
-				Rate:       oldRate,
-				StartTime:  s.pumpState.Basal.TempBasalStart,
-				EndTime:    s.pumpState.Basal.TempBasalEnd,
-				TempRateID: s.pumpState.Basal.TempRateID,
-			}
-			s.pumpState.Basal.TempBasalActive = false
-			basalRate = s.pumpState.Basal.CurrentRate
-
-			// Stamped at the programmed end, not at the tick that noticed it:
-			// a coarse tick must not move a temp rate's recorded end second.
-			s.pumpState.RecordTempRateCompleted(expired, basalRate, expired.EndTime)
-
-			if s.eventNotifier != nil {
-				if err := s.eventNotifier.NotifyBasalRateChange(oldRate, basalRate, false); err != nil {
-					log.Warnf("Failed to notify temp rate expired: %v", err)
-				}
-			}
-		}
 	}
 
 	// A suspended pump delivers no basal at all.
