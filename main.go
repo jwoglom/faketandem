@@ -108,8 +108,14 @@ func main() {
 	log.Infof("Initial state: reservoir=%.1f units, battery=%d%%, basal rate=%.2f U/hr",
 		pumpState.GetReservoirLevel(), pumpState.GetBatteryLevel(), pumpState.GetBasalRate())
 
-	// Set pairing code in bridge
+	// Keep the pumpX2 bridge's copy of the pairing code in step with pump
+	// state, whichever API changes it: the websocket setPairingCode command,
+	// the harness's PUT/PATCH /api/state, or anything else that reaches
+	// PumpState.SetPairingCode. The bridge hands the code to the cliparser
+	// subprocess as the JPAKE password, so a stale copy means pairing fails
+	// against the code the emulator claims to be using.
 	bridge.SetPairingCode(pumpState.GetPairingCode())
+	pumpState.OnPairingCodeChange(bridge.SetPairingCode)
 
 	if len(cfg.JPAKELongTermKey) > 0 {
 		pumpState.SetLongTermKey(cfg.JPAKELongTermKey)
@@ -222,7 +228,7 @@ func main() {
 	})
 
 	// Set up custom command handler for websocket commands
-	configureWebsocketCommands(server, ble, bridge, pumpState)
+	configureWebsocketCommands(server, ble, pumpState)
 
 	log.Info("Transport initialized, waiting for connections...")
 	log.Infof("Starting API server on %s", *apiAddr)
@@ -309,7 +315,7 @@ func configureConnectionHandlers(ble bluetooth.Transport, server *api.Server, ro
 	})
 }
 
-func configureWebsocketCommands(server *api.Server, ble bluetooth.Transport, bridge *pumpx2.Bridge, pumpState *state.PumpState) {
+func configureWebsocketCommands(server *api.Server, ble bluetooth.Transport, pumpState *state.PumpState) {
 	server.SetCommandHandler(func(command string, params map[string]interface{}) {
 		log.Infof("Received command from websocket: %s, params: %v", command, params)
 		switch command {
@@ -321,9 +327,10 @@ func configureWebsocketCommands(server *api.Server, ble bluetooth.Transport, bri
 				log.Warn("Pairing code missing from setPairingCode command")
 				return
 			}
+			// The bridge is updated by the observer main() registered on
+			// PumpState, so every route that sets the code gets it.
 			pumpState.SetPairingCode(pairingCode)
 			pumpState.ResetAuthentication()
-			bridge.SetPairingCode(pairingCode)
 			server.SendPairingState(pumpState.GetPairingCode(), pumpState.IsAuthenticated, pumpState.GetLongTermKey())
 		case "resetPairing":
 			pumpState.ResetAuthentication()

@@ -842,3 +842,47 @@ func assertHasBit(t *testing.T, bits []uint32, want uint32, name string) {
 }
 
 func itoa(i int) string { return strconv.Itoa(i) }
+
+// TestPairingCodeUpdateReachesObservers is the regression this covers: only the
+// websocket setPairingCode command told the pumpX2 bridge about a new pairing
+// code, so a code set through PUT/PATCH /api/state changed what the pump
+// reported but not the JPAKE password the bridge handed to cliparser. A harness
+// that set a code and then paired authenticated against the OLD code.
+//
+// Both routes now go through PumpState.SetPairingCode, which notifies every
+// observer -- main() registers the bridge as one.
+func TestPairingCodeUpdateReachesObservers(t *testing.T) {
+	_, ps, _, mux := testHarness(t)
+
+	var observed []string
+	ps.OnPairingCodeChange(func(code string) { observed = append(observed, code) })
+
+	// A cached long-term key from an earlier pairing must not survive a code
+	// change either: it is derived from the old password.
+	ps.SetLongTermKey([]byte{1, 2, 3, 4})
+
+	mustDo(t, mux, http.MethodPut, "/api/state", `{"pairing_code":"654321"}`)
+
+	if got := ps.GetPairingCode(); got != "654321" {
+		t.Errorf("pairing code = %q, want 654321", got)
+	}
+	if len(observed) != 1 || observed[0] != "654321" {
+		t.Errorf("observers saw %v, want exactly one notification of 654321", observed)
+	}
+	if key := ps.GetLongTermKey(); key != nil {
+		t.Errorf("long-term key = %x, want it cleared by the pairing code change", key)
+	}
+
+	// The snapshot must agree, so a harness can read back what it set.
+	snapshot := mustDo(t, mux, http.MethodGet, "/api/state", "")
+	auth, _ := snapshot["auth"].(map[string]interface{})
+	if auth["pairing_code"] != "654321" {
+		t.Errorf("snapshot pairing_code = %v, want 654321", auth["pairing_code"])
+	}
+
+	// PATCH is the same path.
+	mustDo(t, mux, http.MethodPatch, "/api/state", `{"pairing_code":"111111"}`)
+	if len(observed) != 2 || observed[1] != "111111" {
+		t.Errorf("observers saw %v, want a second notification of 111111", observed)
+	}
+}
