@@ -234,9 +234,16 @@ func (h *InsulinStatusHandler) RequiresAuth() bool {
 func (h *InsulinStatusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	// InsulinStatusResponse(long currentInsulinAmount, boolean isEstimate,
 	// long insulinLowAmount)
+	//
+	// currentInsulinAmount is WHOLE UNITS, not hundredths. Both decoders read
+	// it straight through with no scaling -- TandemKit's fetchReservoirStatus
+	// does "Double(response.currentInsulinAmount)" -- and the real captures in
+	// TandemKit's PumpingSuspendedHistoryLogTests (whose insulinAmount field is
+	// documented as byte-identical to this one) carry 31/150/180 for a 200-unit
+	// cartridge. Scaling by 100 here reported a 137 U reservoir as 13699 U.
 	pumpState.RLock()
 	cargo := map[string]interface{}{
-		"currentInsulinAmount": int(pumpState.Reservoir.CurrentUnits * 100),
+		"currentInsulinAmount": int(pumpState.Reservoir.CurrentUnits),
 		"isEstimate":           0,
 		"insulinLowAmount":     0,
 	}

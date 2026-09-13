@@ -78,16 +78,17 @@ func registerPollingDefaults(manager *Manager) {
 	// ControlIQIOBResponse(long mudaliarIOB, long timeRemainingSeconds,
 	// long mudaliarTotalIOB, long swan6hrIOB, int iobType)
 	registerConstant(manager, "ControlIQIOBRequest", map[string]interface{}{
-		"mudaliarIOB":          250, // 2.5 units * 100
+		"mudaliarIOB":          2500, // 2.5 units, in milliunits
 		"timeRemainingSeconds": 0,
-		"mudaliarTotalIOB":     250,
+		"mudaliarTotalIOB":     2500,
 		"swan6hrIOB":           0,
 		"iobType":              0,
 	})
 
 	// InsulinStatusResponse(int currentInsulinAmount, int isEstimate, int insulinLowAmount)
 	registerConstant(manager, "InsulinStatusRequest", map[string]interface{}{
-		"currentInsulinAmount": 20000, // 200.0 units * 100
+		// Whole units, not hundredths -- see InsulinStatusHandler.
+		"currentInsulinAmount": 200,
 		"isEstimate":           0,
 		"insulinLowAmount":     0,
 	})
@@ -97,8 +98,8 @@ func registerPollingDefaults(manager *Manager) {
 func registerQualifyingEventDefaults(manager *Manager) {
 	// CurrentBasalStatusResponse(long profileBasalRate, long currentBasalRate, int basalModifiedBitmask)
 	registerConstant(manager, "CurrentBasalStatusRequest", map[string]interface{}{
-		"profileBasalRate":     85, // 0.85 U/hr * 100
-		"currentBasalRate":     85,
+		"profileBasalRate":     850, // 0.85 U/hr, in milliunits
+		"currentBasalRate":     850,
 		"basalModifiedBitmask": 0,
 	})
 

@@ -367,7 +367,7 @@ func TestPumpX2JPAKEAuthenticator_CloseKillsServer(t *testing.T) {
 	}
 
 	// The process has been waited on, so the pid is reaped rather than left as
-	// a zombie: signalling it must fail.
+	// a zombie: signaling it must fail.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		if err := syscall.Kill(pid, 0); err != nil {
