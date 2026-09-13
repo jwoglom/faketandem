@@ -2,7 +2,6 @@ package handler
 
 import (
 	"fmt"
-	"time"
 
 	"github.com/jwoglom/faketandem/pkg/pumpx2"
 	"github.com/jwoglom/faketandem/pkg/state"
@@ -47,11 +46,17 @@ func (h *TimeSinceResetHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpSta
 
 	// Build response using pumpX2 bridge. TimeSinceResetResponse's real
 	// constructor is (long currentTime, long pumpTimeSinceReset).
+	//
+	// currentTime is the pump's clock in PUMP-EPOCH seconds (seconds since
+	// 2008-01-01), not Unix seconds: both pumpX2 and TandemKit decode it via
+	// their Jan-1-2008 helpers, and drivers compare it against the phone clock
+	// to detect pump-time drift. Sending time.Now().Unix() reported a pump
+	// clock roughly 38 years fast.
 	response, err := h.bridge.EncodeMessage(
 		msg.TxID,
 		"TimeSinceResetResponse",
 		map[string]interface{}{
-			"currentTime":        time.Now().Unix(),
+			"currentTime":        pumpState.PumpTimeNow(),
 			"pumpTimeSinceReset": timeSinceReset,
 		},
 	)

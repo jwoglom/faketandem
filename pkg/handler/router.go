@@ -124,7 +124,7 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "AlarmStatusRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "LoadStatusRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ProfileStatusRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "LastBolusStatusV2Request", true))
+	r.RegisterHandler(NewLastBolusStatusHandler(r.bridge, "LastBolusStatusV2Request"))
 
 	// Notification/alarm/malfunction handlers
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "HighestAamRequest", true))
@@ -134,8 +134,8 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMAlertStatusRequest", true))
 
 	// ControlIQ info and sleep schedule handlers
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ControlIQInfoV1Request", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ControlIQInfoV2Request", true))
+	r.RegisterHandler(NewControlIQInfoHandler(r.bridge, "ControlIQInfoV1Request"))
+	r.RegisterHandler(NewControlIQInfoHandler(r.bridge, "ControlIQInfoV2Request"))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ControlIQSleepScheduleRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "BasalIQStatusRequest", true))
 	r.RegisterHandler(NewControlIQIOBHandler(r.bridge, "NonControlIQIOBRequest"))
@@ -143,8 +143,8 @@ func (r *Router) registerHandlers() {
 	// Bolus and basal handlers
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ExtendedBolusStatusRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ExtendedBolusStatusV2Request", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "LastBolusStatusV3Request", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "TempRateRequest", true))
+	r.RegisterHandler(NewLastBolusStatusHandler(r.bridge, "LastBolusStatusV3Request"))
+	r.RegisterHandler(NewTempRateHandler(r.bridge))
 	r.RegisterHandler(NewTempRateStatusHandler(r.bridge))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "LastBGRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "BolusPermissionChangeReasonRequest", true))
@@ -244,7 +244,7 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "PumpVersionBRequest", false))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CgmStatusV2Request", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CurrentEgvGuiDataV2Request", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "LastBolusStatusRequest", true))
+	r.RegisterHandler(NewLastBolusStatusHandler(r.bridge, "LastBolusStatusRequest"))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMHardwareInfoRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMGlucoseAlertSettingsRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMOORAlertSettingsRequest", true))
@@ -419,7 +419,8 @@ func (r *Router) applyBolusChange(change StateChange) {
 		return
 	}
 	if bolusState.Active {
-		r.pumpState.StartBolus(bolusState.UnitsTotal, bolusState.BolusID)
+		r.pumpState.StartBolusWithSource(
+			bolusState.UnitsTotal, bolusState.BolusID, bolusState.SourceID, bolusState.TypeBitmask)
 		r.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryBolusActivated, "BolusActivated", map[string]interface{}{
 			"bolusId": bolusState.BolusID, "units": bolusState.UnitsTotal,
 		})
@@ -430,9 +431,25 @@ func (r *Router) applyBolusChange(change StateChange) {
 		}
 		return
 	}
-	currentBolus := r.pumpState.Bolus
+	currentBolus := *r.pumpState.Bolus
 	r.pumpState.StopBolus()
-	if r.qeNotifier != nil && currentBolus.Active {
+	if !currentBolus.Active {
+		return
+	}
+
+	// A canceled bolus is still a finished bolus: record it so the driver's
+	// next LastBolusStatus query reports the same bolusId it commanded, along
+	// with how much actually went in before the cancel.
+	r.pumpState.RecordLastBolus(state.LastBolusRecord{
+		BolusID:        currentBolus.BolusID,
+		RequestedUnits: currentBolus.UnitsTotal,
+		DeliveredUnits: currentBolus.UnitsDelivered,
+		SourceID:       currentBolus.SourceID,
+		TypeBitmask:    currentBolus.TypeBitmask,
+		EndReasonID:    state.BolusEndReasonStopped,
+	})
+
+	if r.qeNotifier != nil {
 		if err := r.qeNotifier.NotifyBolusCanceled(
 			currentBolus.BolusID, currentBolus.UnitsDelivered, currentBolus.UnitsTotal,
 		); err != nil {
