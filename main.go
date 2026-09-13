@@ -144,6 +144,16 @@ func main() {
 		protocol.LogPacket("RX", charType, data)
 		server.SendWriteEvent(charType, data)
 
+		// A central acknowledges every QualifyingEvents notification by writing
+		// four zero bytes back to that characteristic. It is not a pump message:
+		// feeding it to the reassembler and then to cliparser produces garbage
+		// (QualifyingEvents has no pumpX2 characteristic enum, so the opcode is
+		// guessed) and burns two JVM spawns per qualifying event. Consume it here.
+		if isQualifyingEventAck(charType, data) {
+			log.Debugf("Consumed QualifyingEvents acknowledgement write: %s", hex.EncodeToString(data))
+			return
+		}
+
 		// Reassemble multi-packet messages
 		message, rawPacketsHex, isComplete, err := reassembler.AddPacket(charType, data)
 		if err != nil {
@@ -229,6 +239,21 @@ func newTransport(name, virtualAddr, virtualPeripheralID string, virtualAckAfter
 	default:
 		return nil, fmt.Errorf("unknown transport %q (expected %q or %q)", name, transportBle, transportVirtual)
 	}
+}
+
+// isQualifyingEventAck reports whether data is a central's acknowledgement of a
+// QualifyingEvents notification (four zero bytes written to that
+// characteristic), rather than a pump protocol message.
+func isQualifyingEventAck(charType bluetooth.CharacteristicType, data []byte) bool {
+	if charType != bluetooth.CharQualifyingEvents || len(data) != 4 {
+		return false
+	}
+	for _, b := range data {
+		if b != 0x00 {
+			return false
+		}
+	}
+	return true
 }
 
 func configureConnectionHandlers(ble bluetooth.Transport, server *api.Server, router *handler.Router) {
