@@ -21,7 +21,7 @@ import (
 type Server struct {
 	http.Handler
 
-	ble             *bluetooth.Ble
+	ble             bluetooth.Transport
 	conn            *websocket.Conn
 	mtx             sync.Mutex
 	settingsManager *settings.Manager
@@ -51,7 +51,7 @@ type BleEvent struct {
 }
 
 // New creates a new API server
-func New(ble *bluetooth.Ble) *Server {
+func New(ble bluetooth.Transport) *Server {
 	return &Server{
 		ble: ble,
 	}
