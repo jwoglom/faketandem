@@ -796,32 +796,18 @@ func (r *Router) applyBolusChange(change StateChange) {
 		}
 		return
 	}
-	currentBolus := *r.pumpState.Bolus
-	r.pumpState.StopBolus()
-	if !currentBolus.Active {
+	// A canceled bolus is still a finished bolus: EndBolus writes the
+	// last-bolus record the driver's next LastBolusStatus query reports and
+	// the BolusCompleted history record, in one step that cannot run twice for
+	// one bolus even if the simulator finishes it on the same instant.
+	record, ended := r.pumpState.EndBolus(state.BolusEndReasonStopped, nil)
+	if !ended {
 		return
 	}
 
-	// A canceled bolus is still a finished bolus: record it so the driver's
-	// next LastBolusStatus query reports the same bolusId it commanded, along
-	// with how much actually went in before the cancel.
-	r.pumpState.RecordLastBolus(state.LastBolusRecord{
-		BolusID:        currentBolus.BolusID,
-		RequestedUnits: currentBolus.UnitsTotal,
-		DeliveredUnits: currentBolus.UnitsDelivered,
-		SourceID:       currentBolus.SourceID,
-		TypeBitmask:    currentBolus.TypeBitmask,
-		EndReasonID:    state.BolusEndReasonStopped,
-	})
-	// ... and in the history log, which is the other half of the same record.
-	// This path used to write the last-bolus record but no history record, so a
-	// bolus canceled over the protocol had a start in the log and no end.
-	r.pumpState.RecordBolusCompleted(
-		currentBolus.BolusID, currentBolus.UnitsDelivered, currentBolus.UnitsTotal, state.BolusEndReasonStopped)
-
 	if r.qeNotifier != nil {
 		if err := r.qeNotifier.NotifyBolusCanceled(
-			currentBolus.BolusID, currentBolus.UnitsDelivered, currentBolus.UnitsTotal,
+			record.BolusID, record.DeliveredUnits, record.RequestedUnits,
 		); err != nil {
 			log.Warnf("Failed to notify bolus canceled: %v", err)
 		}
@@ -834,16 +820,19 @@ func (r *Router) applyBasalChange(change StateChange) {
 		return
 	}
 	oldRate := r.pumpState.GetBasalRate()
-	previousTemp := r.pumpState.GetTempRate()
-	previousProfile := r.pumpState.GetProfileBasalRate()
+
+	// A temp rate that was running and is not the one being applied has ended,
+	// whether the driver stopped it outright (StopTempRateRequest, which
+	// applies a basal state with no temp rate at all) or replaced it with
+	// another (a second SetTempRateRequest). Either way it ends HERE, at this
+	// instant, and its completion is recorded before whatever replaced it so
+	// the log reads in the order it happened.
+	if r.pumpState.GetTempRate().TempRateID != basalState.TempRateID {
+		r.pumpState.EndTempRate(r.pumpState.Now())
+	}
+
 	r.pumpState.SetBasalState(basalState)
 	newRate := r.pumpState.GetBasalRate()
-	// A temp rate that was running and is no longer has ended, whether it was
-	// canceled outright or replaced: record its completion before the record
-	// for whatever replaced it, so the log reads in the order it happened.
-	if previousTemp.Active && previousTemp.TempRateID != basalState.TempRateID {
-		r.pumpState.RecordTempRateCompleted(previousTemp, previousProfile, r.pumpState.Now())
-	}
 	if basalState.TempBasalActive {
 		// The record's own fields are the commanded percentage, the duration in
 		// milliseconds and the temp rate id -- the same three the driver reads
@@ -874,30 +863,62 @@ func (r *Router) applySuspendChange(change StateChange) {
 	if !ok {
 		return
 	}
-	r.pumpState.SetPumpingSuspended(suspended)
-
-	// Both records carry the reservoir's remaining whole units at the moment of
-	// the change: on real pumps this field tracks
-	// InsulinStatusResponse.currentInsulinAmount to the unit, and it used to be
-	// emitted as an empty payload here. A suspend commanded over the protocol
-	// is user-aborted (reason id 0); a pump-raised one goes through the
-	// harness's suspend action, which names its own reason.
 	if suspended {
-		r.pumpState.RecordPumpingSuspended("user")
-	} else {
-		r.pumpState.RecordPumpingResumed()
+		r.applySuspend()
+		return
+	}
+	r.applyResume()
+}
+
+// applySuspend stops delivery because the driver asked it to.
+//
+// A suspend commanded over the protocol is user-aborted (reason id 0); a
+// pump-raised one goes through the harness's suspend action, which names its
+// own reason. Either way the stop is the full transition -- it ends an
+// in-progress bolus and any running temp rate, each with its own record --
+// rather than just a flag: this path used to set the flag alone, so a temp rate
+// the driver had suspended stayed open in the log forever.
+func (r *Router) applySuspend() {
+	outcome := r.pumpState.SuspendDelivery("user")
+	if !outcome.Changed {
+		// Delivery was already suspended. No transition, so no second record
+		// and no second round of events.
+		return
+	}
+
+	if r.qeNotifier == nil {
+		return
+	}
+	if outcome.Bolus != nil {
+		if err := r.qeNotifier.NotifyBolusCanceled(
+			outcome.Bolus.BolusID, outcome.Bolus.DeliveredUnits, outcome.Bolus.RequestedUnits,
+		); err != nil {
+			log.Warnf("Failed to notify bolus canceled by suspend: %v", err)
+		}
+	}
+	if outcome.TempRate != nil {
+		if err := r.qeNotifier.NotifyBasalRateChange(
+			outcome.TempRate.Rate, outcome.ProfileRate, false,
+		); err != nil {
+			log.Warnf("Failed to notify temp rate ended by suspend: %v", err)
+		}
+	}
+	if err := r.qeNotifier.NotifyPumpSuspended("user"); err != nil {
+		log.Warnf("Failed to notify pump suspended: %v", err)
+	}
+}
+
+// applyResume restarts delivery because the driver asked it to.
+func (r *Router) applyResume() {
+	if !r.pumpState.ResumeDelivery() {
+		// Delivery was not suspended: nothing changed, nothing recorded.
+		return
 	}
 	if r.qeNotifier == nil {
 		return
 	}
-	if suspended {
-		if err := r.qeNotifier.NotifyPumpSuspended("user"); err != nil {
-			log.Warnf("Failed to notify pump suspended: %v", err)
-		}
-	} else {
-		if err := r.qeNotifier.NotifyPumpResumed(); err != nil {
-			log.Warnf("Failed to notify pump resumed: %v", err)
-		}
+	if err := r.qeNotifier.NotifyPumpResumed(); err != nil {
+		log.Warnf("Failed to notify pump resumed: %v", err)
 	}
 }
 

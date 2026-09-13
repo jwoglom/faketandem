@@ -439,6 +439,9 @@ func (h *Harness) applyStateUpdate(u stateUpdate) []string {
 		applied = append(applied, "basal_rate")
 	}
 	if u.Suspended != nil {
+		// Staging only: the flag moves, but nothing is ended and no
+		// PumpingSuspended/PumpingResumed record is written. POST
+		// /api/state/suspend and /api/state/resume are the transitions.
 		ps.SetPumpingSuspended(*u.Suspended)
 		applied = append(applied, "suspended")
 	}

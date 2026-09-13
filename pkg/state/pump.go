@@ -157,12 +157,30 @@ const (
 	BolusSourceBluetoothRemote = 8
 )
 
-// Bolus end-reason IDs, matching pumpX2's LastBolusStatusAbstractResponse.BolusStatus.
+// Bolus end-reason IDs, matching pumpX2's
+// LastBolusStatusAbstractResponse.BolusStatus and TandemKit's
+// LastBolusStatusAbstractResponseBolusStatus. These are the ids the enum
+// carries, verified against both the cliparser jar's compiled enum and the
+// Swift declaration -- not ordinals invented here. The same value is what goes
+// in BolusCompletedHistoryLog's completionStatusId, so a driver reading the
+// history log and one reading LastBolusStatus see the same end reason.
 const (
+	// BolusEndReasonStopped marks a bolus cut short: STOPPED_USER_TERMINATED.
+	// This was 2 here, which is STOPPED_MALFUNCTION -- so every canceled bolus
+	// this emulator reported looked, to a driver, like a pump malfunction.
+	BolusEndReasonStopped = 0
+	// BolusEndReasonStoppedAlarm marks a bolus stopped by an alarm.
+	BolusEndReasonStoppedAlarm = 1
+	// BolusEndReasonStoppedMalfunction marks a bolus stopped by a hardware fault.
+	BolusEndReasonStoppedMalfunction = 2
 	// BolusEndReasonCompleted marks a bolus that delivered its full requested volume.
 	BolusEndReasonCompleted = 3
-	// BolusEndReasonStopped marks a bolus cut short (canceled by the app or the user).
-	BolusEndReasonStopped = 2
+	// BolusEndReasonStoppedWireless marks a bolus stopped over the wireless link.
+	BolusEndReasonStoppedWireless = 4
+	// BolusEndReasonRejectedWireless marks a bolus a wireless request was refused for.
+	BolusEndReasonRejectedWireless = 5
+	// BolusEndReasonTerminatedPLGS marks a bolus terminated by predictive low-glucose suspend.
+	BolusEndReasonTerminatedPLGS = 6
 )
 
 // BolusState represents active bolus state
@@ -616,32 +634,6 @@ func (ps *PumpState) StartBolusWithSource(units float64, bolusID uint32, sourceI
 	log.Infof("Started bolus: %.2f units, ID=%d, sourceId=%d", units, bolusID, sourceID)
 }
 
-// StopBolus stops an active bolus
-func (ps *PumpState) StopBolus() {
-	ps.mutex.Lock()
-	defer ps.mutex.Unlock()
-
-	if ps.Bolus.Active {
-		log.Infof("Stopped bolus: delivered %.2f of %.2f units",
-			ps.Bolus.UnitsDelivered, ps.Bolus.UnitsTotal)
-		ps.Bolus.Active = false
-	}
-}
-
-// UpdateBolusDelivery updates the bolus delivery progress
-func (ps *PumpState) UpdateBolusDelivery(delivered float64) {
-	ps.mutex.Lock()
-	defer ps.mutex.Unlock()
-
-	if ps.Bolus.Active {
-		ps.Bolus.UnitsDelivered = delivered
-		if ps.Bolus.UnitsDelivered >= ps.Bolus.UnitsTotal {
-			ps.Bolus.Active = false
-			log.Infof("Bolus complete: %.2f units delivered", ps.Bolus.UnitsDelivered)
-		}
-	}
-}
-
 // IsBolusActive returns true if a bolus is currently active
 func (ps *PumpState) IsBolusActive() bool {
 	ps.mutex.RLock()
@@ -744,13 +736,20 @@ func (ps *PumpState) GetHistoryLogEntries(startSeq, endSeq uint32) []HistoryLogE
 	return entries
 }
 
-// SetPumpingSuspended sets the pumping suspended state
+// SetPumpingSuspended sets the pumping suspended state.
+//
+// This is the STAGING setter: it moves the flag and nothing else. It writes no
+// history record, ends no bolus and no temp rate, and raises no qualifying
+// event, so it is only for putting the pump in a starting position before a
+// driver looks at it. A stop that has to look like the pump stopping goes
+// through SuspendDelivery, and a restart through ResumeDelivery.
 func (ps *PumpState) SetPumpingSuspended(suspended bool) {
 	ps.SetPumpingSuspendedWithReason(suspended, "")
 }
 
-// SetPumpingSuspendedWithReason sets the pumping suspended state and records
-// why. Resuming clears the reason.
+// SetPumpingSuspendedWithReason is SetPumpingSuspended with a reason recorded
+// alongside the flag; the same staging caveats apply. Resuming clears the
+// reason.
 func (ps *PumpState) SetPumpingSuspendedWithReason(suspended bool, reason string) {
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()

@@ -169,9 +169,17 @@ func (h *TempRateHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *st
 	// side (SetTempRateRequest) carries its duration in milliseconds, so a real
 	// capture during an active temp rate should confirm this before anything
 	// depends on it. No current driver code reads the field -- only `active`.
+	//
+	// Every field is reported as zero once the temp rate is over. The pump
+	// state keeps the finished temp rate's fields around (so the state
+	// snapshot can still show what just ran, and so a stop and a natural
+	// expiry leave the same state behind), but a response saying "no temp rate
+	// is active, 150%" would be a contradiction on the wire.
 	startTimeRaw := uint32(0)
 	durationSeconds := int64(0)
+	percentage := 0
 	if temp.Active {
+		percentage = temp.Percent
 		startTimeRaw = pumpState.PumpTimeFor(temp.StartTime)
 		if !temp.EndTime.IsZero() && !temp.StartTime.IsZero() {
 			durationSeconds = int64(temp.EndTime.Sub(temp.StartTime).Seconds())
@@ -180,13 +188,13 @@ func (h *TempRateHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *st
 
 	cargo := map[string]interface{}{
 		"active":       temp.Active,
-		"percentage":   temp.Percent,
+		"percentage":   percentage,
 		"startTimeRaw": startTimeRaw,
 		"duration":     durationSeconds,
 	}
 
 	log.Debugf("TempRateResponse: active=%v percentage=%d startTimeRaw=%d duration=%ds",
-		temp.Active, temp.Percent, startTimeRaw, durationSeconds)
+		temp.Active, percentage, startTimeRaw, durationSeconds)
 
 	response, err := h.bridge.EncodeMessage(msg.TxID, "TempRateResponse", cargo)
 	if err != nil {
