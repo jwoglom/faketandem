@@ -117,5 +117,8 @@ type Transport interface {
 	GetPairingState() PairingState
 }
 
-// Compile-time assertion that the platform BLE transport satisfies the interface.
-var _ Transport = (*Ble)(nil)
+// Compile-time assertions that both transports satisfy the interface.
+var (
+	_ Transport = (*Ble)(nil)
+	_ Transport = (*VirtualTransport)(nil)
+)
