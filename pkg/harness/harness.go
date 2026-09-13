@@ -49,6 +49,10 @@ type Harness struct {
 	requests  *reqlog.Log
 	registry  *faults.Registry
 
+	// fragments applies drop_fragment faults to outgoing notifications, or is
+	// nil when the transport cannot filter them.
+	fragments *faults.FragmentDropper
+
 	// manual is the manual clock installed while the clock is in manual mode,
 	// or nil while the pump runs on the real clock.
 	manual   *state.ManualClock
@@ -68,7 +72,7 @@ type Options struct {
 
 // New creates a Harness over the emulator's components.
 func New(opts Options) *Harness {
-	return &Harness{
+	h := &Harness{
 		pumpState: opts.PumpState,
 		simulator: opts.Simulator,
 		transport: opts.Transport,
@@ -76,6 +80,38 @@ func New(opts Options) *Harness {
 		requests:  opts.Requests,
 		registry:  opts.Faults,
 	}
+	h.installFragmentDropper()
+	return h
+}
+
+// installFragmentDropper puts the fragment-level fault seam in place, on a
+// transport that has one.
+//
+// The filter goes in once, at construction, rather than when a drop_fragment
+// fault is armed: it consults the registry on every fragment and drops nothing
+// while nothing is armed, and installing it lazily would mean a fault armed
+// mid-connection started counting fragment positions from the middle of a
+// message.
+func (h *Harness) installFragmentDropper() {
+	if h.registry == nil || h.transport == nil {
+		return
+	}
+	filterer, ok := h.transport.(bluetooth.NotifyFilterer)
+	if !ok {
+		return
+	}
+
+	dropper := faults.NewFragmentDropper(h.registry)
+	h.fragments = dropper
+	filterer.SetNotifyFilter(func(charType bluetooth.CharacteristicType, data []byte) bool {
+		if dropper.Allow(charType.String(), data) {
+			return true
+		}
+		if h.requests != nil {
+			h.requests.RecordFault(faults.KindDropFragment, charType.String(), "fragment dropped")
+		}
+		return false
+	})
 }
 
 // RegisterRoutes installs the harness endpoints on a mux.

@@ -137,3 +137,21 @@ type RadioController interface {
 
 // Compile-time assertion that the virtual transport can control its radio.
 var _ RadioController = (*VirtualTransport)(nil)
+
+// NotifyFilterer is implemented by transports that can be asked to drop
+// individual notification fragments on their way out.
+//
+// It is the seam fragment-level fault injection needs, and it is deliberately
+// below the message layer: the filter sees exactly one BLE notification at a
+// time, which is the granularity at which a real link loses data. The virtual
+// transport supports it; the Linux GATT transport does not, so a harness must
+// check the assertion before offering the control.
+type NotifyFilterer interface {
+	// SetNotifyFilter installs the filter consulted before each notification
+	// leaves the link, or removes it when passed nil. Returning false drops
+	// that fragment silently, exactly as a lost BLE notification would be.
+	SetNotifyFilter(filter func(charType CharacteristicType, data []byte) bool)
+}
+
+// Compile-time assertion that the virtual transport can filter notifications.
+var _ NotifyFilterer = (*VirtualTransport)(nil)

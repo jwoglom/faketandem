@@ -309,3 +309,79 @@ func TestNativeHistoryLogStreamResponse_ParsesBackThroughCliparser(t *testing.T)
 		}
 	}
 }
+
+// TestSignedMessageTableAgreesWithCliparser cross-checks pkg/protocol's
+// signed-message table -- derived from TandemKit's MessageProps -- against what
+// pumpX2 itself does, which is the definition that matters on the wire.
+//
+// cliparser never prints a "signed" flag, so signedness is probed behaviourally:
+// the same message is encoded twice with different signing keys, and only a
+// message pumpX2 signs comes out different. That probe is independent of both
+// the table and the Go encoder, so it catches the case where TandemKit and
+// pumpX2 disagree about a message -- which would leave the emulator signing
+// something a real driver expects unsigned, or the reverse.
+func TestSignedMessageTableAgreesWithCliparser(t *testing.T) {
+	jarPath := requireJar(t)
+
+	cases := []struct {
+		message string
+		params  string
+	}{
+		{"SuspendPumpingResponse", `{"status":0}`},
+		{"ResumePumpingResponse", `{"status":0}`},
+		{"InitiateBolusResponse", `{"status":0,"bolusId":42,"statusTypeId":0}`},
+		{"BolusPermissionResponse", `{"status":0,"bolusId":42,"nackReasonId":0}`},
+		{"ApiVersionResponse", `{"majorVersion":3,"minorVersion":5}`},
+		{"InsulinStatusResponse", `{"currentInsulinAmount":100,"isEstimate":0,"insulinLowAmount":20}`},
+		{"CurrentBasalStatusResponse", `{"profileBasalRate":1000,"currentBasalRate":0,"basalModifiedBitmask":1}`},
+		{"HistoryLogStatusResponse", `{"numEntries":12,"firstSequenceNum":1,"lastSequenceNum":12}`},
+	}
+
+	for _, c := range cases {
+		t.Run(c.message, func(t *testing.T) {
+			withOneKey := encodeWithKey(t, jarPath, c.message, c.params, "0000000000000000000000000000000a")
+			withAnother := encodeWithKey(t, jarPath, c.message, c.params, "ffffffffffffffffffffffffffffffff")
+
+			cliparserSigns := strings.Join(withOneKey, " ") != strings.Join(withAnother, " ")
+			if got := protocol.IsSignedMessage(c.message); got != cliparserSigns {
+				t.Errorf("IsSignedMessage(%q) = %v, but cliparser %s the message",
+					c.message, got, map[bool]string{true: "signs", false: "does not sign"}[cliparserSigns])
+			}
+
+			// A signed message must also carry a payload long enough to hold
+			// the trailer, which is what the re-signing path slices on.
+			if !cliparserSigns {
+				return
+			}
+			body := splitFramedMessage(t, withOneKey)
+			parsed, err := protocol.ParseMessageBody(body)
+			if err != nil {
+				t.Fatalf("cliparser produced a malformed message: %v", err)
+			}
+			if len(parsed.Payload) < protocol.SignedTrailerLength {
+				t.Errorf("payload is %d bytes, too short for the %d-byte trailer cliparser claims to have written",
+					len(parsed.Payload), protocol.SignedTrailerLength)
+			}
+		})
+	}
+}
+
+// encodeWithKey runs one cliparser encode with a given PUMP_AUTHENTICATION_KEY.
+// The jar is invoked directly rather than through JarRunner because the signing
+// inputs only reach cliparser through the environment.
+func encodeWithKey(t *testing.T, jarPath, message, params, authKey string) []string {
+	t.Helper()
+
+	cmd := exec.Command(javaCmd(), "-jar", jarPath, "encode", "5", message, params)
+	cmd.Env = append(os.Environ(),
+		"PUMP_AUTHENTICATION_KEY="+authKey,
+		"PUMP_TIME_SINCE_RESET=1000",
+	)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("cliparser encode of %s failed: %v\n%s", message, err, stderr.String())
+	}
+	return packetsFromEncodeOutput(t, stdout.String())
+}

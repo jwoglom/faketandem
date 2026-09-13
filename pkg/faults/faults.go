@@ -34,6 +34,12 @@ const (
 	// KindDisconnect drops the link, either instead of answering the request
 	// or partway through the response's fragments.
 	KindDisconnect = "disconnect"
+	// KindDropFragment drops individual BLE notification fragments rather than
+	// whole messages, which is the loss a real radio actually produces: the
+	// central sees a message that starts and never finishes, or one whose
+	// middle is missing, and has to time out its reassembly rather than its
+	// request.
+	KindDropFragment = "drop_fragment"
 	// KindRejectQuickPair refuses a quick-pair reconnect, forcing the central
 	// back into a full pairing.
 	KindRejectQuickPair = "reject_quick_pair"
@@ -87,6 +93,16 @@ type Fault struct {
 	// FragmentsSent is how many fragments go out before an
 	// AfterPartialResponse disconnect.
 	FragmentsSent int `json:"fragments_sent,omitempty"`
+
+	// Index selects which fragment KindDropFragment drops, by its position
+	// within its own message: 0 is the first fragment of every message on the
+	// characteristic, 1 the second, and so on. It is a pointer because 0 is a
+	// meaningful position and "not set" has to be distinguishable from it.
+	Index *int `json:"index,omitempty"`
+	// EveryNth makes KindDropFragment drop every Nth fragment counted on the
+	// characteristic, regardless of message boundaries -- steady loss across a
+	// stream rather than a hole in a fixed place.
+	EveryNth int `json:"every_nth,omitempty"`
 
 	// Fired counts how many times the fault has been applied.
 	Fired int `json:"fired"`
@@ -144,14 +160,12 @@ func validate(f *Fault) error {
 			return fmt.Errorf("%s requires a positive delay_ms", f.Kind)
 		}
 	case KindDisconnect:
-		if f.After == "" {
-			f.After = AfterRequest
+		if err := validateDisconnect(f); err != nil {
+			return err
 		}
-		if f.After != AfterRequest && f.After != AfterPartialResponse {
-			return fmt.Errorf("disconnect after must be %q or %q, got %q", AfterRequest, AfterPartialResponse, f.After)
-		}
-		if f.After == AfterPartialResponse && f.FragmentsSent < 0 {
-			return fmt.Errorf("fragments_sent must not be negative")
+	case KindDropFragment:
+		if err := validateDropFragment(f); err != nil {
+			return err
 		}
 	case KindRadioOff, KindRadioOn:
 	case "":
@@ -166,6 +180,48 @@ func validate(f *Fault) error {
 	// "Next N" with no N given means the next one.
 	if !f.Every && f.Count == 0 {
 		f.Count = 1
+	}
+	return nil
+}
+
+// validateDisconnect normalizes when a disconnect cuts the link. An unset
+// "after" means the most common case: no answer at all.
+func validateDisconnect(f *Fault) error {
+	if f.After == "" {
+		f.After = AfterRequest
+	}
+	if f.After != AfterRequest && f.After != AfterPartialResponse {
+		return fmt.Errorf("disconnect after must be %q or %q, got %q", AfterRequest, AfterPartialResponse, f.After)
+	}
+	if f.After == AfterPartialResponse && f.FragmentsSent < 0 {
+		return fmt.Errorf("fragments_sent must not be negative")
+	}
+	return nil
+}
+
+// validateDropFragment checks the fragment-level scoping, which is narrower
+// than every other fault's: a fragment on the wire carries only its
+// characteristic and its position, so a fault aimed at one cannot be scoped by
+// opcode or message name. Silently ignoring such a scope would arm a fault
+// that looks targeted and is not.
+func validateDropFragment(f *Fault) error {
+	if f.Opcode != 0 || f.Message != "" {
+		return fmt.Errorf("%s cannot be scoped by opcode or message: a fragment carries no message identity, "+
+			"only its characteristic and its position", f.Kind)
+	}
+	switch {
+	case f.Index != nil && f.EveryNth != 0:
+		return fmt.Errorf("%s takes either index or every_nth, not both", f.Kind)
+	case f.Index != nil:
+		if *f.Index < 0 {
+			return fmt.Errorf("index must not be negative")
+		}
+	case f.EveryNth > 0:
+	case f.EveryNth < 0:
+		return fmt.Errorf("every_nth must be positive")
+	default:
+		return fmt.Errorf("%s requires either index (which fragment of each message) "+
+			"or every_nth (how often to drop one)", f.Kind)
 	}
 	return nil
 }

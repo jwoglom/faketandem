@@ -1,7 +1,10 @@
 package harness
 
 import (
+	"encoding/hex"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,7 +29,12 @@ import (
 const (
 	probeRequest  = "FaultProbeRequest"
 	probeResponse = "FaultProbeResponse"
-	probeOpcode   = 4242
+	// A byte-sized opcode, because the wire format has exactly one byte for
+	// it: an ErrorResponse naming the rejected request has to be able to
+	// carry this value.
+	probeOpcode = 61
+	// probeTxID is the transaction every probe exchange uses.
+	probeTxID = 7
 )
 
 // probeHandler answers the probe request with a three-fragment response and a
@@ -84,11 +92,7 @@ func newFaultRig(t *testing.T) *faultRig {
 	router := handler.NewRouter(nil, ps, transport, protocol.NewTransactionManager(time.Second),
 		"go", "", "jar", "", "java", "")
 
-	fragments := []string{
-		virtualtest.HexPacket(0xa1, 18),
-		virtualtest.HexPacket(0xa2, 18),
-		virtualtest.HexPacket(0xa3, 4),
-	}
+	fragments := probeFragments()
 	router.RegisterHandler(&probeHandler{fragments: fragments})
 
 	log := reqlog.New(64)
@@ -124,6 +128,29 @@ func newFaultRig(t *testing.T) *faultRig {
 	}
 }
 
+// probeFragments builds the probe response's three BLE notifications with real
+// [remaining][txId] framing -- 18, 18 and 4 bytes, the shape an 18-byte-chunked
+// response actually has.
+//
+// The framing matters to fragment-level faults: the remaining-fragment counter
+// is the only thing below the router that says where one message ends and the
+// next begins, so a probe made of unframed filler would make "the second
+// fragment of every message" untestable.
+func probeFragments() []string {
+	payloadSizes := []int{16, 16, 2}
+	markers := []byte{0xa1, 0xa2, 0xa3}
+
+	fragments := make([]string, 0, len(markers))
+	for i, marker := range markers {
+		fragment := []byte{byte(len(markers) - i - 1), probeTxID}
+		for j := 0; j < payloadSizes[i]; j++ {
+			fragment = append(fragment, marker)
+		}
+		fragments = append(fragments, hex.EncodeToString(fragment))
+	}
+	return fragments
+}
+
 // route pushes one probe request through the router, as the write handler
 // would after reassembly and parsing.
 func (r *faultRig) route(t *testing.T) error {
@@ -131,7 +158,7 @@ func (r *faultRig) route(t *testing.T) error {
 
 	return r.router.RouteMessage(bluetooth.CharCurrentStatus, &pumpx2.ParsedMessage{
 		MessageType: probeRequest,
-		TxID:        7,
+		TxID:        probeTxID,
 		Opcode:      probeOpcode,
 		Cargo:       map[string]interface{}{"probe": 1},
 	})
@@ -248,41 +275,8 @@ func TestDelayResponseHoldsTheAnswerBack(t *testing.T) {
 	}
 }
 
-func TestErrorResponseUsesTheEncoderHookAndDegradesWithoutIt(t *testing.T) {
+func TestErrorResponseFaultSendsARealErrorResponse(t *testing.T) {
 	rig := newFaultRig(t)
-
-	// With no encoder installed the fault must not pretend to have worked.
-	mustDo(t, rig.mux, http.MethodPost, "/api/faults",
-		`{"kind":"error_response","message":"FaultProbeRequest","error_code":3}`)
-	if err := rig.route(t); err != nil {
-		t.Fatalf("RouteMessage: %v", err)
-	}
-	if got := rig.client.CollectNotifications(1, 250*time.Millisecond); len(got) != 0 {
-		t.Errorf("central received %d fragments with no encoder installed", len(got))
-	}
-	resp := rig.lastResponseEntry(t)
-	if resp.Fault != faults.KindErrorResponse || resp.FragmentsSent != 0 {
-		t.Errorf("response entry = %+v", resp)
-	}
-	if resp.Note == "" {
-		t.Error("the log does not say why nothing was sent")
-	}
-
-	// With an encoder installed -- as the native packet encoder will provide
-	// -- the error goes out in place of the real response.
-	errorFragment := virtualtest.HexPacket(0xee, 6)
-	var gotTxID, gotCode, gotOpcode int
-	var gotName string
-	handler.ErrorResponseEncoder = func(txID, errorCode, requestOpcode int, requestName string) (*pumpx2.EncodedMessage, error) {
-		gotTxID, gotCode, gotOpcode, gotName = txID, errorCode, requestOpcode, requestName
-		return &pumpx2.EncodedMessage{
-			MessageType: "ErrorResponse",
-			TxID:        txID,
-			Opcode:      77,
-			Packets:     []string{errorFragment},
-		}, nil
-	}
-	t.Cleanup(func() { handler.ErrorResponseEncoder = nil })
 
 	mustDo(t, rig.mux, http.MethodPost, "/api/faults",
 		`{"kind":"error_response","message":"FaultProbeRequest","error_code":3}`)
@@ -291,16 +285,95 @@ func TestErrorResponseUsesTheEncoderHookAndDegradesWithoutIt(t *testing.T) {
 	}
 
 	got := rig.client.CollectNotifications(1, time.Second)
-	if len(got) != 1 || got[0] != errorFragment {
-		t.Fatalf("central received %v, want the single error fragment %s", got, errorFragment)
+	if len(got) != 1 {
+		t.Fatalf("central received %d fragments, want the single-fragment ErrorResponse", len(got))
 	}
-	if gotTxID != 7 || gotCode != 3 || gotOpcode != probeOpcode || gotName != probeResponse {
-		t.Errorf("encoder called with txID=%d code=%d opcode=%d name=%q",
-			gotTxID, gotCode, gotOpcode, gotName)
+
+	// Read it the way the driver does: off the wire, through the reassembler.
+	body := reassemble(t, bluetooth.CharCurrentStatus, got)
+	parsed, err := protocol.ParseMessageBody(body)
+	if err != nil {
+		t.Fatalf("the ErrorResponse is not a well-formed message: %v", err)
 	}
-	if resp := rig.lastResponseEntry(t); resp.Message != "ErrorResponse" {
-		t.Errorf("the log recorded %q, want the ErrorResponse that actually went out", resp.Message)
+	if parsed.Opcode != protocol.OpcodeErrorResponse {
+		t.Errorf("opcode = %d, want %d (ErrorResponse)", parsed.Opcode, protocol.OpcodeErrorResponse)
 	}
+	if parsed.TxID != 7 {
+		t.Errorf("txId = %d, want the 7 of the request it answers", parsed.TxID)
+	}
+	if len(parsed.Payload) != 2 {
+		t.Fatalf("cargo = %x, want the two bytes [requestCodeId][errorCodeId]", parsed.Payload)
+	}
+	if int(parsed.Payload[0]) != probeOpcode {
+		t.Errorf("requestCodeId = %d, want the rejected request's opcode %d", parsed.Payload[0], probeOpcode)
+	}
+	if parsed.Payload[1] != 3 {
+		t.Errorf("errorCodeId = %d, want the armed error code 3", parsed.Payload[1])
+	}
+
+	// The state change still happened: an error_response fault answers with an
+	// error, it does not undo the request.
+	if !rig.pumpState.IsPumpingSuspended() {
+		t.Error("the state change was not applied before the error went out")
+	}
+	if resp := rig.lastResponseEntry(t); resp.Message != "ErrorResponse" || resp.FragmentsSent != 1 {
+		t.Errorf("the log recorded %+v, want the ErrorResponse that actually went out", resp)
+	}
+}
+
+func TestErrorResponseFaultDegradesWithNoEncoder(t *testing.T) {
+	rig := newFaultRig(t)
+
+	// Clearing the hook must not make the fault pretend to have worked.
+	previous := handler.ErrorResponseEncoder
+	handler.ErrorResponseEncoder = nil
+	t.Cleanup(func() { handler.ErrorResponseEncoder = previous })
+
+	mustDo(t, rig.mux, http.MethodPost, "/api/faults",
+		`{"kind":"error_response","message":"FaultProbeRequest","error_code":3}`)
+	if err := rig.route(t); err != nil {
+		t.Fatalf("RouteMessage: %v", err)
+	}
+	if got := rig.client.CollectNotifications(1, 250*time.Millisecond); len(got) != 0 {
+		t.Errorf("central received %d fragments with no encoder installed", len(got))
+	}
+
+	resp := rig.lastResponseEntry(t)
+	if resp.Fault != faults.KindErrorResponse || resp.FragmentsSent != 0 {
+		t.Errorf("response entry = %+v", resp)
+	}
+	if resp.Note == "" {
+		t.Error("the log does not say why nothing was sent")
+	}
+}
+
+// reassemble feeds hex fragments through the real reassembler and returns the
+// message body, so a test asserts on what a central reconstructs rather than on
+// the fragments the emulator happened to emit.
+func reassemble(t *testing.T, charType bluetooth.CharacteristicType, fragmentsHex []string) []byte {
+	t.Helper()
+
+	r := protocol.NewReassembler(time.Second)
+	t.Cleanup(r.Stop)
+
+	for i, fragmentHex := range fragmentsHex {
+		fragment, err := hex.DecodeString(fragmentHex)
+		if err != nil {
+			t.Fatalf("fragment %d is not hex: %v", i, err)
+		}
+		body, _, complete, err := r.AddPacket(charType, fragment)
+		if err != nil {
+			t.Fatalf("reassembling fragment %d: %v", i, err)
+		}
+		if complete {
+			if i != len(fragmentsHex)-1 {
+				t.Fatalf("the message completed at fragment %d of %d", i+1, len(fragmentsHex))
+			}
+			return body
+		}
+	}
+	t.Fatalf("the %d fragments never completed a message", len(fragmentsHex))
+	return nil
 }
 
 func TestDisconnectAfterRequestCutsTheLinkWithNoAnswer(t *testing.T) {
@@ -399,6 +472,116 @@ func TestNotifyFilterDropsIndividualFragments(t *testing.T) {
 	got := rig.client.CollectNotifications(3, 500*time.Millisecond)
 	if len(got) != 1 || got[0] != rig.fragments[2] {
 		t.Errorf("central received %v, want only the short third fragment", got)
+	}
+}
+
+func TestDropFragmentByIndexRemovesTheSamePositionOfEveryMessage(t *testing.T) {
+	rig := newFaultRig(t)
+
+	mustDo(t, rig.mux, http.MethodPost, "/api/faults",
+		`{"kind":"drop_fragment","characteristic":"CurrentStatus","index":1,"every":true}`)
+
+	// Two messages, so the position is shown to reset at each message
+	// boundary rather than running on across the stream.
+	for i := 0; i < 2; i++ {
+		if err := rig.route(t); err != nil {
+			t.Fatalf("RouteMessage %d: %v", i, err)
+		}
+	}
+
+	got := rig.client.CollectNotifications(6, time.Second)
+	want := []string{rig.fragments[0], rig.fragments[2], rig.fragments[0], rig.fragments[2]}
+	if len(got) != len(want) {
+		t.Fatalf("central received %d fragments, want %d (the middle one of each message dropped)", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("fragment %d = %s, want %s", i, got[i], want[i])
+		}
+	}
+
+	// The pump still believes it sent everything: fragment loss happens below
+	// the router, so the request log records a fully sent response.
+	if resp := rig.lastResponseEntry(t); resp.FragmentsSent != 3 || resp.Fault != "" {
+		t.Errorf("response entry = %+v, want the pump's own record of a complete send", resp)
+	}
+}
+
+func TestDropFragmentEveryNthThinsTheStream(t *testing.T) {
+	rig := newFaultRig(t)
+
+	mustDo(t, rig.mux, http.MethodPost, "/api/faults",
+		`{"kind":"drop_fragment","every_nth":2,"every":true}`)
+
+	for i := 0; i < 2; i++ {
+		if err := rig.route(t); err != nil {
+			t.Fatalf("RouteMessage %d: %v", i, err)
+		}
+	}
+
+	// Six fragments go out; every second one is lost, regardless of where the
+	// message boundaries fall.
+	got := rig.client.CollectNotifications(6, time.Second)
+	want := []string{rig.fragments[0], rig.fragments[2], rig.fragments[1]}
+	if len(got) != len(want) {
+		t.Fatalf("central received %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("fragment %d = %s, want %s", i, got[i], want[i])
+		}
+	}
+}
+
+func TestDropFragmentCountExpires(t *testing.T) {
+	rig := newFaultRig(t)
+
+	// No count and no every: the default "next one only".
+	mustDo(t, rig.mux, http.MethodPost, "/api/faults", `{"kind":"drop_fragment","index":0}`)
+
+	for i := 0; i < 2; i++ {
+		if err := rig.route(t); err != nil {
+			t.Fatalf("RouteMessage %d: %v", i, err)
+		}
+	}
+
+	got := rig.client.CollectNotifications(6, time.Second)
+	want := []string{
+		rig.fragments[1], rig.fragments[2],
+		rig.fragments[0], rig.fragments[1], rig.fragments[2],
+	}
+	if len(got) != len(want) {
+		t.Fatalf("central received %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("fragment %d = %s, want %s", i, got[i], want[i])
+		}
+	}
+
+	body := mustDo(t, rig.mux, http.MethodGet, "/api/faults", "")
+	if armed, ok := body["faults"].([]interface{}); !ok || len(armed) != 0 {
+		t.Errorf("the spent fault is still armed: %v", body["faults"])
+	}
+}
+
+func TestDropFragmentRejectsScopingItCannotHonor(t *testing.T) {
+	rig := newFaultRig(t)
+
+	// A fragment carries no message identity, so a message- or opcode-scoped
+	// drop_fragment must be refused rather than quietly applied to everything.
+	for _, body := range []string{
+		`{"kind":"drop_fragment","index":0,"message":"FaultProbeRequest"}`,
+		`{"kind":"drop_fragment","index":0,"opcode":61}`,
+		`{"kind":"drop_fragment"}`,
+		`{"kind":"drop_fragment","index":0,"every_nth":2}`,
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/api/faults", strings.NewReader(body))
+		rec := httptest.NewRecorder()
+		rig.mux.ServeHTTP(rec, req)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("arming %s returned %d, want 400", body, rec.Code)
+		}
 	}
 }
 
