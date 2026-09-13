@@ -30,7 +30,12 @@ type Snapshot struct {
 	Battery    batterySnapshot    `json:"battery"`
 	CGM        cgmSnapshot        `json:"cgm"`
 	Alerts     []alertSnapshot    `json:"alerts"`
-	History    historySnapshot    `json:"history"`
+	// AlarmsHistory is every alarm that has been raised and cleared, with the
+	// instant it was cleared. Alerts only ever reports what is standing now, so
+	// without this an alarm that came and went left nothing a timeline could
+	// place an interval from.
+	AlarmsHistory []clearedAlarmSnapshot `json:"alarms_history"`
+	History       historySnapshot        `json:"history"`
 	RequestLog requestLogSnapshot `json:"request_log"`
 }
 
@@ -122,28 +127,30 @@ type cgmSnapshot struct {
 }
 
 type alertSnapshot struct {
-	ID           uint32 `json:"id"`
-	Type         int    `json:"type"`
-	Priority     int    `json:"priority"`
-	Message      string `json:"message"`
+	ID       uint32 `json:"id"`
+	Type     int    `json:"type"`
+	TypeName string `json:"type_name"`
+	Priority int    `json:"priority"`
+	Message  string `json:"message"`
+	// Time is the true instant the alarm was raised, on the pump's Clock;
+	// PumpSeconds is the same instant as the wire carries it.
 	Time         string `json:"time"`
+	PumpSeconds  uint32 `json:"pump_seconds"`
 	Acknowledged bool   `json:"acknowledged"`
 }
 
-type historyEntrySnapshot struct {
-	Sequence uint32                 `json:"sequence"`
-	TypeID   int                    `json:"type_id"`
-	Type     string                 `json:"type"`
-	Time     string                 `json:"time"`
-	PumpTime uint32                 `json:"pump_time"`
-	Data     map[string]interface{} `json:"data,omitempty"`
-}
-
-type historySnapshot struct {
-	Count         int                    `json:"count"`
-	FirstSequence uint32                 `json:"first_sequence"`
-	LastSequence  uint32                 `json:"last_sequence"`
-	Entries       []historyEntrySnapshot `json:"entries"`
+// clearedAlarmSnapshot is an alarm that stood and has since been cleared, with
+// both ends of the interval.
+type clearedAlarmSnapshot struct {
+	ID                 uint32 `json:"id"`
+	Type               int    `json:"type"`
+	TypeName           string `json:"type_name"`
+	Priority           int    `json:"priority"`
+	Message            string `json:"message"`
+	Time               string `json:"time"`
+	PumpSeconds        uint32 `json:"pump_seconds"`
+	ClearedTime        string `json:"cleared_time"`
+	ClearedPumpSeconds uint32 `json:"cleared_pump_seconds"`
 }
 
 type requestLogSnapshot struct {
@@ -212,18 +219,38 @@ func (h *Harness) Snapshot() Snapshot {
 	authenticated := ps.IsAuthenticated
 	pairingCode := ps.PairingCode
 	hasLTK := len(ps.LongTermKey) > 0
-	alerts := make([]alertSnapshot, 0, len(ps.ActiveAlerts))
-	for _, a := range ps.ActiveAlerts {
+	activeAlerts := make([]state.Alert, len(ps.ActiveAlerts))
+	copy(activeAlerts, ps.ActiveAlerts)
+	ps.RUnlock()
+
+	alerts := make([]alertSnapshot, 0, len(activeAlerts))
+	for _, a := range activeAlerts {
 		alerts = append(alerts, alertSnapshot{
 			ID:           a.ID,
 			Type:         int(a.Type),
+			TypeName:     a.Type.String(),
 			Priority:     int(a.Priority),
 			Message:      a.Message,
 			Time:         formatTime(a.Timestamp),
+			PumpSeconds:  pumpTimeOrZero(ps, a.Timestamp),
 			Acknowledged: a.Acknowledged,
 		})
 	}
-	ps.RUnlock()
+
+	clearedAlarms := make([]clearedAlarmSnapshot, 0)
+	for _, c := range ps.GetClearedAlerts() {
+		clearedAlarms = append(clearedAlarms, clearedAlarmSnapshot{
+			ID:                 c.ID,
+			Type:               int(c.Type),
+			TypeName:           c.Type.String(),
+			Priority:           int(c.Priority),
+			Message:            c.Message,
+			Time:               formatTime(c.Timestamp),
+			PumpSeconds:        pumpTimeOrZero(ps, c.Timestamp),
+			ClearedTime:        formatTime(c.ClearedAt),
+			ClearedPumpSeconds: pumpTimeOrZero(ps, c.ClearedAt),
+		})
+	}
 
 	controlIQ := ps.GetControlIQInfo()
 	lastBolus := h.lastBolusSnapshot()
@@ -273,9 +300,10 @@ func (h *Harness) Snapshot() Snapshot {
 		Insulin:    insulin,
 		Battery:    battery,
 		CGM:        cgm,
-		Alerts:     alerts,
-		History:    h.historySnapshot(),
-		RequestLog: h.requestLogSnapshot(),
+		Alerts:        alerts,
+		AlarmsHistory: clearedAlarms,
+		History:       h.historySnapshot(),
+		RequestLog:    h.requestLogSnapshot(),
 	}
 }
 
@@ -321,19 +349,12 @@ func (h *Harness) historySnapshot() historySnapshot {
 	}
 	entries := h.pumpState.GetHistoryLogEntries(from, last)
 
-	out := make([]historyEntrySnapshot, 0, len(entries))
-	for _, e := range entries {
-		out = append(out, historyEntrySnapshot{
-			Sequence: e.Sequence,
-			TypeID:   e.TypeID,
-			Type:     e.Type,
-			Time:     formatTime(e.Timestamp),
-			PumpTime: e.PumpTime,
-			Data:     e.Data,
-		})
+	return historySnapshot{
+		Count:         count,
+		FirstSequence: first,
+		LastSequence:  last,
+		Entries:       historyEntrySnapshots(entries),
 	}
-
-	return historySnapshot{Count: count, FirstSequence: first, LastSequence: last, Entries: out}
 }
 
 func (h *Harness) requestLogSnapshot() requestLogSnapshot {
@@ -449,6 +470,14 @@ func (h *Harness) applyStateUpdate(u stateUpdate) []string {
 		applied = append(applied, "api_version")
 	}
 
+	if u.ClearAlerts != nil && *u.ClearAlerts {
+		// Staged, not enacted: PUT /api/state writes no history, so the alarms
+		// move into the cleared-alarm log without an AlarmCleared record.
+		// POST /api/state/resume is the path that records the clearing.
+		ps.ClearAlerts(ps.Now())
+		applied = append(applied, "clear_alerts")
+	}
+
 	applied = append(applied, h.applyDirectFields(u)...)
 	return applied
 }
@@ -495,11 +524,6 @@ func (h *Harness) applyDirectFields(u stateUpdate) []string {
 		ps.StartTime = ps.Now().Add(-time.Duration(*u.TimeSinceReset) * time.Second)
 		applied = append(applied, "time_since_reset")
 	}
-	if u.ClearAlerts != nil && *u.ClearAlerts {
-		ps.ActiveAlerts = nil
-		applied = append(applied, "clear_alerts")
-	}
-
 	return applied
 }
 

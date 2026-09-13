@@ -118,6 +118,7 @@ func (h *Harness) installFragmentDropper() {
 func (h *Harness) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/clock", h.handleClock)
 	mux.HandleFunc("/api/clock/advance", h.handleClockAdvance)
+	mux.HandleFunc("/api/history", h.handleHistory)
 	mux.HandleFunc("/api/state", h.handleState)
 	mux.HandleFunc("/api/state/", h.handleStateAction)
 	mux.HandleFunc("/api/transport", h.handleTransport)
@@ -131,8 +132,9 @@ func (h *Harness) RegisterRoutes(mux *http.ServeMux) {
 func (h *Harness) Endpoints() []string {
 	return []string{
 		"GET    /api/clock",
-		"PUT    /api/clock                    {mode, now, pump_offset_seconds, frozen}",
+		"PUT    /api/clock                    {mode, now, pump_offset_seconds, pump_timezone, frozen}",
 		"POST   /api/clock/advance            {seconds}",
+		"GET    /api/history?since=N&limit=N",
 		"GET    /api/state",
 		"PUT    /api/state                    (also PATCH) set pump state fields",
 		"POST   /api/state/bolus/start        {units, source, duration_seconds|rate, bolus_id}",
