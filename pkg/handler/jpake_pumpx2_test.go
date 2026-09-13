@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -104,7 +105,7 @@ func TestConvertServerResponseToParams_Jpake1aResponse(t *testing.T) {
 // constructor-parameter mapping for.
 func TestConvertServerResponseToParams_UnknownMessage(t *testing.T) {
 	envelope := map[string]interface{}{
-		"messageName":  "SomeFutureResponse",
+		"messageName":   "SomeFutureResponse",
 		"messageParams": []interface{}{0},
 	}
 
@@ -329,5 +330,58 @@ func TestPumpX2JPAKEAuthenticator_FullFlowViaJar(t *testing.T) {
 	}
 	if !found {
 		t.Error("client did not report a derived secret or HMAC validation after round 4")
+	}
+}
+
+// TestPumpX2JPAKEAuthenticator_CloseKillsServer guards the subprocess-leak fix:
+// Close must actually terminate the "java -jar cliparser jpake-server" JVM, not
+// just drop the reference to it. JPAKESessionManager.Remove/RemoveAll call
+// Close on handshake completion and on every BLE disconnect, so a Close that
+// left the process running would leak one JVM per pairing attempt for the
+// lifetime of the emulator.
+func TestPumpX2JPAKEAuthenticator_CloseKillsServer(t *testing.T) {
+	jarPath := os.Getenv("FAKETANDEM_TEST_CLIPARSER_JAR")
+	if jarPath == "" {
+		t.Skip("FAKETANDEM_TEST_CLIPARSER_JAR not set, skipping real jar integration test")
+	}
+
+	auth := NewPumpX2JPAKEAuthenticator("123456", nil, "", "jar", "", "java", jarPath)
+	if err := auth.startJPAKEServerProcess(); err != nil {
+		t.Fatalf("failed to start jpake-server: %v", err)
+	}
+
+	proc := auth.server.cmd.Process
+	if proc == nil {
+		t.Fatal("jpake-server started but has no OS process")
+	}
+	pid := proc.Pid
+
+	// It must be alive before Close -- otherwise this test would pass for the
+	// wrong reason.
+	if err := syscall.Kill(pid, 0); err != nil {
+		t.Fatalf("jpake-server pid %d is not running before Close: %v", pid, err)
+	}
+
+	if err := auth.Close(); err != nil {
+		t.Fatalf("Close returned an error: %v", err)
+	}
+
+	// The process has been waited on, so the pid is reaped rather than left as
+	// a zombie: signalling it must fail.
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if err := syscall.Kill(pid, 0); err != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("jpake-server pid %d is still running 5s after Close", pid)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Close must be safe to call again (RemoveAll can race a completed
+	// handshake's own cleanup).
+	if err := auth.Close(); err != nil {
+		t.Errorf("second Close returned an error: %v", err)
 	}
 }
