@@ -84,8 +84,11 @@ func (s *Simulator) update() {
 	// Update time
 	s.pumpState.UpdateTimeSinceReset()
 
-	// Update bolus delivery
-	s.updateBolusDelivery()
+	// Update bolus delivery. A bolus that finished on this tick is recorded
+	// after the pump state mutex has been released.
+	if completed := s.updateBolusDelivery(); completed != nil {
+		s.pumpState.RecordLastBolus(*completed)
+	}
 
 	// Update basal delivery
 	s.updateBasalDelivery()
@@ -97,13 +100,15 @@ func (s *Simulator) update() {
 	s.checkAlerts()
 }
 
-// updateBolusDelivery simulates bolus insulin delivery
-func (s *Simulator) updateBolusDelivery() {
+// updateBolusDelivery simulates bolus insulin delivery. It returns the record
+// of a bolus that finished on this tick, if any; recording it has to happen
+// after the pump state mutex is released, since RecordLastBolus takes it.
+func (s *Simulator) updateBolusDelivery() *LastBolusRecord {
 	s.pumpState.mutex.Lock()
 	defer s.pumpState.mutex.Unlock()
 
 	if !s.pumpState.Bolus.Active {
-		return
+		return nil
 	}
 
 	// Calculate delivery rate (units per second)
@@ -135,12 +140,28 @@ func (s *Simulator) updateBolusDelivery() {
 		unitsDelivered := s.pumpState.Bolus.UnitsDelivered
 		unitsTotal := s.pumpState.Bolus.UnitsTotal
 
+		sourceID := s.pumpState.Bolus.SourceID
+		typeBitmask := s.pumpState.Bolus.TypeBitmask
+
 		s.pumpState.Bolus.Active = false
 		log.Infof("Bolus delivery complete: %.2f units delivered", s.pumpState.Bolus.UnitsDelivered)
 
 		// Update IOB (simple calculation - in reality this would decay over time)
 		s.pumpState.IOB += s.pumpState.Bolus.UnitsTotal
 		s.pumpState.TDD += s.pumpState.Bolus.UnitsTotal
+
+		// Record the completed bolus so LastBolusStatus can report it. This is
+		// how a driver finalizes the dose it commanded: it matches bolusId and
+		// takes the delivered volume and end time from that record.
+		completed := LastBolusRecord{
+			BolusID:        bolusID,
+			RequestedUnits: unitsTotal,
+			DeliveredUnits: unitsDelivered,
+			SourceID:       sourceID,
+			TypeBitmask:    typeBitmask,
+			EndReasonID:    BolusEndReasonCompleted,
+			EndTime:        time.Now(),
+		}
 
 		// Record history log entry
 		s.addHistoryEntryWithTypeID(HistoryBolusCompleted, "BolusCompleted", map[string]interface{}{
@@ -155,7 +176,11 @@ func (s *Simulator) updateBolusDelivery() {
 				log.Warnf("Failed to notify bolus complete: %v", err)
 			}
 		}
+
+		return &completed
 	}
+
+	return nil
 }
 
 // updateBasalDelivery simulates basal insulin delivery

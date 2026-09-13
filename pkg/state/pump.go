@@ -1,6 +1,10 @@
 package state
 
 import (
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -56,8 +60,26 @@ type PumpState struct {
 	PumpingSuspended bool
 	ControlIQMode    int // 0=Normal, 1=Sleep, 2=Exercise
 
+	// ClosedLoopEnabled reports whether Control-IQ closed-loop control is on.
+	// It defaults to FALSE: a driver that reads closedLoopEnabled=true refuses
+	// to enact temp basals and manual boluses at all, so a pump that claims
+	// closed loop by default makes most of the control surface untestable.
+	ClosedLoopEnabled bool
+
+	// Weight (kg) and TotalDailyInsulin (units) back the ControlIQInfo response.
+	Weight            int
+	TotalDailyInsulin int
+
+	// LastBolus is the record of the most recently finished bolus.
+	LastBolus *LastBolusRecord
+
 	// Alerts/Alarms
 	ActiveAlerts []Alert
+
+	// nextBolusID backs GetNextBolusID's monotonic allocator.
+	nextBolusID uint32
+	// nextTempRateID backs NextTempRateID's monotonic allocator.
+	nextTempRateID int
 
 	mutex sync.RWMutex
 }
@@ -68,7 +90,33 @@ type BasalState struct {
 	TempBasalActive bool
 	TempBasalRate   float64
 	TempBasalEnd    time.Time
+
+	// TempBasalPercent, TempBasalStart and TempRateID mirror what
+	// SetTempRateRequest asked for, so TempRateResponse can report the temp
+	// rate back to the driver instead of a static "inactive" constant.
+	TempBasalPercent int
+	TempBasalStart   time.Time
+	TempRateID       int
 }
+
+// Bolus source IDs, matching pumpX2's BolusDeliveryHistoryLog.BolusSource
+// ordinals. A driver uses this to tell a bolus it commanded itself from one a
+// user programmed on the pump's own screen, so an app-commanded bolus must
+// report BolusSourceBluetoothRemote and not the quickBolus default of 0.
+const (
+	// BolusSourceQuickBolus is a bolus started from the pump's quick-bolus buttons.
+	BolusSourceQuickBolus = 0
+	// BolusSourceBluetoothRemote is a bolus commanded by a paired app over BLE.
+	BolusSourceBluetoothRemote = 8
+)
+
+// Bolus end-reason IDs, matching pumpX2's LastBolusStatusAbstractResponse.BolusStatus.
+const (
+	// BolusEndReasonCompleted marks a bolus that delivered its full requested volume.
+	BolusEndReasonCompleted = 3
+	// BolusEndReasonStopped marks a bolus cut short (canceled by the app or the user).
+	BolusEndReasonStopped = 2
+)
 
 // BolusState represents active bolus state
 type BolusState struct {
@@ -77,6 +125,37 @@ type BolusState struct {
 	UnitsTotal     float64
 	StartTime      time.Time
 	BolusID        uint32
+
+	// SourceID is the pumpX2 BolusSource ordinal for how this bolus was
+	// commanded (see BolusSource* constants).
+	SourceID int
+	// TypeBitmask is the pumpX2 BolusType bitmask carried by InitiateBolusRequest.
+	TypeBitmask int
+	// FoodVolume and CorrectionVolume are the optional metadata split the
+	// client attributed to carbs and to a correction, in units.
+	FoodVolume       float64
+	CorrectionVolume float64
+}
+
+// LastBolusRecord is the pump's record of the most recently finished bolus,
+// whether it completed or was cut short. It is what LastBolusStatus(V1/V2/V3)
+// reports, and it is how a driver reconciles the bolus it commanded with what
+// the pump actually delivered: it compares BolusID and reads DeliveredUnits and
+// the end timestamp. Keeping it as live state (rather than the static zeros the
+// generic settings table used to serve) is what makes a bolus initiated through
+// InitiateBolusRequest observable afterwards.
+type LastBolusRecord struct {
+	BolusID           uint32
+	RequestedUnits    float64
+	DeliveredUnits    float64
+	SourceID          int
+	TypeBitmask       int
+	EndReasonID       int
+	EndTime           time.Time
+	SecondsSinceReset uint32
+	// Valid is false until a bolus has actually finished, so the response can
+	// report "no last bolus" rather than a fabricated zeroed record.
+	Valid bool
 }
 
 // ReservoirState represents reservoir state
@@ -112,7 +191,14 @@ type HistoryLogEntry struct {
 	TypeID    int    // Numeric type ID matching pumpX2 history log types
 	Type      string // Human-readable type name
 	Timestamp time.Time
-	Data      map[string]interface{}
+	// PumpTime is Timestamp expressed the way the wire format carries it:
+	// seconds since the Tandem epoch (2008-01-01). Every history-log record
+	// pumpX2 and TandemKit decode reads its pumpTimeSec field this way, so it
+	// is captured at write time rather than converted at send time -- a later
+	// controllable pump clock then cannot retroactively change the timestamp on
+	// records already written.
+	PumpTime uint32
+	Data     map[string]interface{}
 }
 
 // HistoryLogState represents history log storage
@@ -154,14 +240,21 @@ const (
 
 // NewPumpState creates a new pump state with default values
 func NewPumpState() *PumpState {
-	now := time.Now()
+	ps := newDefaultPumpState(time.Now())
+	ps.applyAPIVersionOverride()
+	return ps
+}
 
+func newDefaultPumpState(now time.Time) *PumpState {
 	return &PumpState{
 		SerialNumber:    "11223344",
-		Model:           "t:slim X2",
-		FirmwareVersion: "7.6.0.0",
-		APIVersionMajor: 2,
-		APIVersionMinor: 5,
+		Model:           "Tandem Mobi",
+		FirmwareVersion: "1.0.0.0",
+		// Defaults to the Tandem Mobi API version; see defaultAPIVersionMajor.
+		// Configurable at startup via FAKETANDEM_API_VERSION and at runtime via
+		// SetAPIVersion.
+		APIVersionMajor: defaultAPIVersionMajor,
+		APIVersionMinor: defaultAPIVersionMinor,
 
 		TimeSinceReset: 0,
 		CurrentTime:    now,
@@ -178,6 +271,12 @@ func NewPumpState() *PumpState {
 		Bolus: &BolusState{
 			Active: false,
 		},
+
+		LastBolus: &LastBolusRecord{},
+
+		ClosedLoopEnabled: false,
+		Weight:            70,
+		TotalDailyInsulin: 40,
 
 		IOB: 0.0,
 		TDD: 0.0,
@@ -349,17 +448,36 @@ func (ps *PumpState) GetBasalRate() float64 {
 	return ps.Basal.CurrentRate
 }
 
-// GetNextBolusID returns the next bolus ID
+// GetNextBolusID allocates the bolus ID a BolusPermissionResponse hands out.
+// A real pump returns a monotonically increasing counter that the following
+// InitiateBolusRequest echoes back and that every later LastBolusStatus query
+// is matched against; deriving it from the wall clock (as this used to) made
+// two permission grants inside the same second collide and made the ID
+// unrelated to anything the pump had actually recorded.
 func (ps *PumpState) GetNextBolusID() uint32 {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+
+	ps.nextBolusID++
+	return ps.nextBolusID
+}
+
+// PeekNextBolusID returns the ID GetNextBolusID last handed out, without
+// allocating a new one.
+func (ps *PumpState) PeekNextBolusID() uint32 {
 	ps.mutex.RLock()
 	defer ps.mutex.RUnlock()
 
-	// Simple incrementing ID based on time
-	return uint32(time.Now().Unix() % 1000000)
+	return ps.nextBolusID
 }
 
 // StartBolus starts a bolus delivery
 func (ps *PumpState) StartBolus(units float64, bolusID uint32) {
+	ps.StartBolusWithSource(units, bolusID, BolusSourceBluetoothRemote, 0)
+}
+
+// StartBolusWithSource starts a bolus delivery, recording how it was commanded.
+func (ps *PumpState) StartBolusWithSource(units float64, bolusID uint32, sourceID, typeBitmask int) {
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
 
@@ -368,8 +486,16 @@ func (ps *PumpState) StartBolus(units float64, bolusID uint32) {
 	ps.Bolus.UnitsDelivered = 0
 	ps.Bolus.StartTime = time.Now()
 	ps.Bolus.BolusID = bolusID
+	ps.Bolus.SourceID = sourceID
+	ps.Bolus.TypeBitmask = typeBitmask
 
-	log.Infof("Started bolus: %.2f units, ID=%d", units, bolusID)
+	// Keep the allocator ahead of any externally supplied ID so a later
+	// permission grant can never reissue one already in use.
+	if bolusID > ps.nextBolusID {
+		ps.nextBolusID = bolusID
+	}
+
+	log.Infof("Started bolus: %.2f units, ID=%d, sourceId=%d", units, bolusID, sourceID)
 }
 
 // StopBolus stops an active bolus
@@ -450,11 +576,13 @@ func (ps *PumpState) AddHistoryLogEntryWithTypeID(typeID int, entryType string, 
 	ps.HistoryLog.mutex.Lock()
 	defer ps.HistoryLog.mutex.Unlock()
 
+	now := time.Now()
 	entry := HistoryLogEntry{
 		Sequence:  ps.HistoryLog.NextSequence,
 		TypeID:    typeID,
 		Type:      entryType,
-		Timestamp: time.Now(),
+		Timestamp: now,
+		PumpTime:  PumpTimeSeconds(now),
 		Data:      data,
 	}
 	ps.HistoryLog.Entries = append(ps.HistoryLog.Entries, entry)
@@ -540,4 +668,204 @@ func (ps *PumpState) GetControlIQMode() int {
 	ps.mutex.RLock()
 	defer ps.mutex.RUnlock()
 	return ps.ControlIQMode
+}
+
+// RecordLastBolus stores the record of a bolus that has just finished, so
+// later LastBolusStatus(V1/V2/V3) queries can report it. Callers must NOT hold
+// the pump state mutex.
+func (ps *PumpState) RecordLastBolus(record LastBolusRecord) {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+
+	record.Valid = true
+	if record.EndTime.IsZero() {
+		record.EndTime = time.Now()
+	}
+	record.SecondsSinceReset = ps.TimeSinceReset
+	ps.LastBolus = &record
+
+	log.Infof("Recorded last bolus: ID=%d delivered=%.2f of %.2f units, endReason=%d",
+		record.BolusID, record.DeliveredUnits, record.RequestedUnits, record.EndReasonID)
+}
+
+// GetLastBolus returns a copy of the last finished bolus record. The second
+// result is false when no bolus has finished yet.
+func (ps *PumpState) GetLastBolus() (LastBolusRecord, bool) {
+	ps.mutex.RLock()
+	defer ps.mutex.RUnlock()
+
+	if ps.LastBolus == nil || !ps.LastBolus.Valid {
+		return LastBolusRecord{}, false
+	}
+	return *ps.LastBolus, true
+}
+
+// TempRateSnapshot is a point-in-time view of the temp basal, for building a
+// TempRateResponse without holding the pump state lock across an encode.
+type TempRateSnapshot struct {
+	Active     bool
+	Percent    int
+	Rate       float64
+	StartTime  time.Time
+	EndTime    time.Time
+	TempRateID int
+}
+
+// GetTempRate returns the current temp basal state.
+func (ps *PumpState) GetTempRate() TempRateSnapshot {
+	ps.mutex.RLock()
+	defer ps.mutex.RUnlock()
+
+	return TempRateSnapshot{
+		Active:     ps.Basal.TempBasalActive,
+		Percent:    ps.Basal.TempBasalPercent,
+		Rate:       ps.Basal.TempBasalRate,
+		StartTime:  ps.Basal.TempBasalStart,
+		EndTime:    ps.Basal.TempBasalEnd,
+		TempRateID: ps.Basal.TempRateID,
+	}
+}
+
+// GetProfileBasalRate returns the scheduled (profile) basal rate, ignoring any
+// temp rate currently in effect. Unlike GetBasalRate this is what a percentage
+// temp rate must be applied to: multiplying the *current* rate compounds
+// percentages when one temp rate replaces another.
+func (ps *PumpState) GetProfileBasalRate() float64 {
+	ps.mutex.RLock()
+	defer ps.mutex.RUnlock()
+
+	return ps.Basal.CurrentRate
+}
+
+// SetAPIVersion overrides the API version reported by ApiVersionResponse.
+func (ps *PumpState) SetAPIVersion(major, minor int) {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+
+	ps.APIVersionMajor = major
+	ps.APIVersionMinor = minor
+	log.Infof("Pump API version set to %d.%d", major, minor)
+}
+
+// IsClosedLoopEnabled reports whether Control-IQ closed-loop control is on.
+func (ps *PumpState) IsClosedLoopEnabled() bool {
+	ps.mutex.RLock()
+	defer ps.mutex.RUnlock()
+
+	return ps.ClosedLoopEnabled
+}
+
+// SetClosedLoopEnabled turns Control-IQ closed-loop control on or off.
+func (ps *PumpState) SetClosedLoopEnabled(enabled bool) {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+
+	ps.ClosedLoopEnabled = enabled
+	log.Infof("Control-IQ closed loop set to %v", enabled)
+}
+
+// ControlIQSnapshot is a point-in-time view of the Control-IQ related state
+// that ControlIQInfoV1/V2 responses report.
+type ControlIQSnapshot struct {
+	ClosedLoopEnabled   bool
+	Weight              int
+	TotalDailyInsulin   int
+	CurrentUserModeType int
+}
+
+// GetControlIQInfo returns the Control-IQ state backing ControlIQInfo responses.
+func (ps *PumpState) GetControlIQInfo() ControlIQSnapshot {
+	ps.mutex.RLock()
+	defer ps.mutex.RUnlock()
+
+	return ControlIQSnapshot{
+		ClosedLoopEnabled:   ps.ClosedLoopEnabled,
+		Weight:              ps.Weight,
+		TotalDailyInsulin:   ps.TotalDailyInsulin,
+		CurrentUserModeType: ps.ControlIQMode,
+	}
+}
+
+// NextTempRateID allocates the ID reported by SetTempRateResponse and echoed by
+// the matching TempRateActivated history-log record. A real pump increments
+// this per temp rate; it was previously hard-coded to 1, so a driver could not
+// tell one temp rate from the next.
+func (ps *PumpState) NextTempRateID() int {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+
+	ps.nextTempRateID++
+	return ps.nextTempRateID
+}
+
+// GetHistoryLogSequenceRange returns the first and last sequence numbers
+// currently held in the history log. Both are 0 when the log is empty.
+func (ps *PumpState) GetHistoryLogSequenceRange() (first, last uint32) {
+	ps.HistoryLog.mutex.Lock()
+	defer ps.HistoryLog.mutex.Unlock()
+
+	if len(ps.HistoryLog.Entries) == 0 {
+		return 0, 0
+	}
+	return ps.HistoryLog.Entries[0].Sequence, ps.HistoryLog.Entries[len(ps.HistoryLog.Entries)-1].Sequence
+}
+
+// Default API version reported by ApiVersionResponse. 3.5 is the Tandem Mobi
+// initial-release API. It is chosen to match the captured Mobi
+// PumpVersionResponse fixture this emulator serves (modelNum 1004000): a
+// driver combines pump model and API version to decide which message variants
+// a pump supports, and the Mobi-only paths (LastBolusStatusV3, SetTempRate,
+// StopTempRate) all declare minApi 3.5. Reporting the t:slim X2's 2.5 while
+// claiming a Mobi model number produced an incoherent pump -- the driver took
+// the legacy V2 last-bolus path while still sending Mobi-only control
+// messages.
+const (
+	defaultAPIVersionMajor = 3
+	defaultAPIVersionMinor = 5
+)
+
+// apiVersionEnvVar overrides the default API version at startup, as
+// "<major>.<minor>" (e.g. "2.5" to emulate a t:slim X2 on software v7.6).
+// Deliberately an environment variable rather than a CLI flag so the emulator's
+// entry point does not have to change.
+const apiVersionEnvVar = "FAKETANDEM_API_VERSION"
+
+// applyAPIVersionOverride applies the FAKETANDEM_API_VERSION override, if set.
+// A malformed value is logged and ignored rather than being fatal: an
+// unparseable version should not stop the emulator from starting.
+func (ps *PumpState) applyAPIVersionOverride() {
+	raw := strings.TrimSpace(os.Getenv(apiVersionEnvVar))
+	if raw == "" {
+		return
+	}
+
+	major, minor, err := parseAPIVersion(raw)
+	if err != nil {
+		log.Warnf("Ignoring invalid %s=%q: %v", apiVersionEnvVar, raw, err)
+		return
+	}
+
+	ps.APIVersionMajor = major
+	ps.APIVersionMinor = minor
+	log.Infof("Pump API version overridden by %s: %d.%d", apiVersionEnvVar, major, minor)
+}
+
+// parseAPIVersion parses a "<major>.<minor>" API version string.
+func parseAPIVersion(raw string) (major, minor int, err error) {
+	parts := strings.SplitN(raw, ".", 2)
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("expected \"<major>.<minor>\"")
+	}
+	major, err = strconv.Atoi(strings.TrimSpace(parts[0]))
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid major version: %w", err)
+	}
+	minor, err = strconv.Atoi(strings.TrimSpace(parts[1]))
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid minor version: %w", err)
+	}
+	if major < 0 || minor < 0 {
+		return 0, 0, fmt.Errorf("version components must not be negative")
+	}
+	return major, minor, nil
 }
