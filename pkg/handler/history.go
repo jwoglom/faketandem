@@ -36,18 +36,27 @@ func (h *HistoryLogHandler) RequiresAuth() bool {
 func (h *HistoryLogHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling HistoryLogRequest: txID=%d", msg.TxID)
 
-	// Extract request parameters
+	// pumpX2's HistoryLogRequest fields are "startLog" (uint32, the sequence
+	// number to start at) and "numberOfLogs" (uint8, how many records to
+	// stream) -- not "startSequence"/"endSequence". The pump streams
+	// numberOfLogs records starting at startLog.
 	startSeq := uint32(0)
-	endSeq := uint32(100)
+	numberOfLogs := uint32(0)
 
-	if val, ok := msg.Cargo["startSequence"].(float64); ok {
+	if val, ok := cargoInt(msg, "startLog", "startSequence"); ok && val >= 0 {
 		startSeq = uint32(val)
 	}
-	if val, ok := msg.Cargo["endSequence"].(float64); ok {
-		endSeq = uint32(val)
+	if val, ok := cargoInt(msg, "numberOfLogs"); ok && val > 0 {
+		numberOfLogs = uint32(val)
+	}
+	if numberOfLogs == 0 {
+		numberOfLogs = 1
 	}
 
-	log.Debugf("History log requested: start=%d, end=%d", startSeq, endSeq)
+	endSeq := startSeq + numberOfLogs - 1
+
+	log.Debugf("History log requested: startLog=%d, numberOfLogs=%d (sequences %d..%d)",
+		startSeq, numberOfLogs, startSeq, endSeq)
 
 	// Get entries from pump state. The real HistoryLogResponse has no field
 	// for embedded entries -- actual log entries go out separately via
@@ -105,17 +114,25 @@ func (h *HistoryLogStatusHandler) RequiresAuth() bool {
 func (h *HistoryLogStatusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling HistoryLogStatusRequest: txID=%d", msg.TxID)
 
+	// HistoryLogStatusResponse(numEntries, firstSequenceNum, lastSequenceNum).
+	// Sequence numbers must agree with what storage actually holds: entries are
+	// numbered from 1, so an empty log reports 0/0 and a non-empty one reports
+	// first=1, last=numEntries. Reporting firstSequence 0 for a log whose first
+	// record is sequence 1 made the reported range inconsistent with every
+	// HistoryLogRequest the driver would then send.
 	numEntries := pumpState.GetHistoryLogCount()
+	firstSequence, lastSequence := pumpState.GetHistoryLogSequenceRange()
 
-	log.Debugf("History log status: numEntries=%d", numEntries)
+	log.Debugf("History log status: numEntries=%d, firstSequence=%d, lastSequence=%d",
+		numEntries, firstSequence, lastSequence)
 
 	response, err := h.bridge.EncodeMessage(
 		msg.TxID,
 		"HistoryLogStatusResponse",
 		map[string]interface{}{
-			"numEntries":    numEntries,
-			"firstSequence": 0,
-			"lastSequence":  numEntries,
+			"numEntries":       numEntries,
+			"firstSequenceNum": firstSequence,
+			"lastSequenceNum":  lastSequence,
 		},
 	)
 
