@@ -142,6 +142,55 @@ Tests concurrent session handling:
 go test -v ./pkg/handler -run TestJPAKESessionManager
 ```
 
+### JPAKE Pairing Stress Harness (`pkg/handler/jpake_stress_test.go`)
+
+Runs the full five-round pairing handshake end to end, many times over and
+several at once, against the real pumpX2 `jpake-server` and `jpake` client
+subprocesses through the real `PumpX2JPAKEAuthenticator` code path. Use it when
+a pairing problem only shows up once in many runs and a single pass of
+`TestPumpX2JPAKEAuthenticator_FullFlowViaJar` is too coarse to catch it.
+
+It is skipped unless `FAKETANDEM_STRESS_JPAKE=1`, since each iteration spawns
+several JVMs and CI should not pay for that.
+
+```bash
+FAKETANDEM_STRESS_JPAKE=1 \
+FAKETANDEM_TEST_CLIPARSER_JAR=/path/to/pumpx2-cliparser-all.jar \
+  go test -v ./pkg/handler -run TestJPAKEStress_FullPairing -count=1 -timeout 60m
+```
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `FAKETANDEM_STRESS_JPAKE` | unset | Must be `1` or the harness skips |
+| `FAKETANDEM_TEST_CLIPARSER_JAR` | unset | Path to a built cliparser jar (required) |
+| `FAKETANDEM_STRESS_JPAKE_ITERATIONS` | 30 | Handshakes to run |
+| `FAKETANDEM_STRESS_JPAKE_PARALLELISM` | 4 | Handshakes in flight at once |
+
+Each iteration checks that both sides derive the *same* secret, so a handshake
+that "completes" against a mismatched key counts as a failure. Every failure is
+reported with the tail of what that iteration's `jpake-server` wrote to stderr,
+which is where a Java stack trace from an aborted handshake goes.
+
+Budget roughly one second per iteration at parallelism 4-6 on a laptop. A rate
+of a few tenths of a percent needs at least ~1000 iterations to measure, so
+plan on 15-20 minutes for a run that means anything.
+
+**A known, irreducible failure rate of ~0.4%.** Roughly one handshake in 256
+fails inside pumpX2 itself and cannot be completed by either side.
+`io.particle.crypto.EcJpake.getRound2()` encodes the round-2 zero-knowledge-
+proof scalar with a minimal-length unsigned encoding, so when that scalar's top
+byte happens to be zero the round-2 blob is 167 bytes instead of 168, and
+`Jpake2Response` (which requires exactly 168) rejects it. `jpake-server` prints
+`{"error":"Exception during server JPAKE authentication: null"}` -- "null"
+because the failure reaches it wrapped in an `InvocationTargetException`, whose
+`getMessage()` is null -- and exits without sending round 2. Fixing that
+belongs in pumpX2 (`writeNum` should zero-pad to the curve's scalar length).
+What faketandem does about it is fail the handshake immediately with that
+cause named in the log, kill the subprocess, and drop the link so the client
+pairs again against a fresh `jpake-server`; see
+`pkg/handler/jpake_server_failure_test.go`, which covers that recovery
+deterministically and needs neither java nor a jar.
+
 ## Test Environment Variables
 
 ### Required for Integration Tests
@@ -158,6 +207,11 @@ go test -v ./pkg/handler -run TestJPAKESessionManager
   export LOG_LEVEL=debug
   go test -v ./pkg/handler -run Integration
   ```
+- `FAKETANDEM_TEST_CLIPARSER_JAR`: Path to a prebuilt cliparser jar, for the
+  jar-mode integration tests and the JPAKE stress harness (skipped without it)
+- `FAKETANDEM_STRESS_JPAKE` / `FAKETANDEM_STRESS_JPAKE_ITERATIONS` /
+  `FAKETANDEM_STRESS_JPAKE_PARALLELISM`: see
+  [JPAKE Pairing Stress Harness](#jpake-pairing-stress-harness-pkghandlerjpake_stress_testgo)
 
 ## Writing New Tests
 

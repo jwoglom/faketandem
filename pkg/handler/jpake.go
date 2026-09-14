@@ -248,6 +248,19 @@ func (h *JPAKEHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state
 	// Process this round
 	responseParams, err := auth.ProcessRound(h.round, requestData)
 	if err != nil {
+		// This handshake is over. Drop the authenticator now rather than
+		// waiting for a BLE disconnect to clear it: sessionID is a constant,
+		// so a failed authenticator left in the map would be handed to the
+		// client's very next pairing attempt -- and a PumpX2JPAKEAuthenticator
+		// that has already failed refuses every later round, turning one bad
+		// handshake into a permanently unpairable emulator.
+		if errors.Is(err, ErrJPAKEServerFailed) {
+			log.Warnf("JPAKE round %d failed because pumpX2's jpake-server gave up (%v); dropping this handshake so the client re-pairs against a fresh jpake-server",
+				h.round, err)
+		} else {
+			log.Warnf("JPAKE round %d failed (%v); dropping this handshake", h.round, err)
+		}
+		h.sessionManager.Remove(sessionID)
 		return nil, fmt.Errorf("JPAKE round %d failed: %w", h.round, err)
 	}
 
