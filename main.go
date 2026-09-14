@@ -227,6 +227,16 @@ func main() {
 				log.Warn("Dropping connection to force client back to full pairing (no cached long-term JPAKE key available for this quick-pair reconnect)")
 				ble.ShutdownConnection()
 			}
+			if errors.Is(err, handler.ErrJPAKEServerFailed) {
+				// The pumpX2 jpake-server subprocess driving this handshake
+				// gave up, so no response to this round is ever coming. Cut
+				// the link instead of leaving the client to sit out its own
+				// 30-90 second pairing timeout: it reconnects and pairs
+				// again, which starts a brand new jpake-server.
+				log.Warn("Dropping connection: the pumpX2 jpake-server subprocess for this pairing failed, so this handshake cannot complete. The client should pair again; the retry gets a fresh jpake-server.")
+				router.ResetJPAKESession()
+				ble.ShutdownConnection()
+			}
 			return
 		}
 	})

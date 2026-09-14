@@ -19,8 +19,8 @@ import (
 
 // PumpX2JPAKEAuthenticator uses pumpX2's actual server-side JPAKE implementation
 type PumpX2JPAKEAuthenticator struct {
-	pairingCode string
-	bridge      *pumpx2.Bridge
+	pairingCode   string
+	bridge        *pumpx2.Bridge
 	pumpX2Path    string
 	pumpX2Mode    string
 	gradleCmd     string
@@ -28,7 +28,12 @@ type PumpX2JPAKEAuthenticator struct {
 	pumpX2JarPath string
 
 	// JPAKE state
-	round        int
+	round int
+	// failed, once set, makes every later round fail immediately with the
+	// same cause instead of talking to a subprocess that is gone (or, worse,
+	// silently starting a second one part-way through a handshake the client
+	// is already half-way through with the first).
+	failed       error
 	server       *jpakeServerProcess
 	sharedSecret []byte
 	serverNonce  []byte
@@ -128,11 +133,51 @@ func convertServerResponseValue(value interface{}) interface{} {
 	return hex.EncodeToString(b)
 }
 
-// ProcessRound processes a JPAKE round using pumpX2's server-side implementation
+// ProcessRound processes a JPAKE round using pumpX2's server-side implementation.
+//
+// Any failure ends the handshake here and now: the subprocess is torn down and
+// this authenticator is poisoned, so the caller gets an error on this round
+// (and on any later one) rather than waiting out a 30-second read against a
+// process that has already given up. See abortLocked.
 func (j *PumpX2JPAKEAuthenticator) ProcessRound(round int, requestData map[string]interface{}) (map[string]interface{}, error) {
 	j.mutex.Lock()
 	defer j.mutex.Unlock()
 
+	if j.failed != nil {
+		return nil, j.failed
+	}
+
+	params, err := j.processRoundLocked(round, requestData)
+	if err != nil {
+		j.abortLocked(err)
+		return nil, err
+	}
+	return params, nil
+}
+
+// abortLocked ends the handshake: it kills the jpake-server subprocess and
+// records cause so every later round fails with it immediately. Callers hold
+// j.mutex.
+//
+// Killing the subprocess here is what guarantees the next pairing attempt gets
+// a *fresh* server. JPAKESessionManager drops this authenticator on the same
+// failure, so nothing reuses it; this makes sure that even if something did,
+// it could not half-resume a handshake the client has already abandoned.
+func (j *PumpX2JPAKEAuthenticator) abortLocked(cause error) {
+	if j.failed != nil {
+		return
+	}
+	j.failed = fmt.Errorf("JPAKE handshake abandoned: %w", cause)
+
+	if j.server != nil {
+		log.Warnf("Abandoning this JPAKE handshake and killing its jpake-server subprocess: %v", cause)
+		j.server.close()
+		j.server = nil
+	}
+}
+
+// processRoundLocked runs one round. Callers hold j.mutex.
+func (j *PumpX2JPAKEAuthenticator) processRoundLocked(round int, requestData map[string]interface{}) (map[string]interface{}, error) {
 	log.Infof("Processing JPAKE round %d using pumpX2 server mode", round)
 
 	// Start the jpake-server command if not started
@@ -254,13 +299,18 @@ func (j *PumpX2JPAKEAuthenticator) readServerEnvelope(label string, dst *map[str
 }
 
 // sendClientRequest forwards the client's encoded request to jpake-server.
-func (j *PumpX2JPAKEAuthenticator) sendClientRequest(messageName string, requestData map[string]interface{}) {
+//
+// A write failure is returned, not just logged: stdin only fails once the JVM
+// on the other end is gone, and continuing on to wait 30 seconds for a reply
+// from a dead process is exactly the stall this path has to avoid.
+func (j *PumpX2JPAKEAuthenticator) sendClientRequest(messageName string, requestData map[string]interface{}) error {
 	requestHex := j.encodeClientRequest(requestData)
 
 	log.Debugf("Sending client %s to pumpX2: %s", messageName, requestHex)
 	if err := j.server.send(requestHex); err != nil {
-		log.Warnf("Failed to send %s to pumpX2: %v", messageName, err)
+		return fmt.Errorf("failed to send %s to pumpX2 jpake-server: %w", messageName, err)
 	}
+	return nil
 }
 
 // readServerRound1aResponse reads only the server's initial JPAKE_1A response.
@@ -283,7 +333,9 @@ func (j *PumpX2JPAKEAuthenticator) processRound1(requestData map[string]interfac
 
 	if j.round == 0 {
 		// First call - send client's Jpake1aRequest
-		j.sendClientRequest("Jpake1aRequest", requestData)
+		if err := j.sendClientRequest("Jpake1aRequest", requestData); err != nil {
+			return nil, err
+		}
 
 		// Now read JPAKE_1B (pumpX2 outputs it after receiving client's 1a)
 		if err := j.readServerRound1bResponse(); err != nil {
@@ -295,7 +347,9 @@ func (j *PumpX2JPAKEAuthenticator) processRound1(requestData map[string]interfac
 	}
 
 	// Second call - send client's Jpake1bRequest
-	j.sendClientRequest("Jpake1bRequest", requestData)
+	if err := j.sendClientRequest("Jpake1bRequest", requestData); err != nil {
+		return nil, err
+	}
 
 	// Read server's round 2 response (pumpX2 sends it after receiving round 1b)
 	if err := j.readServerEnvelope("JPAKE_2", &j.round2Response); err != nil {
@@ -319,7 +373,9 @@ func (j *PumpX2JPAKEAuthenticator) processRound1(requestData map[string]interfac
 // this code did) deadlocks, since jpake-server won't produce it until the
 // round 3 request (sent by processRound3, on a later call) has also arrived.
 func (j *PumpX2JPAKEAuthenticator) processRound2(requestData map[string]interface{}) (map[string]interface{}, error) {
-	j.sendClientRequest("Jpake2Request", requestData)
+	if err := j.sendClientRequest("Jpake2Request", requestData); err != nil {
+		return nil, err
+	}
 
 	j.round = 2
 
@@ -331,7 +387,9 @@ func (j *PumpX2JPAKEAuthenticator) processRound3(requestData map[string]interfac
 	// Send client's Jpake3SessionKeyRequest. jpake-server has been blocked
 	// waiting for exactly this since it finished reading round 2 (see
 	// processRound2) -- only once it arrives does jpake-server print "JPAKE_3:".
-	j.sendClientRequest("Jpake3SessionKeyRequest", requestData)
+	if err := j.sendClientRequest("Jpake3SessionKeyRequest", requestData); err != nil {
+		return nil, err
+	}
 
 	if err := j.readServerEnvelope("JPAKE_3", &j.round3Response); err != nil {
 		return nil, err
@@ -354,7 +412,9 @@ func (j *PumpX2JPAKEAuthenticator) processRound3(requestData map[string]interfac
 // processRound4 handles round 4
 func (j *PumpX2JPAKEAuthenticator) processRound4(requestData map[string]interface{}) (map[string]interface{}, error) {
 	// Send client's Jpake4KeyConfirmationRequest
-	j.sendClientRequest("Jpake4KeyConfirmationRequest", requestData)
+	if err := j.sendClientRequest("Jpake4KeyConfirmationRequest", requestData); err != nil {
+		return nil, err
+	}
 
 	// Read server's round 4 response
 	if err := j.readServerEnvelope("JPAKE_4", &j.round4Response); err != nil {
