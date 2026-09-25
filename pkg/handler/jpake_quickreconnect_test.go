@@ -7,6 +7,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/jwoglom/faketandem/pkg/faults"
 	"github.com/jwoglom/faketandem/pkg/pumpx2"
 	"github.com/jwoglom/faketandem/pkg/state"
 )
@@ -170,6 +171,37 @@ func TestJPAKESessionManager_QuickPairWithoutCachedKeyRejected(t *testing.T) {
 	_, err := manager.GetOrCreate("default", "123456", &pumpx2.Bridge{}, 3)
 	if !errors.Is(err, ErrJPAKEQuickPairRejected) {
 		t.Errorf("expected ErrJPAKEQuickPairRejected, got %v", err)
+	}
+}
+
+// TestJPAKESessionManager_QuickPairRejectedByFault verifies the
+// reject_quick_pair fault: a pump that HAS a cached long-term key still
+// refuses the quick-pair reconnect, which is how a harness reproduces "the
+// pump forgot this phone" and forces the client back into a full pairing.
+func TestJPAKESessionManager_QuickPairRejectedByFault(t *testing.T) {
+	pumpState := state.NewPumpState()
+	pumpState.SetLongTermKey([]byte("cached-long-term-secret"))
+
+	manager := NewJPAKESessionManager("pumpx2", "/tmp/pumpx2", "gradle", "./gradlew", "java", "", pumpState)
+
+	registry := faults.NewRegistry()
+	if _, err := registry.Arm(faults.Fault{Kind: faults.KindRejectQuickPair}); err != nil {
+		t.Fatalf("Arm: %v", err)
+	}
+	manager.SetFaultRegistry(registry)
+
+	if _, err := manager.GetOrCreate("session-1", "123456", &pumpx2.Bridge{}, 3); !errors.Is(err, ErrJPAKEQuickPairRejected) {
+		t.Fatalf("expected ErrJPAKEQuickPairRejected with the fault armed, got %v", err)
+	}
+
+	// The fault was armed for one attempt, so the next reconnect succeeds --
+	// which is what lets a test assert the client recovers.
+	auth, err := manager.GetOrCreate("session-2", "123456", &pumpx2.Bridge{}, 3)
+	if err != nil {
+		t.Fatalf("expected the next quick-pair to be honored, got %v", err)
+	}
+	if _, ok := auth.(*QuickReconnectJPAKEAuthenticator); !ok {
+		t.Errorf("expected *QuickReconnectJPAKEAuthenticator, got %T", auth)
 	}
 }
 

@@ -41,9 +41,7 @@ func (h *CentralChallengeHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpS
 
 	// Extract the appInstanceID from the request if present
 	appInstanceID := uint32(0)
-	if val, ok := msg.Cargo["appInstanceId"].(float64); ok {
-		appInstanceID = uint32(val)
-	} else if val, ok := msg.Cargo["appInstanceID"].(float64); ok {
+	if val, ok := cargoInt(msg, "appInstanceId", "appInstanceID"); ok {
 		appInstanceID = uint32(val)
 	}
 

@@ -35,10 +35,9 @@ func (h *SetSensorTypeHandler) RequiresAuth() bool {
 func (h *SetSensorTypeHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling SetSensorTypeRequest: txID=%d", msg.TxID)
 
+	// pumpX2's SetSensorTypeRequest field is "cgmSensorType".
 	sensorType := 0
-	if val, ok := msg.Cargo["cgmSensorType"].(float64); ok {
-		sensorType = int(val)
-	} else if val, ok := msg.Cargo["cgmSensorTypeId"].(float64); ok {
+	if val, ok := cargoInt(msg, "cgmSensorType", "cgmSensorTypeId"); ok {
 		sensorType = int(val)
 	}
 

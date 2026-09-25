@@ -9,6 +9,16 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// basalModifiedBitmask values reported by CurrentBasalStatusResponse. See the
+// discussion in CurrentBasalStatusHandler.HandleMessage for how these were
+// established and what is still unconfirmed.
+const (
+	// basalModifiedSuspend reports that insulin delivery is suspended.
+	basalModifiedSuspend = 0x01
+	// basalModifiedTempRate reports that a temp rate is in effect.
+	basalModifiedTempRate = 0x02
+)
+
 // CurrentBolusStatusHandler returns dynamic bolus status from pump state
 type CurrentBolusStatusHandler struct {
 	bridge *pumpx2.Bridge
@@ -32,25 +42,37 @@ func (h *CurrentBolusStatusHandler) RequiresAuth() bool {
 // HandleMessage returns dynamic bolus status from pump state
 func (h *CurrentBolusStatusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	pumpState.RLock()
-	bolus := pumpState.Bolus
+	bolus := *pumpState.Bolus
+	currentTime := pumpState.CurrentTime
+	pumpState.RUnlock()
+
 	// CurrentBolusStatusResponse(int statusId, int bolusId, long timestamp,
 	// long requestedVolume, int bolusSourceId, int bolusTypeBitmask)
-	cargo := map[string]interface{}{
-		"bolusSourceId":    0,
-		"bolusTypeBitmask": 0,
-	}
+	//
+	// timestamp is the bolus's DELIVERY START, in pump-epoch seconds (seconds
+	// since 2008-01-01), not a Unix timestamp and not "now": drivers use it as
+	// the start of the dose they report. Emitting time.Now().Unix() here put
+	// the delivery start ~38 years in the future.
+	cargo := map[string]interface{}{}
 	if bolus.Active {
+		startTime := bolus.StartTime
+		if startTime.IsZero() {
+			startTime = currentTime
+		}
 		cargo["statusId"] = 1
 		cargo["bolusId"] = bolus.BolusID
-		cargo["timestamp"] = pumpState.CurrentTime.Unix()
+		cargo["timestamp"] = pumpState.PumpTimeFor(startTime)
 		cargo["requestedVolume"] = int(bolus.UnitsTotal * 1000)
+		cargo["bolusSourceId"] = bolus.SourceID
+		cargo["bolusTypeBitmask"] = bolus.TypeBitmask
 	} else {
 		cargo["statusId"] = 0
 		cargo["bolusId"] = 0
-		cargo["timestamp"] = pumpState.CurrentTime.Unix()
+		cargo["timestamp"] = pumpState.PumpTimeFor(currentTime)
 		cargo["requestedVolume"] = 0
+		cargo["bolusSourceId"] = 0
+		cargo["bolusTypeBitmask"] = 0
 	}
-	pumpState.RUnlock()
 
 	log.Debugf("CurrentBolusStatus: active=%v, bolusId=%v", bolus.Active, cargo["bolusId"])
 
@@ -88,19 +110,42 @@ func (h *CurrentBasalStatusHandler) RequiresAuth() bool {
 // HandleMessage returns dynamic basal status from pump state
 func (h *CurrentBasalStatusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	pumpState.RLock()
-	basal := pumpState.Basal
+	basal := *pumpState.Basal
+	suspended := pumpState.PumpingSuspended
+	pumpState.RUnlock()
+
+	// basalModifiedBitmask semantics: 0x01 = suspended, 0x02 = temp rate,
+	// anything else = ordinary profile basal.
+	//
+	// pumpX2's CurrentBasalStatusResponse carries this as an opaque int and
+	// defines no enum, so it was previously read as "0x01 = temp, 0x02 =
+	// suspend" here -- the exact inverse of how TandemKit decodes it, which
+	// made every suspend look like a temp basal to the driver and vice versa.
+	// The ordering above is the one supported by real captured pump traffic in
+	// pumpX2's own btsnoop logs (scripts/discord-switchkill/parse-stdout.log):
+	// CurrentBasalStatusResponse[basalModifiedBitmask=1, currentBasalRate=0,
+	// profileBasalRate=1000] appears alongside a TempRateResponse[active=false]
+	// and a HomeScreenMirrorResponse[basalStatusIcon=4] (= BasalStatusIcon
+	// .SUSPEND) in the same exchange -- i.e. bit 0x01 on a *suspended* pump
+	// with no temp rate running. pumpX2's own unit fixture agrees in shape
+	// (profileBasalRate=800, currentBasalRate=0, bitmask=1).
+	//
+	// TODO: bit 0x02 == temp rate is inferred from TandemKit's decoding and is
+	// NOT directly attested -- no capture we have contains a pump with a temp
+	// rate running. A real Tandem Mobi capture taken during an active temp rate
+	// must confirm it. Note also that this is treated as an enumerated value,
+	// not a true bitmask: suspend wins when a temp rate is also active, because
+	// OR-ing both bits produces 0x03, which TandemKit maps to plain basal.
 	currentRate := basal.CurrentRate
 	basalModifiedBitmask := 0
 	if basal.TempBasalActive {
 		currentRate = basal.TempBasalRate
-		basalModifiedBitmask |= 1
+		basalModifiedBitmask = basalModifiedTempRate
 	}
-	suspended := pumpState.PumpingSuspended
 	if suspended {
 		currentRate = 0
-		basalModifiedBitmask |= 2
+		basalModifiedBitmask = basalModifiedSuspend
 	}
-	pumpState.RUnlock()
 
 	// CurrentBasalStatusResponse(long profileBasalRate, long currentBasalRate,
 	// int basalModifiedBitmask)
@@ -189,9 +234,16 @@ func (h *InsulinStatusHandler) RequiresAuth() bool {
 func (h *InsulinStatusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	// InsulinStatusResponse(long currentInsulinAmount, boolean isEstimate,
 	// long insulinLowAmount)
+	//
+	// currentInsulinAmount is WHOLE UNITS, not hundredths. Both decoders read
+	// it straight through with no scaling -- TandemKit's fetchReservoirStatus
+	// does "Double(response.currentInsulinAmount)" -- and the real captures in
+	// TandemKit's PumpingSuspendedHistoryLogTests (whose insulinAmount field is
+	// documented as byte-identical to this one) carry 31/150/180 for a 200-unit
+	// cartridge. Scaling by 100 here reported a 137 U reservoir as 13699 U.
 	pumpState.RLock()
 	cargo := map[string]interface{}{
-		"currentInsulinAmount": int(pumpState.Reservoir.CurrentUnits * 100),
+		"currentInsulinAmount": int(pumpState.Reservoir.CurrentUnits),
 		"isEstimate":           0,
 		"insulinLowAmount":     0,
 	}

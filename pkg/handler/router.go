@@ -3,10 +3,13 @@ package handler
 import (
 	"encoding/hex"
 	"fmt"
+	"time"
 
 	"github.com/jwoglom/faketandem/pkg/bluetooth"
+	"github.com/jwoglom/faketandem/pkg/faults"
 	"github.com/jwoglom/faketandem/pkg/protocol"
 	"github.com/jwoglom/faketandem/pkg/pumpx2"
+	"github.com/jwoglom/faketandem/pkg/reqlog"
 	"github.com/jwoglom/faketandem/pkg/settings"
 	"github.com/jwoglom/faketandem/pkg/state"
 
@@ -18,7 +21,7 @@ type Router struct {
 	handlers        map[string]MessageHandler
 	bridge          *pumpx2.Bridge
 	pumpState       *state.PumpState
-	ble             *bluetooth.Ble
+	ble             bluetooth.Transport
 	txManager       *protocol.TransactionManager
 	settingsManager *settings.Manager
 	jpakeManager    *JPAKESessionManager
@@ -26,12 +29,18 @@ type Router struct {
 	// Qualifying events notifier
 	qeNotifier *QualifyingEventsNotifier
 
+	// faultRegistry, when set, is consulted before every response leaves the
+	// pump. Nil means no faults are ever injected.
+	faultRegistry *faults.Registry
+	// requestLog, when set, records every message in and out.
+	requestLog *reqlog.Log
+
 	// Default handler for unknown messages
 	defaultHandler MessageHandler
 }
 
 // NewRouter creates a new message router
-func NewRouter(bridge *pumpx2.Bridge, pumpState *state.PumpState, ble *bluetooth.Ble, txManager *protocol.TransactionManager, jpakeMode, pumpX2Path, pumpX2Mode, gradleCmd, javaCmd, pumpX2JarPath string) *Router {
+func NewRouter(bridge *pumpx2.Bridge, pumpState *state.PumpState, ble bluetooth.Transport, txManager *protocol.TransactionManager, jpakeMode, pumpX2Path, pumpX2Mode, gradleCmd, javaCmd, pumpX2JarPath string) *Router {
 	// Create and initialize settings manager
 	settingsManager := settings.NewManager()
 	settings.RegisterDefaults(settingsManager)
@@ -56,6 +65,30 @@ func NewRouter(bridge *pumpx2.Bridge, pumpState *state.PumpState, ble *bluetooth
 // GetSettingsManager returns the settings manager
 func (r *Router) GetSettingsManager() *settings.Manager {
 	return r.settingsManager
+}
+
+// SetFaultRegistry attaches the fault injector consulted on the response path.
+func (r *Router) SetFaultRegistry(registry *faults.Registry) {
+	r.faultRegistry = registry
+	r.jpakeManager.SetFaultRegistry(registry)
+}
+
+// SetRequestLog attaches the pump-side record of messages in and out.
+func (r *Router) SetRequestLog(l *reqlog.Log) {
+	r.requestLog = l
+	if r.qeNotifier != nil {
+		r.qeNotifier.SetRequestLog(l)
+	}
+}
+
+// GetPumpState returns the pump state this router serves.
+func (r *Router) GetPumpState() *state.PumpState {
+	return r.pumpState
+}
+
+// GetTransport returns the transport this router sends on.
+func (r *Router) GetTransport() bluetooth.Transport {
+	return r.ble
 }
 
 // registerHandlers registers all message handlers
@@ -121,10 +154,13 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "HomeScreenMirrorRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMStatusRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "AlertStatusRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "AlarmStatusRequest", true))
+	// AlarmStatusRequest gets a dedicated handler rather than a static one:
+	// cliparser cannot construct AlarmStatusResponse at all (see
+	// alarm_status.go), so this one is built natively from PumpState.
+	r.RegisterHandler(NewAlarmStatusHandler())
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "LoadStatusRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ProfileStatusRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "LastBolusStatusV2Request", true))
+	r.RegisterHandler(NewLastBolusStatusHandler(r.bridge, "LastBolusStatusV2Request"))
 
 	// Notification/alarm/malfunction handlers
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "HighestAamRequest", true))
@@ -134,8 +170,8 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMAlertStatusRequest", true))
 
 	// ControlIQ info and sleep schedule handlers
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ControlIQInfoV1Request", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ControlIQInfoV2Request", true))
+	r.RegisterHandler(NewControlIQInfoHandler(r.bridge, "ControlIQInfoV1Request"))
+	r.RegisterHandler(NewControlIQInfoHandler(r.bridge, "ControlIQInfoV2Request"))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ControlIQSleepScheduleRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "BasalIQStatusRequest", true))
 	r.RegisterHandler(NewControlIQIOBHandler(r.bridge, "NonControlIQIOBRequest"))
@@ -143,8 +179,8 @@ func (r *Router) registerHandlers() {
 	// Bolus and basal handlers
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ExtendedBolusStatusRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ExtendedBolusStatusV2Request", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "LastBolusStatusV3Request", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "TempRateRequest", true))
+	r.RegisterHandler(NewLastBolusStatusHandler(r.bridge, "LastBolusStatusV3Request"))
+	r.RegisterHandler(NewTempRateHandler(r.bridge))
 	r.RegisterHandler(NewTempRateStatusHandler(r.bridge))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "LastBGRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "BolusPermissionChangeReasonRequest", true))
@@ -244,7 +280,7 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "PumpVersionBRequest", false))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CgmStatusV2Request", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CurrentEgvGuiDataV2Request", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "LastBolusStatusRequest", true))
+	r.RegisterHandler(NewLastBolusStatusHandler(r.bridge, "LastBolusStatusRequest"))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMHardwareInfoRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMGlucoseAlertSettingsRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMOORAlertSettingsRequest", true))
@@ -283,6 +319,10 @@ func (r *Router) SetDefaultHandler(handler MessageHandler) {
 func (r *Router) RouteMessage(charType bluetooth.CharacteristicType, msg *pumpx2.ParsedMessage) error {
 	log.Debugf("Routing message: type=%s, txID=%d, opcode=%d", msg.MessageType, msg.TxID, msg.Opcode)
 
+	if r.requestLog != nil {
+		r.requestLog.RecordRequest(charType.String(), msg.MessageType, msg.Opcode, msg.TxID, msg.Cargo, msg.RawPacketsHex)
+	}
+
 	// Find handler
 	handler, exists := r.handlers[msg.MessageType]
 	if !exists {
@@ -320,7 +360,14 @@ func (r *Router) RouteMessage(charType bluetooth.CharacteristicType, msg *pumpx2
 	return nil
 }
 
-// sendResponse sends a handler response
+// sendResponse sends a handler response.
+//
+// State changes are applied BEFORE anything goes on the wire. That ordering is
+// deliberate and is what makes the "applied but the response was lost" case
+// reachable: a real pump that acts on a request and then loses the reply
+// leaves the driver believing nothing happened while the pump has already
+// moved, and a drop_response fault has to reproduce exactly that, not "nothing
+// happened at all". It also means a fault can never suppress a state change.
 func (r *Router) sendResponse(requestCharType bluetooth.CharacteristicType, response *Response) error {
 	// Determine characteristic to use
 	charType := response.Characteristic
@@ -329,51 +376,371 @@ func (r *Router) sendResponse(requestCharType bluetooth.CharacteristicType, resp
 		charType = requestCharType
 	}
 
+	// Apply state changes first -- see the ordering note above.
+	for _, change := range response.StateChanges {
+		r.applyStateChange(change)
+	}
+
 	// Send main response if present
 	if response.ResponseMessage != nil {
-		if err := r.sendMessage(charType, response.ResponseMessage); err != nil {
+		if err := r.sendWithFaults(charType, response.ResponseMessage); err != nil {
 			return fmt.Errorf("failed to send main response: %w", err)
+		}
+	}
+
+	// Send a natively-encoded response, if the handler built one. It carries
+	// its own characteristic (pkg/protocol pins each message to the
+	// characteristic pumpX2 declares for it), so charType is not consulted.
+	if response.NativeResponse != nil {
+		if err := r.SendNative(response.NativeResponse); err != nil {
+			return fmt.Errorf("failed to send native response: %w", err)
 		}
 	}
 
 	// Send notifications
 	for _, notification := range response.Notifications {
-		if err := r.sendMessage(notification.Characteristic, notification.Message); err != nil {
+		if err := r.sendWithFaults(notification.Characteristic, notification.Message); err != nil {
 			log.Errorf("Failed to send notification on %s: %v", notification.Characteristic, err)
 			// Continue with other notifications
 		}
 	}
 
-	// Apply state changes
-	for _, change := range response.StateChanges {
-		r.applyStateChange(change)
+	// Send natively-encoded follow-up notifications (history log streams).
+	for _, native := range response.NativeNotifications {
+		if err := r.SendNative(native); err != nil {
+			log.Errorf("Failed to send native notification %s: %v", native.MessageType, err)
+			// Continue with the rest of the stream.
+		}
 	}
 
 	return nil
 }
 
-// sendMessage sends an encoded message on a characteristic
-func (r *Router) sendMessage(charType bluetooth.CharacteristicType, msg *pumpx2.EncodedMessage) error {
+// resign rebuilds the signed trailer of a response the pumpX2 cliparser
+// encoded, with this pump's real authentication key and time since reset.
+//
+// It is needed because the cliparser subprocess has neither. Its signing
+// inputs arrive only through the environment, and it uses the raw ASCII bytes
+// of PUMP_AUTHENTICATION_KEY as the HMAC key rather than decoding it -- so a
+// binary JPAKE-derived session key cannot be handed to it at all, and with no
+// key set it signs every signed message with the ASCII of its own
+// "IGNORE_HMAC_SIGNATURE_EXCEPTION" placeholder. The cargo cliparser produced
+// is kept verbatim; only the last 24 payload bytes and the CRC are recomputed,
+// so this is a re-signing step and not a second encoder.
+//
+// Messages the catalog does not mark signed are returned untouched, byte for
+// byte. So is a signed message the pump cannot sign yet: before
+// authentication there is no session key, and every signed message is on a
+// characteristic that requires authentication anyway, so this only arises for
+// a handler answering out of turn -- worth a warning, not worth inventing a
+// key for.
+func (r *Router) resign(msg *pumpx2.EncodedMessage) *pumpx2.EncodedMessage {
+	if msg == nil || !protocol.IsSignedMessage(msg.MessageType) {
+		return msg
+	}
+
+	authKey := r.pumpState.GetAuthKey()
+	if len(authKey) == 0 {
+		log.Warnf("Cannot re-sign %s txID=%d: the pump has no authentication key; "+
+			"sending the cliparser signature, which no driver will accept", msg.MessageType, msg.TxID)
+		return msg
+	}
+
+	timeSinceReset := r.pumpState.GetTimeSinceReset()
+	packets, err := protocol.ResignFragmentsHex(msg.Packets, authKey, timeSinceReset)
+	if err != nil {
+		log.Errorf("Cannot re-sign %s txID=%d: %v; sending it as cliparser encoded it",
+			msg.MessageType, msg.TxID, err)
+		return msg
+	}
+
+	log.Debugf("Re-signed %s txID=%d with the pump's own key (timeSinceReset=%d)",
+		msg.MessageType, msg.TxID, timeSinceReset)
+
+	resigned := *msg
+	resigned.Packets = packets
+	return &resigned
+}
+
+// chunkPayload is the per-fragment payload size responses are framed to, from
+// the ATT MTU the transport reports. A transport that cannot report one (the
+// Linux GATT transport, which lets gatt negotiate the MTU with the central and
+// does not expose the result) gets the 23-byte-MTU default, which is the
+// 18-byte chunking the emulator has always used.
+func (r *Router) chunkPayload() int {
+	if negotiator, ok := r.ble.(bluetooth.MTUNegotiator); ok {
+		return protocol.ChunkPayloadForMTU(negotiator.ATTMTU())
+	}
+	return protocol.DefaultMaxChunkPayload
+}
+
+// refragment re-frames a response for the link's negotiated ATT MTU.
+//
+// The pumpX2 cliparser always emits 18-byte payload chunks, the most a 23-byte
+// ATT MTU allows, and so does the native encoder by default. A real Mobi paired
+// with the official iOS app negotiates a much larger MTU, so most responses
+// reach the phone as a single notification. Both receivers read the
+// remaining-fragment counter and never a fragment's length, so the larger
+// framing is the same message in fewer packets -- a one-packet response simply
+// arrives with remaining=0.
+//
+// At the default MTU this is a no-op and the bytes are untouched. It runs after
+// re-signing, so the signature covers the message body rather than any
+// particular framing of it, and before the fault path, so the request log and
+// a partial-response fault both count the fragments that actually go out.
+func (r *Router) refragment(msg *pumpx2.EncodedMessage) *pumpx2.EncodedMessage {
+	chunkPayload := r.chunkPayload()
+	if msg == nil || len(msg.Packets) == 0 || chunkPayload == protocol.DefaultMaxChunkPayload {
+		return msg
+	}
+
+	packets, err := protocol.RefragmentHex(msg.Packets, uint8(msg.TxID), chunkPayload)
+	if err != nil {
+		log.Errorf("Cannot re-fragment %s txID=%d for a %d-byte payload chunk: %v; sending it as encoded",
+			msg.MessageType, msg.TxID, chunkPayload, err)
+		return msg
+	}
+
+	log.Debugf("Re-fragmented %s txID=%d from %d to %d fragment(s) for a %d-byte payload chunk",
+		msg.MessageType, msg.TxID, len(msg.Packets), len(packets), chunkPayload)
+
+	refragmented := *msg
+	refragmented.Packets = packets
+	return &refragmented
+}
+
+// sendWithFaults applies any armed fault to one outgoing message and then
+// sends whatever is left to send.
+func (r *Router) sendWithFaults(charType bluetooth.CharacteristicType, msg *pumpx2.EncodedMessage) error {
+	msg = r.refragment(r.resign(msg))
+
+	fault := r.matchResponseFault(charType, msg)
+	if fault == nil {
+		return r.sendAndRecord(charType, msg, -1, "", "")
+	}
+
+	switch fault.Kind {
+	case faults.KindDropResponse:
+		log.Warnf("Fault %d (drop_response): suppressing %s txID=%d; state changes were already applied",
+			fault.ID, msg.MessageType, msg.TxID)
+		r.recordSuppressed(charType, msg, fault.Kind, "response suppressed after state was applied")
+		return nil
+
+	case faults.KindDelayResponse:
+		delay := fault.Delay()
+		log.Warnf("Fault %d (delay_response): holding %s txID=%d for %v", fault.ID, msg.MessageType, msg.TxID, delay)
+		time.Sleep(delay)
+		return r.sendAndRecord(charType, msg, -1, fault.Kind, fmt.Sprintf("delayed %v", delay))
+
+	case faults.KindErrorResponse:
+		return r.sendErrorResponse(charType, msg, fault)
+
+	case faults.KindDisconnect:
+		return r.disconnectFault(charType, msg, fault)
+
+	default:
+		log.Warnf("Fault %d has kind %q, which the response path does not apply", fault.ID, fault.Kind)
+		return r.sendAndRecord(charType, msg, -1, "", "")
+	}
+}
+
+// matchResponseFault consumes the fault (if any) armed for this message.
+func (r *Router) matchResponseFault(charType bluetooth.CharacteristicType, msg *pumpx2.EncodedMessage) *faults.Fault {
+	if r.faultRegistry == nil {
+		return nil
+	}
+	return r.faultRegistry.Match(faults.Target{
+		Opcode:         msg.Opcode,
+		Message:        msg.MessageType,
+		Characteristic: charType.String(),
+	},
+		faults.KindDropResponse,
+		faults.KindDelayResponse,
+		faults.KindErrorResponse,
+		faults.KindDisconnect,
+	)
+}
+
+// sendErrorResponse replaces a response with a protocol ErrorResponse, via the
+// ErrorResponseEncoder hook. With no encoder installed the fault degrades to a
+// drop and says so, rather than pretending an error path was exercised.
+func (r *Router) sendErrorResponse(charType bluetooth.CharacteristicType, msg *pumpx2.EncodedMessage, fault *faults.Fault) error {
+	if ErrorResponseEncoder == nil {
+		log.Warnf("Fault %d (error_response): no ErrorResponseEncoder installed; dropping %s txID=%d instead",
+			fault.ID, msg.MessageType, msg.TxID)
+		r.recordSuppressed(charType, msg, fault.Kind, "no ErrorResponseEncoder installed; response dropped instead")
+		return nil
+	}
+
+	errMsg, err := ErrorResponseEncoder(msg.TxID, fault.ErrorCode, msg.Opcode, msg.MessageType)
+	if err != nil {
+		log.Errorf("Fault %d (error_response): encoder failed for %s: %v", fault.ID, msg.MessageType, err)
+		r.recordSuppressed(charType, msg, fault.Kind, fmt.Sprintf("ErrorResponseEncoder failed: %v", err))
+		return nil
+	}
+
+	// A real pump answers on the characteristic the message belongs to, not on
+	// whatever characteristic the rejected request arrived on: ErrorResponse is
+	// a CURRENT_STATUS message, and that is the only place the driver looks for
+	// it (TandemPeripheralManager's CURRENT_STATUS/opcode-77 branch). An
+	// encoder that names no characteristic keeps the request's.
+	errCharType := charType
+	if named, ok := bluetooth.CharacteristicTypeFromName(errMsg.Characteristic); ok {
+		errCharType = named
+	}
+
+	log.Warnf("Fault %d (error_response): answering %s txID=%d with ErrorResponse code %d on %s",
+		fault.ID, msg.MessageType, msg.TxID, fault.ErrorCode, errCharType)
+	return r.sendAndRecord(errCharType, errMsg, -1, fault.Kind,
+		fmt.Sprintf("ErrorResponse code %d in place of %s", fault.ErrorCode, msg.MessageType))
+}
+
+// disconnectFault drops the link either instead of answering at all, or
+// partway through the response's fragments.
+func (r *Router) disconnectFault(charType bluetooth.CharacteristicType, msg *pumpx2.EncodedMessage, fault *faults.Fault) error {
+	if fault.After == faults.AfterPartialResponse {
+		limit := fault.FragmentsSent
+		log.Warnf("Fault %d (disconnect): sending %d of %d fragments of %s txID=%d, then dropping the link",
+			fault.ID, limit, len(msg.Packets), msg.MessageType, msg.TxID)
+		err := r.sendAndRecord(charType, msg, limit, fault.Kind,
+			fmt.Sprintf("link dropped after %d of %d fragments", limit, len(msg.Packets)))
+		r.ble.ShutdownConnection()
+		return err
+	}
+
+	log.Warnf("Fault %d (disconnect): dropping the link instead of answering %s txID=%d",
+		fault.ID, msg.MessageType, msg.TxID)
+	r.recordSuppressed(charType, msg, fault.Kind, "link dropped instead of answering")
+	r.ble.ShutdownConnection()
+	return nil
+}
+
+// recordSuppressed logs a response that was encoded but never sent.
+func (r *Router) recordSuppressed(charType bluetooth.CharacteristicType, msg *pumpx2.EncodedMessage, fault, note string) {
+	if r.requestLog == nil {
+		return
+	}
+	r.requestLog.RecordResponse(charType.String(), msg.MessageType, msg.Opcode, msg.TxID, msg.Packets, 0, fault, note)
+}
+
+// sendAndRecord sends up to limit fragments (-1 for all) and records the
+// result in the request log.
+func (r *Router) sendAndRecord(charType bluetooth.CharacteristicType, msg *pumpx2.EncodedMessage, limit int, fault, note string) error {
+	sent, err := r.sendMessage(charType, msg, limit)
+	if r.requestLog != nil {
+		if err != nil {
+			if note != "" {
+				note += "; "
+			}
+			note += "send error: " + err.Error()
+		}
+		r.requestLog.RecordResponse(charType.String(), msg.MessageType, msg.Opcode, msg.TxID, msg.Packets, sent, fault, note)
+	}
+	return err
+}
+
+// sendMessage sends an encoded message on a characteristic, stopping after
+// limit fragments when limit is non-negative. It returns how many fragments
+// actually went out.
+func (r *Router) sendMessage(charType bluetooth.CharacteristicType, msg *pumpx2.EncodedMessage, limit int) (int, error) {
 	log.Infof("Sending %s on %s: txID=%d, %d packet(s)",
 		msg.MessageType, charType, msg.TxID, len(msg.Packets))
 
+	sent := 0
 	for i, packetHex := range msg.Packets {
+		if limit >= 0 && sent >= limit {
+			break
+		}
+
 		packetData, err := hex.DecodeString(packetHex)
 		if err != nil {
-			return fmt.Errorf("failed to decode packet %d: %w", i, err)
+			return sent, fmt.Errorf("failed to decode packet %d: %w", i, err)
 		}
 
 		protocol.LogPacket("TX", charType, packetData)
 
 		// Send via notification
 		if err := r.ble.Notify(charType, packetData); err != nil {
-			return fmt.Errorf("failed to send packet %d: %w", i, err)
+			return sent, fmt.Errorf("failed to send packet %d: %w", i, err)
 		}
+		sent++
 
 		log.Tracef("Sent packet %d/%d: %s", i+1, len(msg.Packets), packetHex)
 	}
 
+	return sent, nil
+}
+
+// SendNative notifies a message built by the Go encoder in pkg/protocol,
+// bypassing the pumpX2 cliparser entirely. This is the escape hatch for
+// messages cliparser cannot encode and for fault injection that needs to put
+// specific bytes on a characteristic.
+func (r *Router) SendNative(msg *protocol.NativeMessage) error {
+	if msg == nil {
+		return nil
+	}
+
+	fragments := r.refragmentNative(msg)
+
+	log.Infof("Sending native %s on %s: txID=%d, %d packet(s)",
+		msg.MessageType, msg.Characteristic, msg.TxID, len(fragments))
+
+	for i, fragment := range fragments {
+		protocol.LogPacket("TX", msg.Characteristic, fragment)
+		if err := r.ble.Notify(msg.Characteristic, fragment); err != nil {
+			return fmt.Errorf("failed to send %s fragment %d: %w", msg.MessageType, i, err)
+		}
+	}
+
 	return nil
+}
+
+// refragmentNative re-frames a natively-encoded message for the link's ATT
+// MTU, the same way refragment does for a cliparser-encoded one.
+func (r *Router) refragmentNative(msg *protocol.NativeMessage) [][]byte {
+	chunkPayload := r.chunkPayload()
+	if chunkPayload == protocol.DefaultMaxChunkPayload || len(msg.Fragments) == 0 {
+		return msg.Fragments
+	}
+
+	body, err := protocol.MessageBodyFromFragmentsHex(msg.PacketsHex())
+	if err == nil {
+		var fragments [][]byte
+		if fragments, err = protocol.FragmentMessage(body, msg.TxID, chunkPayload); err == nil {
+			log.Debugf("Re-fragmented native %s txID=%d from %d to %d fragment(s) for a %d-byte payload chunk",
+				msg.MessageType, msg.TxID, len(msg.Fragments), len(fragments), chunkPayload)
+			return fragments
+		}
+	}
+
+	log.Errorf("Cannot re-fragment native %s txID=%d for a %d-byte payload chunk: %v; sending it as encoded",
+		msg.MessageType, msg.TxID, chunkPayload, err)
+	return msg.Fragments
+}
+
+// SendErrorResponse sends the ErrorResponse a real pump returns in place of the
+// response to a request it rejects: opcode 77 with a two-byte cargo of the
+// rejected request's opcode and a pumpX2 error code.
+//
+// charType is the characteristic to notify on; pass bluetooth.CharCurrentStatus
+// for the normal case, which is where the driver looks for it. The response is
+// left unsigned so it fits one fragment, matching how the driver reads it.
+//
+// Note that TandemKit only logs an ErrorResponse and does not release the
+// pending write it answers, so injecting one makes the driver stall until its
+// 30-second timeout rather than fail fast. That is a driver conformance gap,
+// not a bug in this path.
+func (r *Router) SendErrorResponse(charType bluetooth.CharacteristicType, txID, requestOpcode, errorCode uint8) error {
+	msg, err := protocol.BuildErrorResponse(txID, requestOpcode, errorCode, protocol.ErrorResponseOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to build ErrorResponse: %w", err)
+	}
+	msg.Characteristic = charType
+
+	log.Warnf("Sending ErrorResponse on %s: txID=%d, requestOpcode=%d, errorCode=%d",
+		charType, txID, requestOpcode, errorCode)
+
+	return r.SendNative(msg)
 }
 
 // applyStateChange applies a state change
@@ -419,10 +786,9 @@ func (r *Router) applyBolusChange(change StateChange) {
 		return
 	}
 	if bolusState.Active {
-		r.pumpState.StartBolus(bolusState.UnitsTotal, bolusState.BolusID)
-		r.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryBolusActivated, "BolusActivated", map[string]interface{}{
-			"bolusId": bolusState.BolusID, "units": bolusState.UnitsTotal,
-		})
+		r.pumpState.StartBolusWithSource(
+			bolusState.UnitsTotal, bolusState.BolusID, bolusState.SourceID, bolusState.TypeBitmask)
+		r.pumpState.RecordBolusActivated(bolusState.BolusID, bolusState.UnitsTotal, bolusState.SourceID)
 		if r.qeNotifier != nil {
 			if err := r.qeNotifier.NotifyBolusStart(bolusState.BolusID, bolusState.UnitsTotal); err != nil {
 				log.Warnf("Failed to notify bolus start: %v", err)
@@ -430,11 +796,18 @@ func (r *Router) applyBolusChange(change StateChange) {
 		}
 		return
 	}
-	currentBolus := r.pumpState.Bolus
-	r.pumpState.StopBolus()
-	if r.qeNotifier != nil && currentBolus.Active {
+	// A canceled bolus is still a finished bolus: EndBolus writes the
+	// last-bolus record the driver's next LastBolusStatus query reports and
+	// the BolusCompleted history record, in one step that cannot run twice for
+	// one bolus even if the simulator finishes it on the same instant.
+	record, ended := r.pumpState.EndBolus(state.BolusEndReasonStopped, nil)
+	if !ended {
+		return
+	}
+
+	if r.qeNotifier != nil {
 		if err := r.qeNotifier.NotifyBolusCanceled(
-			currentBolus.BolusID, currentBolus.UnitsDelivered, currentBolus.UnitsTotal,
+			record.BolusID, record.DeliveredUnits, record.RequestedUnits,
 		); err != nil {
 			log.Warnf("Failed to notify bolus canceled: %v", err)
 		}
@@ -447,12 +820,25 @@ func (r *Router) applyBasalChange(change StateChange) {
 		return
 	}
 	oldRate := r.pumpState.GetBasalRate()
+
+	// A temp rate that was running and is not the one being applied has ended,
+	// whether the driver stopped it outright (StopTempRateRequest, which
+	// applies a basal state with no temp rate at all) or replaced it with
+	// another (a second SetTempRateRequest). Either way it ends HERE, at this
+	// instant, and its completion is recorded before whatever replaced it so
+	// the log reads in the order it happened.
+	if r.pumpState.GetTempRate().TempRateID != basalState.TempRateID {
+		r.pumpState.EndTempRate(r.pumpState.Now())
+	}
+
 	r.pumpState.SetBasalState(basalState)
 	newRate := r.pumpState.GetBasalRate()
 	if basalState.TempBasalActive {
-		r.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryTempRateActivated, "TempRateActivated", map[string]interface{}{
-			"tempRate": basalState.TempBasalRate, "normalRate": basalState.CurrentRate,
-		})
+		// The record's own fields are the commanded percentage, the duration in
+		// milliseconds and the temp rate id -- the same three the driver reads
+		// back out of TempRateActivatedHistoryLog. RecordTempRateActivated is
+		// the single writer the harness path uses too, so the two agree.
+		r.pumpState.RecordTempRateActivated(basalState, r.pumpState.GetProfileBasalRate())
 	}
 	if r.qeNotifier != nil {
 		if err := r.qeNotifier.NotifyBasalRateChange(oldRate, newRate, basalState.TempBasalActive); err != nil {
@@ -477,23 +863,62 @@ func (r *Router) applySuspendChange(change StateChange) {
 	if !ok {
 		return
 	}
-	r.pumpState.SetPumpingSuspended(suspended)
 	if suspended {
-		r.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryPumpingSuspended, "PumpingSuspended", nil)
-	} else {
-		r.pumpState.AddHistoryLogEntryWithTypeID(state.HistoryPumpingResumed, "PumpingResumed", nil)
+		r.applySuspend()
+		return
+	}
+	r.applyResume()
+}
+
+// applySuspend stops delivery because the driver asked it to.
+//
+// A suspend commanded over the protocol is user-aborted (reason id 0); a
+// pump-raised one goes through the harness's suspend action, which names its
+// own reason. Either way the stop is the full transition -- it ends an
+// in-progress bolus and any running temp rate, each with its own record --
+// rather than just a flag: this path used to set the flag alone, so a temp rate
+// the driver had suspended stayed open in the log forever.
+func (r *Router) applySuspend() {
+	outcome := r.pumpState.SuspendDelivery("user")
+	if !outcome.Changed {
+		// Delivery was already suspended. No transition, so no second record
+		// and no second round of events.
+		return
+	}
+
+	if r.qeNotifier == nil {
+		return
+	}
+	if outcome.Bolus != nil {
+		if err := r.qeNotifier.NotifyBolusCanceled(
+			outcome.Bolus.BolusID, outcome.Bolus.DeliveredUnits, outcome.Bolus.RequestedUnits,
+		); err != nil {
+			log.Warnf("Failed to notify bolus canceled by suspend: %v", err)
+		}
+	}
+	if outcome.TempRate != nil {
+		if err := r.qeNotifier.NotifyBasalRateChange(
+			outcome.TempRate.Rate, outcome.ProfileRate, false,
+		); err != nil {
+			log.Warnf("Failed to notify temp rate ended by suspend: %v", err)
+		}
+	}
+	if err := r.qeNotifier.NotifyPumpSuspended("user"); err != nil {
+		log.Warnf("Failed to notify pump suspended: %v", err)
+	}
+}
+
+// applyResume restarts delivery because the driver asked it to.
+func (r *Router) applyResume() {
+	if !r.pumpState.ResumeDelivery() {
+		// Delivery was not suspended: nothing changed, nothing recorded.
+		return
 	}
 	if r.qeNotifier == nil {
 		return
 	}
-	if suspended {
-		if err := r.qeNotifier.NotifyPumpSuspended("user"); err != nil {
-			log.Warnf("Failed to notify pump suspended: %v", err)
-		}
-	} else {
-		if err := r.qeNotifier.NotifyPumpResumed(); err != nil {
-			log.Warnf("Failed to notify pump resumed: %v", err)
-		}
+	if err := r.qeNotifier.NotifyPumpResumed(); err != nil {
+		log.Warnf("Failed to notify pump resumed: %v", err)
 	}
 }
 

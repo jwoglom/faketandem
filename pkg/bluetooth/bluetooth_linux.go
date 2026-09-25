@@ -17,7 +17,6 @@ import (
 const (
 	advTypeSomeUUID16 = 0x02
 	advTypeTxPower    = 0x0A
-	pumpName          = "Tandem Mobi 123"
 )
 
 // Ble represents the Bluetooth Low Energy device
@@ -36,8 +35,8 @@ type Ble struct {
 	extraCharData    map[string][]byte
 	extraCharDataMtx sync.RWMutex
 
-	writeNotifyChars map[CharacteristicType]*gatt.Characteristic
-	notifyOnlyChars  map[CharacteristicType]*gatt.Characteristic
+	writeNotifyChars        map[CharacteristicType]*gatt.Characteristic
+	notifyOnlyChars         map[CharacteristicType]*gatt.Characteristic
 	unknownWriteNotifyChars map[string]*gatt.Characteristic
 	unknownWriteOnlyChars   map[string]*gatt.Characteristic
 
@@ -72,13 +71,13 @@ func New(adapterID string) (*Ble, error) {
 	}
 
 	b := &Ble{
-		device:        &d,
-		notifiers:     make(map[CharacteristicType]gatt.Notifier),
-		charData:      make(map[CharacteristicType][]byte),
-		extraCharData: make(map[string][]byte),
-		pairingState:  PairingStateNotDiscoverable,
-		writeNotifyChars:       make(map[CharacteristicType]*gatt.Characteristic),
-		notifyOnlyChars:        make(map[CharacteristicType]*gatt.Characteristic),
+		device:                  &d,
+		notifiers:               make(map[CharacteristicType]gatt.Notifier),
+		charData:                make(map[CharacteristicType][]byte),
+		extraCharData:           make(map[string][]byte),
+		pairingState:            PairingStateNotDiscoverable,
+		writeNotifyChars:        make(map[CharacteristicType]*gatt.Characteristic),
+		notifyOnlyChars:         make(map[CharacteristicType]*gatt.Characteristic),
 		unknownWriteNotifyChars: make(map[string]*gatt.Characteristic),
 		unknownWriteOnlyChars:   make(map[string]*gatt.Characteristic),
 	}
@@ -86,12 +85,12 @@ func New(adapterID string) (*Ble, error) {
 	d.Handle(
 		gatt.CentralConnected(func(c gatt.Central) {
 			fmt.Println("pkg bluetooth; ** New connection from:", c.ID())
-			
+
 			// Reject connection if not discoverable
 			b.pairingStateMtx.RLock()
 			state := b.pairingState
 			b.pairingStateMtx.RUnlock()
-			
+
 			if state == PairingStateNotDiscoverable {
 				log.Warnf("pkg bluetooth; rejecting connection from %s - not discoverable", c.ID())
 				if err := c.Close(); err != nil {
@@ -99,7 +98,7 @@ func New(adapterID string) (*Ble, error) {
 				}
 				return
 			}
-			
+
 			b.central = &c
 			b.reenableCharacteristicHandlers()
 			if b.connectionHandler != nil {
@@ -136,7 +135,7 @@ func New(adapterID string) (*Ble, error) {
 
 // setupService creates the pump service and all characteristics
 func (b *Ble) setupService(d gatt.Device) {
-	b.pumpNameForAdv = pumpName
+	b.pumpNameForAdv = PumpName
 
 	// Registration order and UUID form (16-bit vs 128-bit) here match a btsnoop
 	// capture of a real Tandem Mobi pairing exactly: Generic Access, Generic
@@ -168,7 +167,7 @@ func (b *Ble) setupService(d gatt.Device) {
 
 	b.addUnknownServiceFDFA(d)
 
-	err = b.advertisePump(d, pumpName)
+	err = b.advertisePump(d, PumpName)
 	if err != nil {
 		log.Fatalf("pkg bluetooth; could not advertise: %s", err)
 	}
@@ -192,10 +191,10 @@ func (b *Ble) addGenericAccessService(d gatt.Device) {
 	serviceUUID := gatt.MustParseUUID(GenericAccessServiceUUID)
 	s := gatt.NewService(serviceUUID)
 
-	b.addReadWriteCharacteristic(s, DeviceNameCharUUID, []byte(pumpName))
-	b.addReadOnlyCharacteristic(s, AppearanceCharUUID, []byte{0x00, 0x00})
-	b.addReadOnlyCharacteristic(s, PeripheralPreferredConnectionParametersCharUUID, []byte{0x18, 0x00, 0x28, 0x00, 0x00, 0x00, 0xf4, 0x01})
-	b.addReadOnlyCharacteristic(s, CentralAddressResolutionCharUUID, []byte{0x01})
+	b.addReadWriteCharacteristic(s, DeviceNameCharUUID, []byte(PumpName))
+	b.addReadOnlyCharacteristic(s, AppearanceCharUUID, gapAppearance)
+	b.addReadOnlyCharacteristic(s, PeripheralPreferredConnectionParametersCharUUID, gapPeripheralPreferredConnectionParameters)
+	b.addReadOnlyCharacteristic(s, CentralAddressResolutionCharUUID, gapCentralAddressResolution)
 
 	b.addService(d, s, "Generic Access")
 }
@@ -204,14 +203,14 @@ func (b *Ble) addDeviceInformationService(d gatt.Device) {
 	serviceUUID := gatt.MustParseUUID(DeviceInformationServiceUUID)
 	s := gatt.NewService(serviceUUID)
 
-	b.addReadOnlyCharacteristic(s, ManufacturerNameStringCharUUID, []byte("Tandem Diabetes Care"))
-	b.addReadOnlyCharacteristic(s, ModelNumberStringCharUUID, []byte("X2")) // Always "X2" even for Mobi
+	b.addReadOnlyCharacteristic(s, ManufacturerNameStringCharUUID, []byte(DISManufacturerName))
+	b.addReadOnlyCharacteristic(s, ModelNumberStringCharUUID, []byte(DISModelNumber))
 	// A real Tandem Mobi's Serial Number String characteristic reports a truncated
 	// suffix of its device name (e.g. name "Tandem Mobi 976" -> serial "bi 976"),
 	// confirmed via a btsnoop capture of an official pairing. Reproduce that quirk
 	// instead of a real serial number so identity checks match genuine hardware.
-	b.addReadOnlyCharacteristic(s, SerialNumberStringCharUUID, []byte(pumpName[9:]))
-	b.addReadOnlyCharacteristic(s, SoftwareRevisionStringCharUUID, []byte("3553172181"))
+	b.addReadOnlyCharacteristic(s, SerialNumberStringCharUUID, []byte(DISSerialNumber()))
+	b.addReadOnlyCharacteristic(s, SoftwareRevisionStringCharUUID, []byte(DISSoftwareRevision))
 
 	b.addService(d, s, "Device Information")
 }
@@ -232,33 +231,19 @@ func (b *Ble) advertisePump(d gatt.Device, name string) error {
 	b.pairingStateMtx.RUnlock()
 
 	advPacket := &gatt.AdvPacket{}
-	
+
 	// Set flags based on discoverable state
 	if state == PairingStateNotDiscoverable {
 		advPacket.AppendFlags(0x04) // BR/EDR Not Supported (not discoverable)
 	} else {
 		advPacket.AppendFlags(0x06) // LE General Discoverable + BR/EDR Not Supported
 	}
-	
+
 	advPacket.AppendField(advTypeSomeUUID16, uint16ToBytes(0xFDFB))
 	advPacket.AppendField(advTypeTxPower, []byte{0x04})
-	
+
 	// Set manufacturer data based on pairing state
-	var lastByte byte
-	switch state {
-	case PairingStateNotDiscoverable:
-		lastByte = 0x10 // Not discoverable
-	case PairingStateDiscoverableOnly:
-		lastByte = 0x10 // Discoverable but no pairing step
-	case PairingStatePairStep1:
-		lastByte = 0x11 // Discoverable with PairStep1
-	case PairingStatePairStep2:
-		lastByte = 0x12 // Discoverable with PairStep2
-	default:
-		lastByte = 0x10
-	}
-	mfgData := []byte{0x00, 0x01, lastByte}
-	advPacket.AppendManufacturerData(0x059D, mfgData)
+	advPacket.AppendManufacturerData(0x059D, ManufacturerData(state))
 
 	scanPacket := &gatt.AdvPacket{}
 	scanPacket.AppendName(name)
@@ -301,7 +286,6 @@ func uint16ToBytes(value uint16) []byte {
 	binary.LittleEndian.PutUint16(bytes, value)
 	return bytes
 }
-
 
 func (b *Ble) addService(d gatt.Device, s *gatt.Service, name string) {
 	if err := d.AddService(s); err != nil {
@@ -451,7 +435,6 @@ func (b *Ble) reenableCharacteristicHandlers() {
 		b.bindUnknownWriteOnlyHandlers(char, uuidStr)
 	}
 }
-
 
 func (b *Ble) setExtraCharacteristicData(uuidStr string, data []byte) {
 	if data == nil {

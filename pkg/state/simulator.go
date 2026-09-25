@@ -15,7 +15,13 @@ type Simulator struct {
 	stopChan       chan bool
 	ticker         *time.Ticker
 	updateInterval time.Duration
-	mutex          sync.Mutex
+	// lastUpdate is the pump-clock instant the previous update ran at. Basal
+	// delivery, battery drain and IOB decay integrate over the elapsed pump
+	// time rather than over the ticker interval, so a harness that advances a
+	// manual clock by an hour and calls Tick once gets an hour's worth of
+	// simulation instead of one tick's worth.
+	lastUpdate time.Time
+	mutex      sync.Mutex
 }
 
 // NewSimulator creates a new background simulator
@@ -79,37 +85,97 @@ func (s *Simulator) simulationLoop() {
 	}
 }
 
+// Tick runs exactly one simulation update, synchronously.
+//
+// It is what a harness calls after stepping a ManualClock: with the background
+// ticker stopped (or simply ignored), Advance + Tick gives a fully
+// deterministic pump with no wall-clock waiting anywhere.
+func (s *Simulator) Tick() {
+	s.update()
+}
+
+// elapsedSincePrevious returns how much pump time has passed since the last
+// update, and records this one. The first update after Start has no previous
+// instant, so it counts as one interval.
+func (s *Simulator) elapsedSincePrevious(now time.Time) time.Duration {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	prev := s.lastUpdate
+	s.lastUpdate = now
+	if prev.IsZero() {
+		return s.updateInterval
+	}
+	elapsed := now.Sub(prev)
+	if elapsed < 0 {
+		// The clock was moved backwards; deliver nothing rather than
+		// un-delivering insulin.
+		return 0
+	}
+	return elapsed
+}
+
 // update performs a single simulation update
 func (s *Simulator) update() {
+	elapsed := s.elapsedSincePrevious(s.pumpState.Now())
+
 	// Update time
 	s.pumpState.UpdateTimeSinceReset()
 
-	// Update bolus delivery
-	s.updateBolusDelivery()
+	// Update bolus delivery. A bolus that finished on this tick is recorded
+	// after the pump state mutex has been released.
+	if completed := s.updateBolusDelivery(); completed != nil {
+		s.pumpState.RecordLastBolus(*completed)
+		// The end reason goes on the record: it is the wire's
+		// completionStatusId, and leaving it off made a bolus that ran to
+		// completion look, in the log, exactly like one that was canceled.
+		s.pumpState.RecordBolusCompleted(
+			completed.BolusID, completed.DeliveredUnits, completed.RequestedUnits, completed.EndReasonID)
+	}
+
+	// End a temp rate whose time is up before delivering any basal, so the
+	// insulin for this interval goes in at the rate that was actually running.
+	s.expireTempRate()
 
 	// Update basal delivery
-	s.updateBasalDelivery()
+	s.updateBasalDelivery(elapsed)
 
 	// Update battery
-	s.updateBattery()
+	s.updateBattery(elapsed)
 
 	// Check for alerts
 	s.checkAlerts()
 }
 
-// updateBolusDelivery simulates bolus insulin delivery
-func (s *Simulator) updateBolusDelivery() {
+// updateBolusDelivery simulates bolus insulin delivery. It returns the record
+// of a bolus that finished on this tick, if any; recording it has to happen
+// after the pump state mutex is released, since RecordLastBolus takes it.
+func (s *Simulator) updateBolusDelivery() *LastBolusRecord {
 	s.pumpState.mutex.Lock()
 	defer s.pumpState.mutex.Unlock()
 
 	if !s.pumpState.Bolus.Active {
-		return
+		return nil
 	}
 
-	// Calculate delivery rate (units per second)
-	// Assume bolus delivers at 0.05 units/second (3 units/minute)
-	deliveryRate := 0.05 // units/second
-	elapsed := time.Since(s.pumpState.Bolus.StartTime).Seconds()
+	// A stalled bolus stays open and keeps answering CurrentBolusStatus, but
+	// makes no further progress.
+	if s.pumpState.Bolus.Stalled {
+		return nil
+	}
+
+	// Delivery speed is configurable (see PumpState.BolusRateUnitsPerSecond):
+	// a real pump is much slower than the 0.05 U/s default, and driver
+	// behavior that depends on a bolus still being unfinished is only
+	// reproducible when the two agree.
+	deliveryRate := s.pumpState.BolusRateUnitsPerSecond
+	if deliveryRate <= 0 {
+		deliveryRate = DefaultBolusRateUnitsPerSecond
+	}
+	elapsed := s.pumpState.Now().Sub(s.pumpState.Bolus.StartTime).Seconds()
+	if elapsed < 0 {
+		elapsed = 0
+	}
 	expectedDelivered := deliveryRate * elapsed
 
 	if expectedDelivered > s.pumpState.Bolus.UnitsTotal {
@@ -135,6 +201,9 @@ func (s *Simulator) updateBolusDelivery() {
 		unitsDelivered := s.pumpState.Bolus.UnitsDelivered
 		unitsTotal := s.pumpState.Bolus.UnitsTotal
 
+		sourceID := s.pumpState.Bolus.SourceID
+		typeBitmask := s.pumpState.Bolus.TypeBitmask
+
 		s.pumpState.Bolus.Active = false
 		log.Infof("Bolus delivery complete: %.2f units delivered", s.pumpState.Bolus.UnitsDelivered)
 
@@ -142,12 +211,18 @@ func (s *Simulator) updateBolusDelivery() {
 		s.pumpState.IOB += s.pumpState.Bolus.UnitsTotal
 		s.pumpState.TDD += s.pumpState.Bolus.UnitsTotal
 
-		// Record history log entry
-		s.addHistoryEntryWithTypeID(HistoryBolusCompleted, "BolusCompleted", map[string]interface{}{
-			"bolusId":        bolusID,
-			"unitsDelivered": unitsDelivered,
-			"unitsTotal":     unitsTotal,
-		})
+		// Record the completed bolus so LastBolusStatus can report it. This is
+		// how a driver finalizes the dose it commanded: it matches bolusId and
+		// takes the delivered volume and end time from that record.
+		completed := LastBolusRecord{
+			BolusID:        bolusID,
+			RequestedUnits: unitsTotal,
+			DeliveredUnits: unitsDelivered,
+			SourceID:       sourceID,
+			TypeBitmask:    typeBitmask,
+			EndReasonID:    BolusEndReasonCompleted,
+			EndTime:        s.pumpState.Now(),
+		}
 
 		// Notify qualifying event
 		if s.eventNotifier != nil {
@@ -155,11 +230,45 @@ func (s *Simulator) updateBolusDelivery() {
 				log.Warnf("Failed to notify bolus complete: %v", err)
 			}
 		}
+
+		return &completed
+	}
+
+	return nil
+}
+
+// expireTempRate ends a temp rate whose programmed duration has run out.
+//
+// PumpState.EndTempRate writes the one TempRateCompleted record, stamped at the
+// programmed end rather than at the tick that noticed it: a coarse tick must
+// not move a temp rate's recorded end second. It reports false when something
+// else -- a driver's StopTempRate, a replacement temp rate, a suspend -- ended
+// this temp rate first, in which case that path already wrote the record and
+// this tick writes nothing.
+func (s *Simulator) expireTempRate() {
+	temp := s.pumpState.GetTempRate()
+	if !temp.Active || !s.pumpState.Now().After(temp.EndTime) {
+		return
+	}
+
+	ended, profileRate, ok := s.pumpState.EndTempRate(temp.EndTime)
+	if !ok {
+		return
+	}
+	log.Info("Temp basal expired, returning to normal basal rate")
+
+	s.mutex.Lock()
+	notifier := s.eventNotifier
+	s.mutex.Unlock()
+	if notifier != nil {
+		if err := notifier.NotifyBasalRateChange(ended.Rate, profileRate, false); err != nil {
+			log.Warnf("Failed to notify temp rate expired: %v", err)
+		}
 	}
 }
 
-// updateBasalDelivery simulates basal insulin delivery
-func (s *Simulator) updateBasalDelivery() {
+// updateBasalDelivery simulates basal insulin delivery over elapsed pump time.
+func (s *Simulator) updateBasalDelivery(elapsed time.Duration) {
 	s.pumpState.mutex.Lock()
 	defer s.pumpState.mutex.Unlock()
 
@@ -167,32 +276,18 @@ func (s *Simulator) updateBasalDelivery() {
 	basalRate := s.pumpState.Basal.CurrentRate
 	if s.pumpState.Basal.TempBasalActive {
 		basalRate = s.pumpState.Basal.TempBasalRate
+	}
 
-		// Check if temp basal has expired
-		if time.Now().After(s.pumpState.Basal.TempBasalEnd) {
-			log.Info("Temp basal expired, returning to normal basal rate")
-			oldRate := s.pumpState.Basal.TempBasalRate
-			s.pumpState.Basal.TempBasalActive = false
-			basalRate = s.pumpState.Basal.CurrentRate
-
-			s.pumpState.AddHistoryLogEntryWithTypeID(HistoryTempRateCompleted, "TempRateCompleted", map[string]interface{}{
-				"tempRate":   oldRate,
-				"normalRate": basalRate,
-			})
-
-			if s.eventNotifier != nil {
-				if err := s.eventNotifier.NotifyBasalRateChange(oldRate, basalRate, false); err != nil {
-					log.Warnf("Failed to notify temp rate expired: %v", err)
-				}
-			}
-		}
+	// A suspended pump delivers no basal at all.
+	if s.pumpState.PumpingSuspended {
+		basalRate = 0
 	}
 
 	// Basal rate is in units/hour, convert to units/second
 	basalPerSecond := basalRate / 3600.0
 
-	// Deliver basal for the update interval
-	basalDelivered := basalPerSecond * s.updateInterval.Seconds()
+	// Deliver basal for the pump time that has actually elapsed
+	basalDelivered := basalPerSecond * elapsed.Seconds()
 
 	// Deduct from reservoir
 	s.pumpState.Reservoir.CurrentUnits -= basalDelivered
@@ -207,14 +302,14 @@ func (s *Simulator) updateBasalDelivery() {
 	// Decay IOB slightly (very simplified - real IOB calculation is complex)
 	// Assume insulin action time of ~4 hours
 	iobDecayPerSecond := s.pumpState.IOB / (4.0 * 3600.0)
-	s.pumpState.IOB -= iobDecayPerSecond * s.updateInterval.Seconds()
+	s.pumpState.IOB -= iobDecayPerSecond * elapsed.Seconds()
 	if s.pumpState.IOB < 0 {
 		s.pumpState.IOB = 0
 	}
 }
 
-// updateBattery simulates battery drain
-func (s *Simulator) updateBattery() {
+// updateBattery simulates battery drain over elapsed pump time.
+func (s *Simulator) updateBattery(elapsed time.Duration) {
 	s.pumpState.mutex.Lock()
 	defer s.pumpState.mutex.Unlock()
 
@@ -222,7 +317,7 @@ func (s *Simulator) updateBattery() {
 	// Assume battery lasts ~7 days (168 hours)
 	// Drain 100% over 168 hours = ~0.595% per hour = ~0.0001653% per second
 	drainPerSecond := 100.0 / (7.0 * 24.0 * 3600.0)
-	drainAmount := drainPerSecond * s.updateInterval.Seconds()
+	drainAmount := drainPerSecond * elapsed.Seconds()
 
 	s.pumpState.Battery.Percentage -= int(drainAmount * 100) // Scale for percentage
 	if s.pumpState.Battery.Percentage < 0 {
@@ -315,16 +410,11 @@ func (s *Simulator) addAlert(alertType AlertType, priority AlertPriority, messag
 		Type:         alertType,
 		Priority:     priority,
 		Message:      message,
-		Timestamp:    time.Now(),
+		Timestamp:    s.pumpState.Now(),
 		Acknowledged: false,
 	}
 	s.pumpState.ActiveAlerts = append(s.pumpState.ActiveAlerts, alert)
 	return alert
-}
-
-// addHistoryEntryWithTypeID adds a typed history log entry (must NOT hold pumpState mutex)
-func (s *Simulator) addHistoryEntryWithTypeID(typeID int, entryType string, data map[string]interface{}) {
-	s.pumpState.AddHistoryLogEntryWithTypeID(typeID, entryType, data)
 }
 
 // GetStats returns simulator statistics

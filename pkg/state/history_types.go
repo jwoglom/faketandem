@@ -1,87 +1,157 @@
 package state
 
-// History log event type IDs matching pumpX2's HistoryLog type IDs.
-// These are the most commonly generated event types.
+// History log event type IDs.
+//
+// These are the `typeId` values that go in the first 12 bits of a history log
+// record's 26-byte cargo. Every value below was taken from the corresponding
+// class in TandemKit's Sources/TandemCore/Messages/HistoryLog (each declares
+// `public static let typeId`), which in turn mirrors pumpX2's
+// @HistoryLogProps(typeId=...).
+//
+// An earlier version of this file carried invented, sequentially-assigned IDs
+// that happened to be right for only a handful of events (BolusCompleted 20,
+// BolusDelivery 280, DateChange 14). Anything streamed with a wrong ID decodes
+// on the driver side as a different event class, or as an unknown record that
+// is silently dropped -- so these must not be "tidied" into a neat sequence
+// again.
 const (
 	// Bolus events
-	HistoryBolusRequestedMsg1 = 16
-	HistoryBolusRequestedMsg2 = 17
-	HistoryBolusRequestedMsg3 = 18
-	HistoryBolusActivated     = 19
+	HistoryBolusRequestedMsg1 = 64
+	HistoryBolusRequestedMsg2 = 65
+	HistoryBolusRequestedMsg3 = 66
+	HistoryBolusActivated     = 55
 	HistoryBolusCompleted     = 20
 	HistoryBolusDelivery      = 280
-	HistoryBolexActivated     = 21
-	HistoryBolexCompleted     = 22
-	HistoryCorrectionDeclined = 23
+	HistoryBolexActivated     = 59
+	HistoryBolexCompleted     = 21
+	HistoryCorrectionDeclined = 93
 
 	// Basal events
-	HistoryBasalDelivery   = 32
-	HistoryBasalRateChange = 33
-	HistoryDailyBasal      = 34
+	HistoryBasalDelivery   = 279
+	HistoryBasalRateChange = 3
+	HistoryDailyBasal      = 81
 
 	// Temp rate events
-	HistoryTempRateActivated = 35
-	HistoryTempRateCompleted = 36
+	HistoryTempRateActivated = 2
+	HistoryTempRateCompleted = 15
 
 	// Cartridge/tubing events
-	HistoryCartridgeInserted = 40
-	HistoryCartridgeRemoved  = 41
-	HistoryCartridgeFilled   = 42
-	HistoryTubingFilled      = 43
-	HistoryCannulaFilled     = 44
+	HistoryCartridgeInserted = 32
+	HistoryCartridgeRemoved  = 31
+	HistoryCartridgeFilled   = 33
+	HistoryTubingFilled      = 63
+	HistoryCannulaFilled     = 61
 
 	// Pump state events
-	HistoryPumpingSuspended = 50
-	HistoryPumpingResumed   = 51
+	HistoryPumpingSuspended = 11
+	HistoryPumpingResumed   = 12
 
 	// Remote entry events
-	HistoryBGEntry   = 55
-	HistoryCarbEntry = 56
+	HistoryBGEntry   = 16
+	HistoryCarbEntry = 48
 
 	// System events
 	HistoryDateChange   = 14
-	HistoryTimeChanged  = 15
-	HistoryNewDay       = 60
-	HistoryVersionInfo  = 61
-	HistoryFactoryReset = 62
-	HistoryLogErased    = 63
+	HistoryTimeChanged  = 13
+	HistoryNewDay       = 90
+	HistoryVersionInfo  = 191
+	HistoryFactoryReset = 82
+	HistoryLogErased    = 0
 
 	// Alarm/Alert events
-	HistoryAlarmActivated = 70
-	HistoryAlarmAck       = 71
-	HistoryAlarmCleared   = 72
-	HistoryAlertActivated = 73
-	HistoryAlertAck       = 74
-	HistoryAlertCleared   = 75
-	HistoryMalfunction    = 76
+	HistoryAlarmActivated = 5
+	HistoryAlarmAck       = 8
+	HistoryAlarmCleared   = 28
+	HistoryAlertActivated = 4
+	HistoryAlertAck       = 27
+	HistoryAlertCleared   = 26
+	HistoryMalfunction    = 6
 
 	// CGM events
-	HistoryCGMData              = 100
-	HistoryCGMCalibration       = 101
-	HistoryCGMSensorTypeChange  = 102
-	HistoryCGMStartSession      = 103
-	HistoryCGMStopSession       = 104
-	HistoryCGMAlertActivated    = 105
-	HistoryCGMAlertCleared      = 106
+	HistoryCGMData             = 256
+	HistoryCGMCalibration      = 160
+	HistoryCGMSensorTypeChange = 368
+	HistoryCGMStartSession     = 212
+	HistoryCGMStopSession      = 214
+	HistoryCGMAlertActivated   = 171
+	HistoryCGMAlertCleared     = 172
 
 	// Settings events
-	HistoryParamChangeGlobalSettings = 110
-	HistoryParamChangePumpSettings   = 111
-	HistoryControlIQUserModeChange   = 112
-	HistoryBasalIQSettingsChange     = 113
+	HistoryParamChangeGlobalSettings = 74
+	HistoryParamChangePumpSettings   = 73
+	HistoryControlIQUserModeChange   = 229
+	HistoryBasalIQSettingsChange     = 142
 
 	// IDP events
-	HistoryIDPAction  = 120
-	HistoryIDPBolus   = 121
-	HistoryIDPList    = 122
-	HistoryIDPSegment = 123
+	HistoryIDPAction  = 69
+	HistoryIDPBolus   = 70
+	HistoryIDPList    = 71
+	HistoryIDPSegment = 68
 
 	// Hypo protection
-	HistoryHypoMinimizerSuspend = 130
-	HistoryHypoMinimizerResume  = 131
+	HistoryHypoMinimizerSuspend = 198
+	HistoryHypoMinimizerResume  = 199
 
-	// Daily/status
-	HistoryDailyStatus = 140
-	HistoryLoadStatus  = 141
-	HistoryUpdateStatus = 142
+	// Daily/status. There is no LoadStatus history log in pumpX2 or TandemKit
+	// (LoadStatus is a CURRENT_STATUS message, not a log record), so the
+	// constant that used to sit here has been removed rather than given a
+	// guessed ID.
+	HistoryDailyStatus  = 313
+	HistoryUpdateStatus = 203
 )
+
+// historyTypeIDByName maps the record type names this emulator writes to the
+// pumpX2 numeric type IDs above, so an API caller can append a record by the
+// name it sees in the log rather than by looking the number up.
+//
+// It covers the types the emulator generates itself; anything else is appended
+// with an explicit type_id.
+var historyTypeIDByName = map[string]int{
+	"BolusRequestedMsg1":      HistoryBolusRequestedMsg1,
+	"BolusRequestedMsg2":      HistoryBolusRequestedMsg2,
+	"BolusRequestedMsg3":      HistoryBolusRequestedMsg3,
+	"BolusActivated":          HistoryBolusActivated,
+	"BolusCompleted":          HistoryBolusCompleted,
+	"BolusDelivery":           HistoryBolusDelivery,
+	"BolexActivated":          HistoryBolexActivated,
+	"BolexCompleted":          HistoryBolexCompleted,
+	"CorrectionDeclined":      HistoryCorrectionDeclined,
+	"BasalDelivery":           HistoryBasalDelivery,
+	"BasalRateChange":         HistoryBasalRateChange,
+	"DailyBasal":              HistoryDailyBasal,
+	"TempRateActivated":       HistoryTempRateActivated,
+	"TempRateCompleted":       HistoryTempRateCompleted,
+	"CartridgeInserted":       HistoryCartridgeInserted,
+	"CartridgeRemoved":        HistoryCartridgeRemoved,
+	"CartridgeFilled":         HistoryCartridgeFilled,
+	"TubingFilled":            HistoryTubingFilled,
+	"CannulaFilled":           HistoryCannulaFilled,
+	"PumpingSuspended":        HistoryPumpingSuspended,
+	"PumpingResumed":          HistoryPumpingResumed,
+	"BGEntry":                 HistoryBGEntry,
+	"CarbEntry":               HistoryCarbEntry,
+	"DateChange":              HistoryDateChange,
+	"TimeChanged":             HistoryTimeChanged,
+	"NewDay":                  HistoryNewDay,
+	"AlarmActivated":          HistoryAlarmActivated,
+	"AlarmAck":                HistoryAlarmAck,
+	"AlarmCleared":            HistoryAlarmCleared,
+	"AlertActivated":          HistoryAlertActivated,
+	"AlertAck":                HistoryAlertAck,
+	"AlertCleared":            HistoryAlertCleared,
+	"Malfunction":             HistoryMalfunction,
+	"CGMData":                 HistoryCGMData,
+	"CGMCalibration":          HistoryCGMCalibration,
+	"CGMStartSession":         HistoryCGMStartSession,
+	"CGMStopSession":          HistoryCGMStopSession,
+	"HypoMinimizerSuspend":    HistoryHypoMinimizerSuspend,
+	"HypoMinimizerResume":     HistoryHypoMinimizerResume,
+	"ControlIQUserModeChange": HistoryControlIQUserModeChange,
+}
+
+// HistoryTypeIDByName returns the numeric history-log type ID for a record
+// type name, and whether the name is known.
+func HistoryTypeIDByName(name string) (int, bool) {
+	id, ok := historyTypeIDByName[name]
+	return id, ok
+}

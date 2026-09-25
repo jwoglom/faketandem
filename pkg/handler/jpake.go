@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/jwoglom/faketandem/pkg/faults"
 	"github.com/jwoglom/faketandem/pkg/pumpx2"
 	"github.com/jwoglom/faketandem/pkg/state"
 
@@ -48,6 +49,27 @@ type JPAKESessionManager struct {
 	// pumpState gives access to the cached long-term key for quick-pair
 	// reconnects (see GetOrCreate).
 	pumpState *state.PumpState
+
+	// faultRegistry, when set, can arm a reject_quick_pair fault that refuses
+	// a quick-pair reconnect even when a long-term key is cached -- the pump
+	// side of "the pump forgot us and the app has to pair again".
+	faultRegistry *faults.Registry
+}
+
+// SetFaultRegistry attaches the fault injector consulted for quick-pair.
+func (m *JPAKESessionManager) SetFaultRegistry(registry *faults.Registry) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.faultRegistry = registry
+}
+
+// quickPairFaulted consumes a reject_quick_pair fault, if one is armed.
+// Callers hold m.mutex.
+func (m *JPAKESessionManager) quickPairFaulted() bool {
+	if m.faultRegistry == nil {
+		return false
+	}
+	return m.faultRegistry.Match(faults.Target{Message: "Jpake3SessionKeyRequest"}, faults.KindRejectQuickPair) != nil
 }
 
 // NewJPAKESessionManager creates a new JPAKE session manager
@@ -84,6 +106,10 @@ func (m *JPAKESessionManager) GetOrCreate(sessionID string, pairingCode string, 
 	}
 
 	if round == 3 {
+		if m.quickPairFaulted() {
+			log.Warn("Fault (reject_quick_pair): refusing this quick-pair reconnect even though a long-term key is cached")
+			return nil, ErrJPAKEQuickPairRejected
+		}
 		longTermKey := m.pumpState.GetLongTermKey()
 		if len(longTermKey) == 0 {
 			return nil, ErrJPAKEQuickPairRejected
@@ -222,6 +248,19 @@ func (h *JPAKEHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state
 	// Process this round
 	responseParams, err := auth.ProcessRound(h.round, requestData)
 	if err != nil {
+		// This handshake is over. Drop the authenticator now rather than
+		// waiting for a BLE disconnect to clear it: sessionID is a constant,
+		// so a failed authenticator left in the map would be handed to the
+		// client's very next pairing attempt -- and a PumpX2JPAKEAuthenticator
+		// that has already failed refuses every later round, turning one bad
+		// handshake into a permanently unpairable emulator.
+		if errors.Is(err, ErrJPAKEServerFailed) {
+			log.Warnf("JPAKE round %d failed because pumpX2's jpake-server gave up (%v); dropping this handshake so the client re-pairs against a fresh jpake-server",
+				h.round, err)
+		} else {
+			log.Warnf("JPAKE round %d failed (%v); dropping this handshake", h.round, err)
+		}
+		h.sessionManager.Remove(sessionID)
 		return nil, fmt.Errorf("JPAKE round %d failed: %w", h.round, err)
 	}
 

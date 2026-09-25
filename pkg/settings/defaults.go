@@ -78,16 +78,17 @@ func registerPollingDefaults(manager *Manager) {
 	// ControlIQIOBResponse(long mudaliarIOB, long timeRemainingSeconds,
 	// long mudaliarTotalIOB, long swan6hrIOB, int iobType)
 	registerConstant(manager, "ControlIQIOBRequest", map[string]interface{}{
-		"mudaliarIOB":          250, // 2.5 units * 100
+		"mudaliarIOB":          2500, // 2.5 units, in milliunits
 		"timeRemainingSeconds": 0,
-		"mudaliarTotalIOB":     250,
+		"mudaliarTotalIOB":     2500,
 		"swan6hrIOB":           0,
 		"iobType":              0,
 	})
 
 	// InsulinStatusResponse(int currentInsulinAmount, int isEstimate, int insulinLowAmount)
 	registerConstant(manager, "InsulinStatusRequest", map[string]interface{}{
-		"currentInsulinAmount": 20000, // 200.0 units * 100
+		// Whole units, not hundredths -- see InsulinStatusHandler.
+		"currentInsulinAmount": 200,
 		"isEstimate":           0,
 		"insulinLowAmount":     0,
 	})
@@ -97,8 +98,8 @@ func registerPollingDefaults(manager *Manager) {
 func registerQualifyingEventDefaults(manager *Manager) {
 	// CurrentBasalStatusResponse(long profileBasalRate, long currentBasalRate, int basalModifiedBitmask)
 	registerConstant(manager, "CurrentBasalStatusRequest", map[string]interface{}{
-		"profileBasalRate":     85, // 0.85 U/hr * 100
-		"currentBasalRate":     85,
+		"profileBasalRate":     850, // 0.85 U/hr, in milliunits
+		"currentBasalRate":     850,
 		"basalModifiedBitmask": 0,
 	})
 
@@ -157,8 +158,12 @@ func registerQualifyingEventDefaults(manager *Manager) {
 
 	// AlarmStatusResponse's real "data" constructor takes an AlarmResponseType...
 	// varargs enum array, which cliparser cannot construct from JSON at all (no
-	// enum support) -- no 1-param JSON input can ever succeed. Fall back to the
-	// no-arg constructor (empty/zeroed cargo).
+	// enum support) -- no 1-param JSON input can ever succeed, and the no-arg
+	// fallback emits a zero-length cargo where the driver expects an eight-byte
+	// bitmask. AlarmStatusRequest is therefore served by AlarmStatusHandler,
+	// which builds the response with the native encoder from
+	// PumpState.AlarmBitmask; this entry is kept only so the settings API still
+	// knows the message name.
 	registerConstant(manager, "AlarmStatusRequest", map[string]interface{}{})
 
 	// LoadStatusResponse has two real "data" constructors with the same 3-param
@@ -295,13 +300,23 @@ func registerNotificationDefaults(manager *Manager) {
 	})
 }
 
+// NOTE: ControlIQInfoV1Request/V2Request, TempRateRequest,
+// LastBolusStatusRequest, LastBolusStatusV2Request and LastBolusStatusV3Request
+// are no longer served from this table -- they are answered by dedicated
+// handlers that derive their response from live PumpState (see
+// pkg/handler/state_status.go). The entries below are kept registered so the
+// settings HTTP API still enumerates and validates them, and so a scenario can
+// re-register a static override, but the router does not read them.
+
 // registerControlIQDefaults registers defaults for ControlIQ info and sleep schedule
 func registerControlIQDefaults(manager *Manager) {
 	// ControlIQInfoV1Response(boolean closedLoopEnabled, int weight, int weightUnit,
 	// int totalDailyInsulin, int currentUserModeType, int byte6, int byte7,
 	// int byte8, int controlStateType)
 	registerConstant(manager, "ControlIQInfoV1Request", map[string]interface{}{
-		"closedLoopEnabled":   true,
+		// closedLoopEnabled defaults to false: a driver that sees closed loop
+		// enabled refuses to enact temp basals and manual boluses at all.
+		"closedLoopEnabled":   false,
 		"weight":              70,
 		"weightUnit":          0,
 		"totalDailyInsulin":   40,
@@ -314,7 +329,8 @@ func registerControlIQDefaults(manager *Manager) {
 
 	// ControlIQInfoV2Response — same 9 fields as V1 plus exercise fields
 	registerConstant(manager, "ControlIQInfoV2Request", map[string]interface{}{
-		"closedLoopEnabled":     true,
+		// closedLoopEnabled defaults to false; see ControlIQInfoV1Request above.
+		"closedLoopEnabled":     false,
 		"weight":                70,
 		"weightUnit":            0,
 		"totalDailyInsulin":     40,

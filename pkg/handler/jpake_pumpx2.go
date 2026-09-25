@@ -12,7 +12,6 @@ import (
 	"sync"
 	"time"
 
-	expect "github.com/google/goexpect"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/jwoglom/faketandem/pkg/pumpx2"
@@ -20,8 +19,8 @@ import (
 
 // PumpX2JPAKEAuthenticator uses pumpX2's actual server-side JPAKE implementation
 type PumpX2JPAKEAuthenticator struct {
-	pairingCode string
-	bridge      *pumpx2.Bridge
+	pairingCode   string
+	bridge        *pumpx2.Bridge
 	pumpX2Path    string
 	pumpX2Mode    string
 	gradleCmd     string
@@ -29,8 +28,13 @@ type PumpX2JPAKEAuthenticator struct {
 	pumpX2JarPath string
 
 	// JPAKE state
-	round        int
-	gexp         *expect.GExpect
+	round int
+	// failed, once set, makes every later round fail immediately with the
+	// same cause instead of talking to a subprocess that is gone (or, worse,
+	// silently starting a second one part-way through a handshake the client
+	// is already half-way through with the first).
+	failed       error
+	server       *jpakeServerProcess
 	sharedSecret []byte
 	serverNonce  []byte
 
@@ -129,15 +133,55 @@ func convertServerResponseValue(value interface{}) interface{} {
 	return hex.EncodeToString(b)
 }
 
-// ProcessRound processes a JPAKE round using pumpX2's server-side implementation
+// ProcessRound processes a JPAKE round using pumpX2's server-side implementation.
+//
+// Any failure ends the handshake here and now: the subprocess is torn down and
+// this authenticator is poisoned, so the caller gets an error on this round
+// (and on any later one) rather than waiting out a 30-second read against a
+// process that has already given up. See abortLocked.
 func (j *PumpX2JPAKEAuthenticator) ProcessRound(round int, requestData map[string]interface{}) (map[string]interface{}, error) {
 	j.mutex.Lock()
 	defer j.mutex.Unlock()
 
+	if j.failed != nil {
+		return nil, j.failed
+	}
+
+	params, err := j.processRoundLocked(round, requestData)
+	if err != nil {
+		j.abortLocked(err)
+		return nil, err
+	}
+	return params, nil
+}
+
+// abortLocked ends the handshake: it kills the jpake-server subprocess and
+// records cause so every later round fails with it immediately. Callers hold
+// j.mutex.
+//
+// Killing the subprocess here is what guarantees the next pairing attempt gets
+// a *fresh* server. JPAKESessionManager drops this authenticator on the same
+// failure, so nothing reuses it; this makes sure that even if something did,
+// it could not half-resume a handshake the client has already abandoned.
+func (j *PumpX2JPAKEAuthenticator) abortLocked(cause error) {
+	if j.failed != nil {
+		return
+	}
+	j.failed = fmt.Errorf("JPAKE handshake abandoned: %w", cause)
+
+	if j.server != nil {
+		log.Warnf("Abandoning this JPAKE handshake and killing its jpake-server subprocess: %v", cause)
+		j.server.close()
+		j.server = nil
+	}
+}
+
+// processRoundLocked runs one round. Callers hold j.mutex.
+func (j *PumpX2JPAKEAuthenticator) processRoundLocked(round int, requestData map[string]interface{}) (map[string]interface{}, error) {
 	log.Infof("Processing JPAKE round %d using pumpX2 server mode", round)
 
 	// Start the jpake-server command if not started
-	if j.gexp == nil {
+	if j.server == nil {
 		if err := j.startJPAKEServerProcess(); err != nil {
 			return nil, fmt.Errorf("failed to start JPAKE server process: %w", err)
 		}
@@ -180,7 +224,8 @@ func getRepoRoot() string {
 	return strings.TrimSpace(string(output))
 }
 
-// startJPAKEServerProcess starts the pumpX2 jpake-server command
+// startJPAKEServerProcess starts the pumpX2 jpake-server command over plain
+// stdin/stdout pipes (see jpakeServerProcess for why not a pty).
 func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 	var scriptPath string
 	var args []string
@@ -212,111 +257,72 @@ func (j *PumpX2JPAKEAuthenticator) startJPAKEServerProcess() error {
 
 	log.Infof("Starting pumpX2 JPAKE server process: %s %v", scriptPath, args)
 
-	// Test if we can run the command
-	cmd := exec.Command(scriptPath, args...)
-	if err := cmd.Start(); err != nil {
-		log.Errorf("Failed to start command %s %v: %v", scriptPath, args, err)
-		return fmt.Errorf("failed to start JPAKE server process: %w", err)
-	}
-
-	// Wait a bit to see if the process immediately exits
-	time.Sleep(100 * time.Millisecond)
-	
-	// Check if process is still running
-	if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
-		log.Errorf("Process exited immediately with status: %s", cmd.ProcessState.String())
-		return fmt.Errorf("JPAKE server process exited immediately")
-	}
-
-	// Kill the test process - we'll spawn it properly with expect
-	if cmd.Process != nil {
-		if err := cmd.Process.Kill(); err != nil {
-			log.Warnf("Failed to kill test process: %v", err)
-		}
-	}
-
-	// Now spawn with expect using the script
-	fullCmd := append([]string{scriptPath}, args...)
-	log.Debugf("Spawning with expect: %v", fullCmd)
-
-	var err error
-	j.gexp, _, err = expect.SpawnWithArgs(
-		fullCmd,
-		-1,
-		expect.CheckDuration(100*time.Millisecond),
-		expect.PartialMatch(true),
-		expect.Verbose(true),
-	)
-
+	server, err := startJPAKEServer(scriptPath, args)
 	if err != nil {
-		log.Errorf("Failed to spawn with expect: %v", err)
-		return fmt.Errorf("failed to spawn JPAKE server process with expect: %w", err)
+		log.Errorf("Failed to start %s %v: %v", scriptPath, args, err)
+		return err
 	}
+	j.server = server
 
-	log.Debug("pumpX2 JPAKE server process started successfully with expect")
-
-	// Give the process a moment to start and output initial messages
-	time.Sleep(200 * time.Millisecond)
+	log.Debug("pumpX2 JPAKE server process started successfully")
 
 	return nil
 }
 
-// readServerRound1aResponse reads only the server's initial JPAKE_1A response
-// JPAKE_1B is read after sending client's round 1a request (pumpX2 waits for input)
-func (j *PumpX2JPAKEAuthenticator) readServerRound1aResponse() error {
-	// Read JPAKE_1A response
-	// The regex needs to handle potential stderr output before the JPAKE_1A line
-	// Match JPAKE_1A: followed by JSON (JSONObject.toString() outputs single-line JSON)
-	round1aRegex := regexp.MustCompile(`(?s).*?JPAKE_1A:\s*(\{.*?\})`)
-	output, _, err := j.gexp.Expect(round1aRegex, 30*time.Second)
+// jpakeServerTimeout bounds how long the pump waits for jpake-server to print
+// each of its own messages. It matches the old goexpect timeout.
+const jpakeServerTimeout = 30 * time.Second
+
+// jpakeEnvelopeRegex builds the matcher for one of jpake-server's output lines,
+// e.g. "JPAKE_1A: {json}". JSONObject.toString() emits single-line JSON, so one
+// stdout line always carries the whole envelope.
+func jpakeEnvelopeRegex(label string) *regexp.Regexp {
+	return regexp.MustCompile(label + `:\s*(\{.*\})`)
+}
+
+// readServerEnvelope waits for jpake-server's next "<label>: {json}" line and
+// unmarshals it into dst.
+func (j *PumpX2JPAKEAuthenticator) readServerEnvelope(label string, dst *map[string]interface{}) error {
+	matches, err := j.server.expect(jpakeEnvelopeRegex(label), jpakeServerTimeout)
 	if err != nil {
-		// Try to get any remaining output for debugging
-		log.Errorf("Failed to read JPAKE_1A. Last output captured: %s", output)
-		return fmt.Errorf("failed to read JPAKE_1A from pumpX2: %w", err)
+		log.Errorf("Failed to read %s from jpake-server: %v", label, err)
+		return fmt.Errorf("failed to read %s from pumpX2: %w", label, err)
 	}
 
-	matches := round1aRegex.FindStringSubmatch(output)
-	if len(matches) < 2 {
-		log.Errorf("Failed to parse JPAKE_1A. Full output: %s", output)
-		return fmt.Errorf("failed to parse JPAKE_1A output: %s", output)
+	if err := json.Unmarshal([]byte(matches[1]), dst); err != nil {
+		log.Errorf("Failed to unmarshal %s JSON: %s. Error: %v", label, matches[1], err)
+		return fmt.Errorf("failed to unmarshal %s response: %w", label, err)
 	}
 
-	// Parse the JSON response
-	if err := json.Unmarshal([]byte(matches[1]), &j.round1aResponse); err != nil {
-		log.Errorf("Failed to unmarshal JPAKE_1A JSON: %s. Error: %v", matches[1], err)
-		return fmt.Errorf("failed to unmarshal JPAKE_1A response: %w", err)
-	}
-
-	log.Debugf("Got server Round1a response: %+v", j.round1aResponse)
-
+	log.Debugf("Got server %s response: %+v", label, *dst)
 	return nil
+}
+
+// sendClientRequest forwards the client's encoded request to jpake-server.
+//
+// A write failure is returned, not just logged: stdin only fails once the JVM
+// on the other end is gone, and continuing on to wait 30 seconds for a reply
+// from a dead process is exactly the stall this path has to avoid.
+func (j *PumpX2JPAKEAuthenticator) sendClientRequest(messageName string, requestData map[string]interface{}) error {
+	requestHex := j.encodeClientRequest(requestData)
+
+	log.Debugf("Sending client %s to pumpX2: %s", messageName, requestHex)
+	if err := j.server.send(requestHex); err != nil {
+		return fmt.Errorf("failed to send %s to pumpX2 jpake-server: %w", messageName, err)
+	}
+	return nil
+}
+
+// readServerRound1aResponse reads only the server's initial JPAKE_1A response.
+// JPAKE_1B is read after sending client's round 1a request (pumpX2 waits for
+// input).
+func (j *PumpX2JPAKEAuthenticator) readServerRound1aResponse() error {
+	return j.readServerEnvelope("JPAKE_1A", &j.round1aResponse)
 }
 
 // readServerRound1bResponse reads the server's JPAKE_1B response after sending client's 1a
 func (j *PumpX2JPAKEAuthenticator) readServerRound1bResponse() error {
-	// Read JPAKE_1B response
-	// Match JPAKE_1B: followed by JSON (JSONObject.toString() outputs single-line JSON)
-	round1bRegex := regexp.MustCompile(`(?s).*?JPAKE_1B:\s*(\{.*?\})`)
-	output, _, err := j.gexp.Expect(round1bRegex, 30*time.Second)
-	if err != nil {
-		log.Errorf("Failed to read JPAKE_1B. Last output captured: %s", output)
-		return fmt.Errorf("failed to read JPAKE_1B from pumpX2: %w", err)
-	}
-
-	matches := round1bRegex.FindStringSubmatch(output)
-	if len(matches) < 2 {
-		log.Errorf("Failed to parse JPAKE_1B. Full output: %s", output)
-		return fmt.Errorf("failed to parse JPAKE_1B output: %s", output)
-	}
-
-	if err := json.Unmarshal([]byte(matches[1]), &j.round1bResponse); err != nil {
-		log.Errorf("Failed to unmarshal JPAKE_1B JSON: %s. Error: %v", matches[1], err)
-		return fmt.Errorf("failed to unmarshal JPAKE_1B response: %w", err)
-	}
-
-	log.Debugf("Got server Round1b response: %+v", j.round1bResponse)
-
-	return nil
+	return j.readServerEnvelope("JPAKE_1B", &j.round1bResponse)
 }
 
 // processRound1 handles round 1 (combines 1a and 1b)
@@ -327,11 +333,8 @@ func (j *PumpX2JPAKEAuthenticator) processRound1(requestData map[string]interfac
 
 	if j.round == 0 {
 		// First call - send client's Jpake1aRequest
-		requestHex := j.encodeClientRequest(requestData)
-
-		log.Debugf("Sending client Jpake1aRequest to pumpX2: %s", requestHex)
-		if err := j.gexp.Send(requestHex + "\n"); err != nil {
-			log.Warnf("Failed to send to pumpX2: %v", err)
+		if err := j.sendClientRequest("Jpake1aRequest", requestData); err != nil {
+			return nil, err
 		}
 
 		// Now read JPAKE_1B (pumpX2 outputs it after receiving client's 1a)
@@ -344,35 +347,14 @@ func (j *PumpX2JPAKEAuthenticator) processRound1(requestData map[string]interfac
 	}
 
 	// Second call - send client's Jpake1bRequest
-	requestHex := j.encodeClientRequest(requestData)
-
-	log.Debugf("Sending client Jpake1bRequest to pumpX2: %s", requestHex)
-	if err := j.gexp.Send(requestHex + "\n"); err != nil {
-		log.Warnf("Failed to send to pumpX2: %v", err)
+	if err := j.sendClientRequest("Jpake1bRequest", requestData); err != nil {
+		return nil, err
 	}
 
 	// Read server's round 2 response (pumpX2 sends it after receiving round 1b)
-	round2Regex := regexp.MustCompile(`JPAKE_2:\s*({.+})`)
-	output, _, err := j.gexp.Expect(round2Regex, 30*time.Second)
-	if err != nil {
-		if j.gexp != nil {
-			log.Errorf("Failed to read JPAKE_2. Last output captured: %s", output)
-		}
-		return nil, fmt.Errorf("failed to read JPAKE_2 from pumpX2: %w", err)
+	if err := j.readServerEnvelope("JPAKE_2", &j.round2Response); err != nil {
+		return nil, err
 	}
-
-	matches := round2Regex.FindStringSubmatch(output)
-	if len(matches) < 2 {
-		log.Errorf("Failed to parse JPAKE_2. Full output: %s", output)
-		return nil, fmt.Errorf("failed to parse JPAKE_2 output: %s", output)
-	}
-
-	if err := json.Unmarshal([]byte(matches[1]), &j.round2Response); err != nil {
-		log.Errorf("Failed to unmarshal JPAKE_2 JSON: %s. Error: %v", matches[1], err)
-		return nil, fmt.Errorf("failed to unmarshal JPAKE_2 response: %w", err)
-	}
-
-	log.Debugf("Got server Round2 response: %+v", j.round2Response)
 
 	return convertServerResponseToParams(j.round1bResponse)
 }
@@ -391,11 +373,8 @@ func (j *PumpX2JPAKEAuthenticator) processRound1(requestData map[string]interfac
 // this code did) deadlocks, since jpake-server won't produce it until the
 // round 3 request (sent by processRound3, on a later call) has also arrived.
 func (j *PumpX2JPAKEAuthenticator) processRound2(requestData map[string]interface{}) (map[string]interface{}, error) {
-	requestHex := j.encodeClientRequest(requestData)
-
-	log.Debugf("Sending client Jpake2Request to pumpX2: %s", requestHex)
-	if err := j.gexp.Send(requestHex + "\n"); err != nil {
-		log.Warnf("Failed to send Jpake2Request to pumpX2: %v", err)
+	if err := j.sendClientRequest("Jpake2Request", requestData); err != nil {
+		return nil, err
 	}
 
 	j.round = 2
@@ -408,34 +387,13 @@ func (j *PumpX2JPAKEAuthenticator) processRound3(requestData map[string]interfac
 	// Send client's Jpake3SessionKeyRequest. jpake-server has been blocked
 	// waiting for exactly this since it finished reading round 2 (see
 	// processRound2) -- only once it arrives does jpake-server print "JPAKE_3:".
-	requestHex := j.encodeClientRequest(requestData)
-
-	log.Debugf("Sending client Jpake3SessionKeyRequest to pumpX2: %s", requestHex)
-	if err := j.gexp.Send(requestHex + "\n"); err != nil {
-		log.Warnf("Failed to send to pumpX2: %v", err)
+	if err := j.sendClientRequest("Jpake3SessionKeyRequest", requestData); err != nil {
+		return nil, err
 	}
 
-	round3Regex := regexp.MustCompile(`JPAKE_3:\s*({.+})`)
-	output, _, err := j.gexp.Expect(round3Regex, 30*time.Second)
-	if err != nil {
-		if j.gexp != nil {
-			log.Errorf("Failed to read JPAKE_3. Last output captured: %s", output)
-		}
-		return nil, fmt.Errorf("failed to read JPAKE_3 from pumpX2: %w", err)
+	if err := j.readServerEnvelope("JPAKE_3", &j.round3Response); err != nil {
+		return nil, err
 	}
-
-	matches := round3Regex.FindStringSubmatch(output)
-	if len(matches) < 2 {
-		log.Errorf("Failed to parse JPAKE_3. Full output: %s", output)
-		return nil, fmt.Errorf("failed to parse JPAKE_3 output: %s", output)
-	}
-
-	if err := json.Unmarshal([]byte(matches[1]), &j.round3Response); err != nil {
-		log.Errorf("Failed to unmarshal JPAKE_3 JSON: %s. Error: %v", matches[1], err)
-		return nil, fmt.Errorf("failed to unmarshal JPAKE_3 response: %w", err)
-	}
-
-	log.Debugf("Got server Round3 response: %+v", j.round3Response)
 
 	j.round = 3
 
@@ -454,68 +412,56 @@ func (j *PumpX2JPAKEAuthenticator) processRound3(requestData map[string]interfac
 // processRound4 handles round 4
 func (j *PumpX2JPAKEAuthenticator) processRound4(requestData map[string]interface{}) (map[string]interface{}, error) {
 	// Send client's Jpake4KeyConfirmationRequest
-	requestHex := j.encodeClientRequest(requestData)
-
-	log.Debugf("Sending client Jpake4KeyConfirmationRequest to pumpX2: %s", requestHex)
-	if err := j.gexp.Send(requestHex + "\n"); err != nil {
-		log.Warnf("Failed to send Jpake4KeyConfirmationRequest to pumpX2: %v", err)
+	if err := j.sendClientRequest("Jpake4KeyConfirmationRequest", requestData); err != nil {
+		return nil, err
 	}
 
 	// Read server's round 4 response
-	round4Regex := regexp.MustCompile(`JPAKE_4:\s*({.+})`)
-	output, _, err := j.gexp.Expect(round4Regex, 30*time.Second)
-	if err != nil {
-		if j.gexp != nil {
-			log.Errorf("Failed to read JPAKE_4. Last output captured: %s", output)
-		}
-		return nil, fmt.Errorf("failed to read JPAKE_4 from pumpX2: %w", err)
+	if err := j.readServerEnvelope("JPAKE_4", &j.round4Response); err != nil {
+		return nil, err
 	}
 
-	matches := round4Regex.FindStringSubmatch(output)
-	if len(matches) < 2 {
-		log.Errorf("Failed to parse JPAKE_4. Full output: %s", output)
-		return nil, fmt.Errorf("failed to parse JPAKE_4 output: %s", output)
-	}
-
-	if err := json.Unmarshal([]byte(matches[1]), &j.round4Response); err != nil {
-		log.Errorf("Failed to unmarshal JPAKE_4 JSON: %s. Error: %v", matches[1], err)
-		return nil, fmt.Errorf("failed to unmarshal JPAKE_4 response: %w", err)
-	}
-
-	log.Debugf("Got server Round4 response: %+v", j.round4Response)
-
-	// Read the final result with derived secret
-	resultRegex := regexp.MustCompile(`({[^{}]*"derivedSecret"[^{}]*})`)
-	resultOutput, _, err := j.gexp.Expect(resultRegex, 30*time.Second)
-	if err != nil {
-		if j.gexp != nil {
-			log.Errorf("Failed to read derivedSecret. Last output captured: %s", resultOutput)
-		}
-		return nil, fmt.Errorf("failed to read derived secret from pumpX2: %w", err)
-	}
-
-	resultMatches := resultRegex.FindStringSubmatch(resultOutput)
-	if len(resultMatches) >= 2 {
-		var result map[string]interface{}
-		if err := json.Unmarshal([]byte(resultMatches[1]), &result); err != nil {
-			log.Errorf("Failed to unmarshal result JSON: %s. Error: %v", resultMatches[1], err)
-			log.Warnf("Failed to unmarshal result JSON: %v", err)
-		} else {
-			if derivedSecretHex, ok := result["derivedSecret"].(string); ok {
-				j.sharedSecret = []byte(derivedSecretHex)
-				if raw, decErr := hex.DecodeString(derivedSecretHex); decErr == nil {
-					j.longTermSecret = raw
-				} else {
-					log.Warnf("Failed to hex-decode derivedSecret for long-term key caching: %v", decErr)
-				}
-				log.Infof("Extracted shared secret from pumpX2: %s", derivedSecretHex)
-			}
-		}
-	}
+	j.readDerivedSecret()
 
 	j.round = 4
 
 	return convertServerResponseToParams(j.round4Response)
+}
+
+// readDerivedSecret picks up the final line jpake-server prints once the
+// handshake completes, which carries the derived long-term secret.
+//
+// A failure here is logged rather than returned: the handshake itself already
+// succeeded from the client's point of view, and the caller's round 4 response
+// is what keeps the connection alive. Only a later quick-pair reconnect needs
+// the secret.
+func (j *PumpX2JPAKEAuthenticator) readDerivedSecret() {
+	resultRegex := regexp.MustCompile(`(\{[^{}]*"derivedSecret"[^{}]*\})`)
+	matches, err := j.server.expect(resultRegex, jpakeServerTimeout)
+	if err != nil {
+		log.Errorf("Failed to read derivedSecret from jpake-server: %v", err)
+		return
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal([]byte(matches[1]), &result); err != nil {
+		log.Warnf("Failed to unmarshal derivedSecret JSON %s: %v", matches[1], err)
+		return
+	}
+
+	derivedSecretHex, ok := result["derivedSecret"].(string)
+	if !ok {
+		log.Warnf("jpake-server result had no derivedSecret string: %v", result)
+		return
+	}
+
+	j.sharedSecret = []byte(derivedSecretHex)
+	if raw, decErr := hex.DecodeString(derivedSecretHex); decErr == nil {
+		j.longTermSecret = raw
+	} else {
+		log.Warnf("Failed to hex-decode derivedSecret for long-term key caching: %v", decErr)
+	}
+	log.Infof("Extracted shared secret from pumpX2: %s", derivedSecretHex)
 }
 
 // encodeClientRequest encodes a client request using pumpX2's format
@@ -645,13 +591,18 @@ func (j *PumpX2JPAKEAuthenticator) IsComplete() bool {
 	return j.round == 4
 }
 
-// Close cleans up the goexpect process
+// Close terminates the jpake-server subprocess, if one was started.
+//
+// JPAKESessionManager.Remove and RemoveAll call this on handshake completion
+// and on every BLE disconnect; without it each pairing attempt would leak one
+// JVM for the lifetime of the emulator.
 func (j *PumpX2JPAKEAuthenticator) Close() error {
 	j.mutex.Lock()
 	defer j.mutex.Unlock()
 
-	if j.gexp != nil {
-		return j.gexp.Close()
+	if j.server != nil {
+		j.server.close()
+		j.server = nil
 	}
 
 	return nil
