@@ -33,6 +33,8 @@ const (
 	// it: an ErrorResponse naming the rejected request has to be able to
 	// carry this value.
 	probeOpcode = 61
+	// Not the request's, so a test can tell which opcode an ErrorResponse names.
+	probeResponseOpcode = 62
 	// probeTxID is the transaction every probe exchange uses.
 	probeTxID = 7
 )
@@ -52,7 +54,7 @@ func (h *probeHandler) HandleMessage(msg *pumpx2.ParsedMessage, _ *state.PumpSta
 		ResponseMessage: &pumpx2.EncodedMessage{
 			MessageType: probeResponse,
 			TxID:        msg.TxID,
-			Opcode:      probeOpcode,
+			Opcode:      probeResponseOpcode,
 			Packets:     h.fragments,
 		},
 		Immediate: true,

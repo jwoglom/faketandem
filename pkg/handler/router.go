@@ -351,7 +351,7 @@ func (r *Router) RouteMessage(charType bluetooth.CharacteristicType, msg *pumpx2
 
 	// Process response
 	if response != nil {
-		if err := r.sendResponse(charType, response); err != nil {
+		if err := r.sendResponse(charType, msg.Opcode, response); err != nil {
 			log.Errorf("Failed to send response: %v", err)
 			return fmt.Errorf("failed to send response: %w", err)
 		}
@@ -368,7 +368,7 @@ func (r *Router) RouteMessage(charType bluetooth.CharacteristicType, msg *pumpx2
 // leaves the driver believing nothing happened while the pump has already
 // moved, and a drop_response fault has to reproduce exactly that, not "nothing
 // happened at all". It also means a fault can never suppress a state change.
-func (r *Router) sendResponse(requestCharType bluetooth.CharacteristicType, response *Response) error {
+func (r *Router) sendResponse(requestCharType bluetooth.CharacteristicType, requestOpcode int, response *Response) error {
 	// Determine characteristic to use
 	charType := response.Characteristic
 	if charType == 0 {
@@ -383,7 +383,7 @@ func (r *Router) sendResponse(requestCharType bluetooth.CharacteristicType, resp
 
 	// Send main response if present
 	if response.ResponseMessage != nil {
-		if err := r.sendWithFaults(charType, response.ResponseMessage); err != nil {
+		if err := r.sendWithFaults(charType, response.ResponseMessage, requestOpcode); err != nil {
 			return fmt.Errorf("failed to send main response: %w", err)
 		}
 	}
@@ -399,7 +399,7 @@ func (r *Router) sendResponse(requestCharType bluetooth.CharacteristicType, resp
 
 	// Send notifications
 	for _, notification := range response.Notifications {
-		if err := r.sendWithFaults(notification.Characteristic, notification.Message); err != nil {
+		if err := r.sendWithFaults(notification.Characteristic, notification.Message, notification.Message.Opcode); err != nil {
 			log.Errorf("Failed to send notification on %s: %v", notification.Characteristic, err)
 			// Continue with other notifications
 		}
@@ -511,7 +511,9 @@ func (r *Router) refragment(msg *pumpx2.EncodedMessage) *pumpx2.EncodedMessage {
 
 // sendWithFaults applies any armed fault to one outgoing message and then
 // sends whatever is left to send.
-func (r *Router) sendWithFaults(charType bluetooth.CharacteristicType, msg *pumpx2.EncodedMessage) error {
+// requestOpcode is the opcode of the request msg answers, which an error_response
+// fault's ErrorResponse names as its requestCodeId.
+func (r *Router) sendWithFaults(charType bluetooth.CharacteristicType, msg *pumpx2.EncodedMessage, requestOpcode int) error {
 	msg = r.refragment(r.resign(msg))
 
 	fault := r.matchResponseFault(charType, msg)
@@ -533,7 +535,7 @@ func (r *Router) sendWithFaults(charType bluetooth.CharacteristicType, msg *pump
 		return r.sendAndRecord(charType, msg, -1, fault.Kind, fmt.Sprintf("delayed %v", delay))
 
 	case faults.KindErrorResponse:
-		return r.sendErrorResponse(charType, msg, fault)
+		return r.sendErrorResponse(charType, msg, fault, requestOpcode)
 
 	case faults.KindDisconnect:
 		return r.disconnectFault(charType, msg, fault)
@@ -564,7 +566,7 @@ func (r *Router) matchResponseFault(charType bluetooth.CharacteristicType, msg *
 // sendErrorResponse replaces a response with a protocol ErrorResponse, via the
 // ErrorResponseEncoder hook. With no encoder installed the fault degrades to a
 // drop and says so, rather than pretending an error path was exercised.
-func (r *Router) sendErrorResponse(charType bluetooth.CharacteristicType, msg *pumpx2.EncodedMessage, fault *faults.Fault) error {
+func (r *Router) sendErrorResponse(charType bluetooth.CharacteristicType, msg *pumpx2.EncodedMessage, fault *faults.Fault, requestOpcode int) error {
 	if ErrorResponseEncoder == nil {
 		log.Warnf("Fault %d (error_response): no ErrorResponseEncoder installed; dropping %s txID=%d instead",
 			fault.ID, msg.MessageType, msg.TxID)
@@ -572,7 +574,7 @@ func (r *Router) sendErrorResponse(charType bluetooth.CharacteristicType, msg *p
 		return nil
 	}
 
-	errMsg, err := ErrorResponseEncoder(msg.TxID, fault.ErrorCode, msg.Opcode, msg.MessageType)
+	errMsg, err := ErrorResponseEncoder(msg.TxID, fault.ErrorCode, requestOpcode, msg.MessageType)
 	if err != nil {
 		log.Errorf("Fault %d (error_response): encoder failed for %s: %v", fault.ID, msg.MessageType, err)
 		r.recordSuppressed(charType, msg, fault.Kind, fmt.Sprintf("ErrorResponseEncoder failed: %v", err))
