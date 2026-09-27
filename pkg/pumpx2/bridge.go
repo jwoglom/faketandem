@@ -29,7 +29,7 @@ func NewBridge(pumpX2Path, mode, gradleCmd, javaCmd, jarPath string) (*Bridge, e
 		runner = NewGradleRunner(pumpX2Path, gradleCmd)
 	} else if jarPath != "" {
 		log.Infof("Using prebuilt cliparser JAR: %s", jarPath)
-		runner = NewJarRunner(jarPath, javaCmd)
+		runner = NewServeRunner(jarPath, javaCmd)
 	} else {
 		log.Info("Using JAR mode for cliparser")
 		// Build/find the cliparser JAR
@@ -38,7 +38,7 @@ func NewBridge(pumpX2Path, mode, gradleCmd, javaCmd, jarPath string) (*Bridge, e
 			return nil, fmt.Errorf("failed to initialize cliparser JAR: %w", err)
 		}
 		log.Infof("Using cliparser JAR: %s", builtJarPath)
-		runner = NewJarRunner(builtJarPath, javaCmd)
+		runner = NewServeRunner(builtJarPath, javaCmd)
 	}
 
 	return &Bridge{
