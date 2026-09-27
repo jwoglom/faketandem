@@ -130,3 +130,25 @@ func countLines(t *testing.T, path string) int {
 	}
 	return strings.Count(string(data), "\n")
 }
+
+// Against a real cliparser jar: through serve if the jar has it, through the
+// JarRunner fallback if not. Skipped without FAKETANDEM_TEST_CLIPARSER_JAR.
+func TestServeRunner_Parse_RealJpake1aRequest(t *testing.T) {
+	jarPath := os.Getenv("FAKETANDEM_TEST_CLIPARSER_JAR")
+	if jarPath == "" {
+		t.Skip("FAKETANDEM_TEST_CLIPARSER_JAR not set, skipping real jar integration test")
+	}
+	runner := NewServeRunner(jarPath, "java")
+	t.Cleanup(func() { _ = runner.Close() })
+
+	for i := 0; i < 2; i++ {
+		output, err := runner.Parse("AUTHORIZATION", realJpake1aRawFragments)
+		if err != nil {
+			t.Fatalf("parse %d: %v", i, err)
+		}
+		if name, _ := parseCliparserOutput(output); name != "Jpake1aRequest" {
+			t.Fatalf("parse %d: message name %q (output: %s)", i, name, output)
+		}
+	}
+	t.Logf("serve unsupported by this jar: %v", runner.unsupported)
+}
