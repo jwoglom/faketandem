@@ -28,6 +28,19 @@ func parseEnv(btChar string) []string {
 	return append(os.Environ(), "PUMPX2_CHARACTERISTIC="+btChar)
 }
 
+// encodeParamsJSON renders encode params as the single JSON object argument
+// cliparser's "encode" command takes.
+func encodeParamsJSON(params map[string]interface{}) (string, error) {
+	if len(params) == 0 {
+		return "{}", nil
+	}
+	paramsBytes, err := json.Marshal(params)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal params: %w", err)
+	}
+	return string(paramsBytes), nil
+}
+
 // Runner is an interface for executing cliparser commands
 type Runner interface {
 	// Parse decodes a message from its raw BLE fragments. rawPacketsHex must be the
@@ -85,15 +98,9 @@ func (r *GradleRunner) Parse(btChar string, rawPacketsHex []string) (string, err
 // Encode builds a message using gradle cliparser
 func (r *GradleRunner) Encode(txID int, messageName string, params map[string]interface{}) (string, error) {
 	// Build args: encode <txID> <messageName> <params>
-	var paramsJSON string
-	if len(params) == 0 {
-		paramsJSON = "{}"
-	} else {
-		paramsBytes, err := json.Marshal(params)
-		if err != nil {
-			return "", fmt.Errorf("failed to marshal params: %w", err)
-		}
-		paramsJSON = string(paramsBytes)
+	paramsJSON, err := encodeParamsJSON(params)
+	if err != nil {
+		return "", err
 	}
 
 	args := fmt.Sprintf("encode %d %s %s", txID, messageName, paramsJSON)
@@ -166,15 +173,9 @@ func (r *JarRunner) Parse(btChar string, rawPacketsHex []string) (string, error)
 // pairs -- confirmed empirically against a real cliparser jar (a bare key=value
 // arg throws org.json.JSONException: "A JSONObject text must begin with '{'").
 func (r *JarRunner) Encode(txID int, messageName string, params map[string]interface{}) (string, error) {
-	var paramsJSON string
-	if len(params) == 0 {
-		paramsJSON = "{}"
-	} else {
-		paramsBytes, err := json.Marshal(params)
-		if err != nil {
-			return "", fmt.Errorf("failed to marshal params: %w", err)
-		}
-		paramsJSON = string(paramsBytes)
+	paramsJSON, err := encodeParamsJSON(params)
+	if err != nil {
+		return "", err
 	}
 
 	args := []string{"-jar", r.jarPath, "encode", fmt.Sprintf("%d", txID), messageName, paramsJSON}
