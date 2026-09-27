@@ -19,7 +19,7 @@ Fetch the pumpX2 cliparser jar (into `third_party/`) and run:
 ```bash
 make jar
 go run . -transport virtual \
-  -pumpx2-jar-path third_party/pumpx2-cliparser-1.9.1.jar \
+  -pumpx2-jar-path third_party/pumpx2-cliparser-1.9.2.jar \
   -q
 ```
 
