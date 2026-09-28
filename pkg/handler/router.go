@@ -243,7 +243,7 @@ func (r *Router) registerHandlers() {
 	// resolves this to the int ctor via JVM reflection order, but that
 	// ordering isn't JLS-guaranteed, so this is fragile.
 	r.RegisterHandler(NewSettingsWriteHandler(r.bridge, r.settingsManager, "SetSleepScheduleRequest", "ControlIQSleepScheduleRequest"))
-	r.RegisterHandler(NewSettingsWriteHandler(r.bridge, r.settingsManager, "SetQuickBolusSettingsRequest", ""))
+	r.RegisterHandler(NewQuickBolusSettingsHandler(r.bridge, r.settingsManager))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetPumpSoundsRequest"))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetPumpAlertSnoozeRequest"))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetAutoOffAlertRequest"))
