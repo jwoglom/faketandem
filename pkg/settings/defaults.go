@@ -47,8 +47,8 @@ func registerSettingsDefaults(manager *Manager) {
 	// int alertAnnun, int alarmAnnun, int fillTubingAnnun)
 	registerConstant(manager, "PumpGlobalsRequest", map[string]interface{}{
 		"quickBolusEnabledRaw":     1,
-		"quickBolusIncrementUnits": 100,
-		"quickBolusIncrementCarbs": 1,
+		"quickBolusIncrementUnits": 500,  // milliunits
+		"quickBolusIncrementCarbs": 2000, // milligrams
 		"quickBolusEntryType":      0,
 		"quickBolusStatus":         0,
 		"buttonAnnun":              0,
