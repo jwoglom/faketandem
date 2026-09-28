@@ -171,6 +171,24 @@ func encodeHistoryPayload(payload []byte, typeID int, fields map[string]interfac
 		putFloat32(payload[8:12], fieldFloat(fields, "insulinDelivered", "unitsDelivered"))
 		putFloat32(payload[12:16], fieldFloat(fields, "insulinRequested", "unitsTotal"))
 
+	case HistoryBolexActivated:
+		// bolusId u16 @0, selectedIob u8 @2, iob f32 @4, bolexSize f32 @8 -- the
+		// BolusActivated layout, for the extended part of a bolus.
+		binary.LittleEndian.PutUint16(payload[0:2], uint16(fieldInt(fields, "bolusId", "bolusID")))
+		payload[2] = uint8(fieldInt(fields, "selectedIob"))
+		putFloat32(payload[4:8], fieldFloat(fields, "iob"))
+		putFloat32(payload[8:12], fieldFloat(fields, "bolexSize", "units"))
+
+	case HistoryBolexCompleted:
+		// completionStatus u16 @0, bolusId u16 @2, iob f32 @4,
+		// insulinDelivered f32 @8, insulinRequested f32 @12 -- the
+		// BolusCompleted layout; completionStatus is the same BolusStatus enum.
+		binary.LittleEndian.PutUint16(payload[0:2], uint16(fieldIntDefault(fields, 3, "completionStatus", "completionStatusId")))
+		binary.LittleEndian.PutUint16(payload[2:4], uint16(fieldInt(fields, "bolusId", "bolusID")))
+		putFloat32(payload[4:8], fieldFloat(fields, "iob"))
+		putFloat32(payload[8:12], fieldFloat(fields, "insulinDelivered", "unitsDelivered"))
+		putFloat32(payload[12:16], fieldFloat(fields, "insulinRequested", "unitsTotal"))
+
 	case HistoryTempRateActivated:
 		// percent f32 @0, durationMilliseconds f32 @4, unknown u16 @8,
 		// tempRateId u16 @10
