@@ -215,10 +215,10 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewStopTempRateHandler(r.bridge))
 
 	// Cartridge change flow handlers
-	r.RegisterHandler(NewCartridgeHandler(r.bridge, "EnterChangeCartridgeModeRequest"))
-	r.RegisterHandler(NewCartridgeHandler(r.bridge, "ExitChangeCartridgeModeRequest"))
-	r.RegisterHandler(NewCartridgeHandler(r.bridge, "EnterFillTubingModeRequest"))
-	r.RegisterHandler(NewCartridgeHandler(r.bridge, "ExitFillTubingModeRequest"))
+	r.RegisterHandler(NewCartridgeModeHandler(r.bridge, "EnterChangeCartridgeModeRequest", state.WorkflowChangeCartridge, true))
+	r.RegisterHandler(NewCartridgeModeHandler(r.bridge, "ExitChangeCartridgeModeRequest", state.WorkflowChangeCartridge, false))
+	r.RegisterHandler(NewCartridgeModeHandler(r.bridge, "EnterFillTubingModeRequest", state.WorkflowFillTubing, true))
+	r.RegisterHandler(NewCartridgeModeHandler(r.bridge, "ExitFillTubingModeRequest", state.WorkflowFillTubing, false))
 	r.RegisterHandler(NewCartridgeHandler(r.bridge, "FillCannulaRequest"))
 
 	// Simple control handlers (log and return success)
