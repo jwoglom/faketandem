@@ -62,6 +62,16 @@ func TestEncodeRecord_AgainstCapturedRecords(t *testing.T) {
 			want: "14009ed7971a70d802000300210454c86940f2bae43ff2bae43f",
 		},
 		{
+			name: "BolexActivatedMobiExtendedBolus",
+			entry: HistoryLogEntry{
+				TypeID: HistoryBolexActivated, PumpTime: 543715895, Sequence: 68927, SourceNibble: 1,
+				Data: map[string]interface{}{
+					"bolusId": 248, "selectedIob": 0, "iob": 0.0, "bolexSize": 2.0,
+				},
+			},
+			want: "3b10377268203f0d0100f8000000000000000000004000000000",
+		},
+		{
 			name: "TempRateActivated",
 			entry: HistoryLogEntry{
 				TypeID: HistoryTempRateActivated, PumpTime: 579777478, Sequence: 449311, SourceNibble: 1,
@@ -143,6 +153,24 @@ func TestEncodeRecord_AgainstCapturedRecords(t *testing.T) {
 				t.Errorf("EncodeRecord() =\n  %s\nwant\n  %s", got, c.want)
 			}
 		})
+	}
+}
+
+// TestEncodeRecord_BolexCompleted pins BolexCompleted to the offsets TandemKit's
+// BolexCompletedHistoryLog parses. No record captured from a real pump exists
+// (TandemKit #424), so this one is synthetic: the end of the captured
+// extended bolus above, 480 minutes later.
+func TestEncodeRecord_BolexCompleted(t *testing.T) {
+	entry := HistoryLogEntry{
+		TypeID: HistoryBolexCompleted, PumpTime: 543715895 + 480*60, Sequence: 68928, SourceNibble: 1,
+		Data: map[string]interface{}{
+			"completionStatus": 3, "bolusId": 248, "iob": 0.0,
+			"insulinDelivered": 2.0, "insulinRequested": 2.0,
+		},
+	}
+	want := "1510b7e26820400d01000300f800000000000000004000000040"
+	if got := hex.EncodeToString(entry.EncodeRecord()); got != want {
+		t.Errorf("EncodeRecord() =\n  %s\nwant\n  %s", got, want)
 	}
 }
 
