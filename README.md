@@ -166,7 +166,13 @@ Settable fields: `reservoir_units`, `battery_percent`, `battery_charging`,
 `basal_rate`, `suspended`, `iob`, `tdd`, `closed_loop_enabled`,
 `control_iq_mode`, `weight`, `total_daily_insulin`,
 `bolus_rate_units_per_second`, `cgm_egv`, `cgm_session_active`, `pairing_code`,
-`time_since_reset`, `api_version_major`, `api_version_minor`, `clear_alerts`.
+`time_since_reset`, `api_version_major`, `api_version_minor`, `clear_alerts`,
+`workflow_mode`.
+
+`workflow_mode` is the cartridge procedure the pump has open (`none`,
+`change_cartridge` or `fill_tubing`), reported in the snapshot too. The pump
+refuses to enter a procedure while one is open, and refuses to exit one it is
+not in; setting it stages a pump that was left part-way through one.
 
 ### Pump-initiated actions
 

@@ -63,6 +63,7 @@ type PumpState struct {
 
 	// Pump mode
 	PumpingSuspended bool
+	workflowMode     WorkflowMode
 	// suspendReason records WHY delivery is suspended ("user", "occlusion",
 	// "alarm", ...). A driver cannot see it directly, but it decides which
 	// history records and qualifying events a suspend produces, and a harness

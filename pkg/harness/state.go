@@ -35,8 +35,11 @@ type Snapshot struct {
 	// without this an alarm that came and went left nothing a timeline could
 	// place an interval from.
 	AlarmsHistory []clearedAlarmSnapshot `json:"alarms_history"`
-	History       historySnapshot        `json:"history"`
-	RequestLog requestLogSnapshot `json:"request_log"`
+	// WorkflowMode is the cartridge procedure the pump has open: none,
+	// change_cartridge or fill_tubing.
+	WorkflowMode string             `json:"workflow_mode"`
+	History      historySnapshot    `json:"history"`
+	RequestLog   requestLogSnapshot `json:"request_log"`
 }
 
 type identitySnapshot struct {
@@ -174,6 +177,12 @@ func (h *Harness) handleState(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "%v", err)
 			return
 		}
+		if body.WorkflowMode != nil {
+			if _, ok := state.ParseWorkflowMode(*body.WorkflowMode); !ok {
+				writeError(w, http.StatusBadRequest, "unknown workflow_mode %q", *body.WorkflowMode)
+				return
+			}
+		}
 		applied := h.applyStateUpdate(body)
 		log.Infof("harness: applied state update: %v", applied)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -202,6 +211,7 @@ func (h *Harness) Snapshot() Snapshot {
 	bolus := *ps.Bolus
 	suspended := ps.PumpingSuspended
 	suspendReason := ps.SuspendReason()
+	workflowMode := ps.WorkflowModeUnlocked()
 	insulin := insulinSnapshot{
 		ReservoirUnits: ps.Reservoir.CurrentUnits,
 		ReservoirMax:   ps.Reservoir.MaxUnits,
@@ -297,11 +307,12 @@ func (h *Harness) Snapshot() Snapshot {
 			Weight:            controlIQ.Weight,
 			TotalDailyInsulin: controlIQ.TotalDailyInsulin,
 		},
-		Insulin:    insulin,
-		Battery:    battery,
-		CGM:        cgm,
+		Insulin:       insulin,
+		Battery:       battery,
+		CGM:           cgm,
 		Alerts:        alerts,
 		AlarmsHistory: clearedAlarms,
+		WorkflowMode:  string(workflowMode),
 		History:       h.historySnapshot(),
 		RequestLog:    h.requestLogSnapshot(),
 	}
@@ -405,6 +416,7 @@ type stateUpdate struct {
 	APIVersionMajor   *int     `json:"api_version_major,omitempty"`
 	APIVersionMinor   *int     `json:"api_version_minor,omitempty"`
 	ClearAlerts       *bool    `json:"clear_alerts,omitempty"`
+	WorkflowMode      *string  `json:"workflow_mode,omitempty"`
 }
 
 // applyStateUpdate writes the named fields and returns the names it applied.
@@ -481,8 +493,20 @@ func (h *Harness) applyStateUpdate(u stateUpdate) []string {
 		applied = append(applied, "clear_alerts")
 	}
 
+	applied = append(applied, h.applyWorkflowMode(u)...)
 	applied = append(applied, h.applyDirectFields(u)...)
 	return applied
+}
+
+// applyWorkflowMode stages the open cartridge procedure with none of the checks a request goes
+// through. handleState has already validated the name.
+func (h *Harness) applyWorkflowMode(u stateUpdate) []string {
+	if u.WorkflowMode == nil {
+		return nil
+	}
+	mode, _ := state.ParseWorkflowMode(*u.WorkflowMode)
+	h.pumpState.SetWorkflowMode(mode)
+	return []string{"workflow_mode"}
 }
 
 // applyDirectFields writes the fields that have no setter of their own and are
