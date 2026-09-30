@@ -159,7 +159,7 @@ func (r *Router) registerHandlers() {
 	// alarm_status.go), so this one is built natively from PumpState.
 	r.RegisterHandler(NewAlarmStatusHandler())
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "LoadStatusRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ProfileStatusRequest", true))
+	r.RegisterHandler(NewProfileStatusHandler(r.bridge))
 	r.RegisterHandler(NewLastBolusStatusHandler(r.bridge, "LastBolusStatusV2Request"))
 
 	// Notification/alarm/malfunction handlers
@@ -253,9 +253,9 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetLowInsulinAlertRequest"))
 
 	// IDP management handlers
-	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "CreateIDPRequest"))
+	r.RegisterHandler(NewCreateIDPHandler(r.bridge))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetIDPSettingsRequest"))
-	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetIDPSegmentRequest"))
+	r.RegisterHandler(NewSetIDPSegmentHandler(r.bridge))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetActiveIDPRequest"))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "DeleteIDPRequest"))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "RenameIDPRequest"))
@@ -270,8 +270,8 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "CgmOutOfRangeAlertRequest"))
 
 	// Additional status handlers used by controlX2
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "IDPSegmentRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "IDPSettingsRequest", true))
+	r.RegisterHandler(NewIDPSegmentHandler(r.bridge))
+	r.RegisterHandler(NewIDPSettingsHandler(r.bridge))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "GetSavedG7PairingCodeRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CurrentActiveIdpValuesRequest", true))
 
@@ -295,7 +295,8 @@ func (r *Router) registerHandlers() {
 
 	// ProfileBasalRequest/Response has no corresponding class anywhere in
 	// pumpX2 -- not part of the real protocol, so no handler is registered.
-	// (Basal profile data is exposed via the real ProfileStatusRequest, above.)
+	// (Basal profile data is exposed via the real ProfileStatusRequest, IDPSettingsRequest and
+	// IDPSegmentRequest; see idp.go.)
 
 	// Set default handler for unknown messages
 	r.SetDefaultHandler(NewDefaultHandler(r.bridge))

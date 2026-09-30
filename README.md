@@ -167,12 +167,23 @@ Settable fields: `reservoir_units`, `battery_percent`, `battery_charging`,
 `control_iq_mode`, `weight`, `total_daily_insulin`,
 `bolus_rate_units_per_second`, `cgm_egv`, `cgm_session_active`, `pairing_code`,
 `time_since_reset`, `api_version_major`, `api_version_minor`, `clear_alerts`,
-`workflow_mode`.
+`workflow_mode`, `idp_profiles`.
 
 `workflow_mode` is the cartridge procedure the pump has open (`none`,
 `change_cartridge` or `fill_tubing`), reported in the snapshot too. The pump
 refuses to enter a procedure while one is open, and refuses to exit one it is
 not in; setting it stages a pump that was left part-way through one.
+
+`idp_profiles` replaces the pump's insulin delivery profiles, in slot order (slot
+0 is the active one); `[]` leaves it with none. Each profile is `{"id", "name",
+"insulin_duration", "max_bolus", "carb_entry", "segments"}`, and each segment
+`{"start_time", "basal_rate", "carb_ratio", "target_bg", "isf"}` in the wire's
+units (minutes after midnight, milliunits/hour). `ProfileStatusRequest`,
+`IDPSettingsRequest` and `IDPSegmentRequest` read them, and `CreateIDPRequest`
+and `SetIDPSegmentRequest` change them as a pump would: at most 6 profiles and 16
+segments, no two segments at one start time, segment 0 fixed at midnight, and a
+nonzero status for anything refused. The profile does not drive delivery;
+`basal_rate` does.
 
 ### Pump-initiated actions
 
