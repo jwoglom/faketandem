@@ -177,9 +177,11 @@ func registerQualifyingEventDefaults(manager *Manager) {
 
 	// ProfileStatusResponse(int numberOfProfiles, int idpSlot0Id, int idpSlot1Id,
 	// int idpSlot2Id, int idpSlot3Id, int idpSlot4Id, int idpSlot5Id, int activeSegmentIndex)
+	// idpSlot0Id must match the idpId IDPSettingsRequest and IDPSegmentRequest answer with, or a
+	// client walking the profiles by slot never sees the one it asked for.
 	registerConstant(manager, "ProfileStatusRequest", map[string]interface{}{
 		"numberOfProfiles":   1,
-		"idpSlot0Id":         0,
+		"idpSlot0Id":         1,
 		"idpSlot1Id":         -1,
 		"idpSlot2Id":         -1,
 		"idpSlot3Id":         -1,
