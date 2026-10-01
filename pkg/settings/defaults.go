@@ -175,18 +175,6 @@ func registerQualifyingEventDefaults(manager *Manager) {
 		"unknown": 0,
 	})
 
-	// ProfileStatusResponse(int numberOfProfiles, int idpSlot0Id, int idpSlot1Id,
-	// int idpSlot2Id, int idpSlot3Id, int idpSlot4Id, int idpSlot5Id, int activeSegmentIndex)
-	registerConstant(manager, "ProfileStatusRequest", map[string]interface{}{
-		"numberOfProfiles":   1,
-		"idpSlot0Id":         0,
-		"idpSlot1Id":         -1,
-		"idpSlot2Id":         -1,
-		"idpSlot3Id":         -1,
-		"idpSlot4Id":         -1,
-		"idpSlot5Id":         -1,
-		"activeSegmentIndex": 0,
-	})
 
 	// LastBolusStatusV2Response(int status, int bolusId, long timestamp,
 	// long deliveredVolume, int bolusStatusId, int bolusSourceId,
@@ -499,30 +487,6 @@ func registerGlobalSettingsDefaults(manager *Manager) {
 
 // registerAdditionalStatusDefaults registers defaults for additional status handlers
 func registerAdditionalStatusDefaults(manager *Manager) {
-	// IDPSegmentResponse(int idpId, int segmentIndex, int profileStartTime,
-	// int profileBasalRate, long profileCarbRatio, int profileTargetBG,
-	// int profileISF, int statusId)
-	registerConstant(manager, "IDPSegmentRequest", map[string]interface{}{
-		"idpId":            1,
-		"segmentIndex":     0,
-		"profileStartTime": 0,
-		"profileBasalRate": 850,
-		"profileCarbRatio": 10000,
-		"profileTargetBG":  110,
-		"profileISF":       50,
-		"statusId":         0,
-	})
-
-	// IDPSettingsResponse(int idpId, String name, int numberOfProfileSegments,
-	// int insulinDuration, int maxBolus, boolean carbEntry)
-	registerConstant(manager, "IDPSettingsRequest", map[string]interface{}{
-		"idpId":                   1,
-		"name":                    "Profile 1",
-		"numberOfProfileSegments": 1,
-		"insulinDuration":         300,
-		"maxBolus":                25000,
-		"carbEntry":               true,
-	})
 
 	// GetSavedG7PairingCodeResponse(int pairingCode)
 	registerConstant(manager, "GetSavedG7PairingCodeRequest", map[string]interface{}{

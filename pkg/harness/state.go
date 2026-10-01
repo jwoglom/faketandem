@@ -37,8 +37,10 @@ type Snapshot struct {
 	AlarmsHistory []clearedAlarmSnapshot `json:"alarms_history"`
 	// WorkflowMode is the cartridge procedure the pump has open: none,
 	// change_cartridge or fill_tubing.
-	WorkflowMode string             `json:"workflow_mode"`
-	History      historySnapshot    `json:"history"`
+	WorkflowMode string `json:"workflow_mode"`
+	// IDPProfiles are the insulin delivery profiles in slot order; slot 0 is active.
+	IDPProfiles []state.IDPProfile `json:"idp_profiles"`
+	History     historySnapshot    `json:"history"`
 	RequestLog   requestLogSnapshot `json:"request_log"`
 }
 
@@ -183,6 +185,10 @@ func (h *Harness) handleState(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if body.IDPProfiles != nil && len(*body.IDPProfiles) > state.MaxIDPProfiles {
+			writeError(w, http.StatusBadRequest, "%d idp_profiles; a pump holds at most %d", len(*body.IDPProfiles), state.MaxIDPProfiles)
+			return
+		}
 		applied := h.applyStateUpdate(body)
 		log.Infof("harness: applied state update: %v", applied)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
@@ -212,6 +218,7 @@ func (h *Harness) Snapshot() Snapshot {
 	suspended := ps.PumpingSuspended
 	suspendReason := ps.SuspendReason()
 	workflowMode := ps.WorkflowModeUnlocked()
+	idpProfiles := ps.IDPProfilesUnlocked()
 	insulin := insulinSnapshot{
 		ReservoirUnits: ps.Reservoir.CurrentUnits,
 		ReservoirMax:   ps.Reservoir.MaxUnits,
@@ -313,6 +320,7 @@ func (h *Harness) Snapshot() Snapshot {
 		Alerts:        alerts,
 		AlarmsHistory: clearedAlarms,
 		WorkflowMode:  string(workflowMode),
+		IDPProfiles:   idpProfiles,
 		History:       h.historySnapshot(),
 		RequestLog:    h.requestLogSnapshot(),
 	}
@@ -417,6 +425,8 @@ type stateUpdate struct {
 	APIVersionMinor   *int     `json:"api_version_minor,omitempty"`
 	ClearAlerts       *bool    `json:"clear_alerts,omitempty"`
 	WorkflowMode      *string  `json:"workflow_mode,omitempty"`
+	// IDPProfiles replaces every profile; an empty list leaves the pump with none.
+	IDPProfiles *[]state.IDPProfile `json:"idp_profiles,omitempty"`
 }
 
 // applyStateUpdate writes the named fields and returns the names it applied.
@@ -494,6 +504,7 @@ func (h *Harness) applyStateUpdate(u stateUpdate) []string {
 	}
 
 	applied = append(applied, h.applyWorkflowMode(u)...)
+	applied = append(applied, h.applyIDPProfiles(u)...)
 	applied = append(applied, h.applyDirectFields(u)...)
 	return applied
 }
@@ -507,6 +518,15 @@ func (h *Harness) applyWorkflowMode(u stateUpdate) []string {
 	mode, _ := state.ParseWorkflowMode(*u.WorkflowMode)
 	h.pumpState.SetWorkflowMode(mode)
 	return []string{"workflow_mode"}
+}
+
+// applyIDPProfiles stages the profiles with none of the checks a request goes through.
+func (h *Harness) applyIDPProfiles(u stateUpdate) []string {
+	if u.IDPProfiles == nil {
+		return nil
+	}
+	h.pumpState.SetIDPProfiles(*u.IDPProfiles)
+	return []string{"idp_profiles"}
 }
 
 // applyDirectFields writes the fields that have no setter of their own and are

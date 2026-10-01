@@ -283,10 +283,6 @@ var simpleControlResponseParamsOverrides = map[string]map[string]interface{}{
 	"FactoryResetResponse": {},
 	// AdditionalBolusResponse(int status, int bolusId, int reserve)
 	"AdditionalBolusResponse": {"status": 0, "bolusId": 1, "reserve": 0},
-	// CreateIDPResponse(int status, int newIdpId)
-	"CreateIDPResponse": {"status": 0, "newIdpId": 1},
-	// SetIDPSegmentResponse has no int-status constructor, only a raw byte[] one (size=2).
-	"SetIDPSegmentResponse": {"raw": "0000"},
 	// RenameIDPResponse(int status, int numberOfProfiles)
 	"RenameIDPResponse": {"status": 0, "numberOfProfiles": 1},
 }

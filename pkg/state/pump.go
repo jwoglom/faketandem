@@ -64,6 +64,8 @@ type PumpState struct {
 	// Pump mode
 	PumpingSuspended bool
 	workflowMode     WorkflowMode
+	// idpProfiles are the insulin delivery profiles in slot order; see idp.go.
+	idpProfiles []IDPProfile
 	// suspendReason records WHY delivery is suspended ("user", "occlusion",
 	// "alarm", ...). A driver cannot see it directly, but it decides which
 	// history records and qualifying events a suspend produces, and a harness
@@ -358,6 +360,8 @@ func newDefaultPumpState(now time.Time) *PumpState {
 
 		PairingCode:     "123456", // Default 6-digit pairing code
 		IsAuthenticated: false,
+
+		idpProfiles: DefaultIDPProfiles(),
 
 		Basal: &BasalState{
 			CurrentRate:     0.85,
