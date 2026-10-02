@@ -219,3 +219,32 @@ func TestDefaultPumpStateUsesRealClock(t *testing.T) {
 		t.Errorf("default clock is %v away from wall time", delta)
 	}
 }
+
+func TestSimulatorDrainsTheBatteryOverAWeek(t *testing.T) {
+	ps := NewPumpState()
+	c := NewFrozenClock(testInstant)
+	ps.SetClock(c)
+	ps.SetBatteryLevel(100)
+	sim := NewSimulator(ps, time.Second)
+	sim.Tick()
+
+	c.Advance(time.Hour)
+	sim.Tick()
+	if got := ps.GetBatteryLevel(); got != 100 {
+		t.Errorf("battery at %d%% after an hour, want 100%% (0.6%% drained, carried)", got)
+	}
+
+	for i := 0; i < 3600; i++ {
+		c.Advance(time.Second)
+		sim.Tick()
+	}
+	if got := ps.GetBatteryLevel(); got != 99 {
+		t.Errorf("battery at %d%% after two hours of 1 s ticks, want 99%%", got)
+	}
+
+	c.Advance(7 * 24 * time.Hour)
+	sim.Tick()
+	if got := ps.GetBatteryLevel(); got != 0 {
+		t.Errorf("battery at %d%% a week later, want 0%%", got)
+	}
+}
