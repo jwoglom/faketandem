@@ -1,7 +1,9 @@
 package harness
 
 import (
+	"bytes"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -33,20 +35,26 @@ type clockBody struct {
 	// It is a *skew* only. The pump's local-time convention is not a skew and
 	// is not expressed here -- see PumpTimeZone.
 	PumpOffsetSeconds float64 `json:"pump_offset_seconds"`
-	// PumpTimeZone is the IANA zone the pump keeps its clock in ("America/New_York").
+	// PumpTimeZone is the IANA zone the pump's clock was last set to local
+	// time in ("America/New_York"); after the clock is set to an arbitrary
+	// time (ChangeTimeDateRequest, POST /api/state/time) it is a fixed zone
+	// named for the offset ("UTC-07:00").
 	//
-	// A Tandem pump holds local time with no zone attached, and every consumer
-	// decodes its pump-epoch seconds on that assumption, so this is what the
-	// wire timestamps are encoded in. It defaults to the host's zone (or
-	// -pump-timezone) and a PUT can move the pump to any zone, which is how a
-	// test reproduces a traveling pump or a DST boundary. "UTC" turns the
-	// convention off.
+	// A Tandem pump holds a date and time with no zone attached, and every
+	// consumer decodes its pump-epoch seconds as local time, so a PUT that
+	// names a zone sets the pump's clock to that zone's local time *now*. The
+	// offset is fixed at that moment: the pump does not follow DST, and a PUT
+	// that leaves this field out does not move its clock. It defaults to the
+	// host's zone (or -pump-timezone). "UTC" turns the convention off.
 	PumpTimeZone string `json:"pump_timezone"`
-	// PumpTimeZoneOffsetSeconds is that zone's UTC offset in force at PumpNow,
-	// read-only. It is the quantity a decoder subtracts back out, so a test
-	// never has to work out which side of a DST transition the pump is on:
+	// PumpTimeZoneOffsetSeconds is how far the pump's clock is set ahead of
+	// UTC, apart from the skew, read-only. It is the quantity a decoder
+	// subtracts back out of a record written under the current setting:
 	//
 	//	unix = pump_time_seconds + 1199145600 - pump_timezone_offset_seconds - pump_offset_seconds
+	//
+	// A record written before the clock was last set carries its own
+	// wire_offset_seconds instead.
 	PumpTimeZoneOffsetSeconds int `json:"pump_timezone_offset_seconds"`
 	// Frozen stops a manual clock where it is.
 	Frozen bool `json:"frozen"`
@@ -70,13 +78,34 @@ func (h *Harness) handleClock(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, h.clockSnapshot())
 
 	case http.MethodPut, http.MethodPatch, http.MethodPost:
-		var body clockBody
-		// Start from the current settings so a PUT that names only one field
-		// does not silently reset the others.
-		body = h.clockSnapshot()
-		if err := decodeBody(r, &body); err != nil {
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
 			writeError(w, http.StatusBadRequest, "%v", err)
 			return
+		}
+		decode := func(v interface{}) error {
+			r.Body = io.NopCloser(bytes.NewReader(raw))
+			return decodeBody(r, v)
+		}
+		// Start from the current settings so a PUT that names only one field
+		// does not silently reset the others.
+		body := h.clockSnapshot()
+		var named struct {
+			PumpTimeZone *string `json:"pump_timezone"`
+		}
+		if err := decode(&body); err != nil {
+			writeError(w, http.StatusBadRequest, "%v", err)
+			return
+		}
+		if err := decode(&named); err != nil {
+			writeError(w, http.StatusBadRequest, "%v", err)
+			return
+		}
+		// Only a PUT that names the zone sets the pump's clock: the snapshot's
+		// own zone would otherwise re-set it on every PUT, which after a DST
+		// transition or a ChangeTimeDateRequest moves a clock nobody touched.
+		if named.PumpTimeZone == nil {
+			body.PumpTimeZone = ""
 		}
 		if err := h.applyClock(body); err != nil {
 			writeError(w, http.StatusBadRequest, "%v", err)
@@ -101,6 +130,9 @@ func (h *Harness) applyClock(body clockBody) error {
 		}
 		h.manual = nil
 		h.pumpState.SetClock(state.RealClock{})
+		if h.simulator != nil {
+			h.simulator.Rebase()
+		}
 
 	case ClockModeManual:
 		now := h.pumpState.Now()
@@ -121,12 +153,18 @@ func (h *Harness) applyClock(body clockBody) error {
 		// getting here into a time the caller asked to be exact.
 		h.manual.Freeze(body.Frozen)
 		h.manual.Set(now)
+		// Set, not advanced: the pump was not delivering across the jump.
+		if h.simulator != nil {
+			h.simulator.Rebase()
+		}
 
 	default:
 		return fmt.Errorf("unknown clock mode %q (expected %q or %q)", body.Mode, ClockModeReal, ClockModeManual)
 	}
 
 	if zone := strings.TrimSpace(body.PumpTimeZone); zone != "" {
+		// After the manual clock is set, so the offset fixed is the zone's at
+		// the new instant.
 		loc, err := time.LoadLocation(zone)
 		if err != nil {
 			return fmt.Errorf("unknown pump_timezone %q: %w", zone, err)
@@ -220,7 +258,7 @@ func (h *Harness) clockSnapshot() clockBody {
 		Now:                       h.pumpState.Now().UTC().Format(time.RFC3339Nano),
 		PumpOffsetSeconds:         h.pumpState.GetPumpClockOffset().Seconds(),
 		PumpTimeZone:              h.pumpState.GetPumpTimeZone().String(),
-		PumpTimeZoneOffsetSeconds: h.pumpState.PumpTimeZoneOffsetSeconds(pumpNow),
+		PumpTimeZoneOffsetSeconds: h.pumpState.PumpTimeZoneOffsetSeconds(),
 		Frozen:                    frozen,
 		PumpNow:                   pumpNow.UTC().Format(time.RFC3339Nano),
 		PumpTimeSeconds:           h.pumpState.PumpTimeNow(),

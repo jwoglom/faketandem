@@ -121,6 +121,21 @@ func (ps *PumpState) AppendHistory(event HistoryEvent) HistoryLogEntry {
 	return entry
 }
 
+// LatestHistoryTime is the latest instant any record in the log was written at,
+// zero for an empty log. It is not the last record's: a record written after the
+// clock was moved back is older than ones before it.
+func (ps *PumpState) LatestHistoryTime() time.Time {
+	ps.HistoryLog.mutex.Lock()
+	defer ps.HistoryLog.mutex.Unlock()
+	var latest time.Time
+	for _, e := range ps.HistoryLog.Entries {
+		if e.Timestamp.After(latest) {
+			latest = e.Timestamp
+		}
+	}
+	return latest
+}
+
 // EncodeRecord renders the entry as the 26 bytes a HistoryLogStreamResponse
 // carries.
 //
@@ -150,6 +165,9 @@ func (e HistoryLogEntry) EncodeRecord() []byte {
 // where buildCargo writes tempRateId two bytes early). Captured records from
 // real pumps agree with the parse offsets, so those are what we emit.
 func encodeHistoryPayload(payload []byte, typeID int, fields map[string]interface{}) {
+	if encodeClockChangePayload(payload, typeID, fields) {
+		return
+	}
 	switch typeID {
 	case HistoryBolusActivated:
 		// bolusId u16 @0, selectedIob u8 @2, iob f32 @4, bolusSize f32 @8
@@ -269,6 +287,29 @@ func encodeHistoryPayload(payload []byte, typeID int, fields map[string]interfac
 		// decodes as this event type at this time and sequence.
 		writeRawPayload(payload, fields)
 	}
+}
+
+// encodeClockChangePayload writes the records a pump writes when its clock is
+// set, and reports whether typeID was one of them.
+func encodeClockChangePayload(payload []byte, typeID int, fields map[string]interface{}) bool {
+	switch typeID {
+	case HistoryTimeChanged:
+		// timePrior u32 @0, timeAfter u32 @4 (milliseconds since the pump's
+		// local midnight), rawRTC u32 @8
+		binary.LittleEndian.PutUint32(payload[0:4], uint32(fieldInt(fields, "timePrior")))
+		binary.LittleEndian.PutUint32(payload[4:8], uint32(fieldInt(fields, "timeAfter")))
+		binary.LittleEndian.PutUint32(payload[8:12], uint32(fieldInt(fields, "rawRTC")))
+
+	case HistoryDateChange:
+		// datePrior u32 @0, dateAfter u32 @4 (days since the Tandem epoch on the
+		// pump's local clock), rawRTCTime u32 @8
+		binary.LittleEndian.PutUint32(payload[0:4], uint32(fieldInt(fields, "datePrior")))
+		binary.LittleEndian.PutUint32(payload[4:8], uint32(fieldInt(fields, "dateAfter")))
+		binary.LittleEndian.PutUint32(payload[8:12], uint32(fieldInt(fields, "rawRTCTime", "rawRTC")))
+	default:
+		return false
+	}
+	return true
 }
 
 // writeRawPayload lets a scenario supply payload bytes directly for an event

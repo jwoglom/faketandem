@@ -121,13 +121,18 @@ type PumpState struct {
 	// which is exactly how a real pump whose clock is set wrong behaves, and
 	// what makes a driver's pump-time drift handling testable.
 	pumpClockOffset time.Duration
-	// pumpTimeZone is the zone the pump keeps its clock in. A real Tandem pump
-	// holds local time with no zone attached, and every consumer decodes the
-	// pump-epoch seconds on the wire on that assumption, so this zone -- not
-	// UTC -- is what PumpTimeFor encodes with. It defaults to the host's local
-	// zone and is settable with -pump-timezone or PUT /api/clock.
-	pumpTimeZone *time.Location
-	clockMtx     sync.RWMutex
+	// pumpTimeZone is the zone the pump's clock was last set to local time in,
+	// and pumpUTCOffset that zone's offset at the moment of setting. A real
+	// Tandem pump holds local time with no zone attached, and every consumer
+	// decodes the pump-epoch seconds on the wire on that assumption, so the
+	// offset -- not UTC -- is what PumpTimeFor encodes with. It does not follow
+	// DST: the pump's clock only moves when someone sets it (SetPumpTimeZone,
+	// SetPumpWallClock). It defaults to the host's local zone and is settable
+	// with -pump-timezone, PUT /api/clock, ChangeTimeDateRequest and
+	// POST /api/state/time.
+	pumpTimeZone  *time.Location
+	pumpUTCOffset int
+	clockMtx      sync.RWMutex
 
 	// BolusRateUnitsPerSecond is the speed the simulator delivers a bolus at.
 	// Real pumps deliver far more slowly than the 0.05 U/s default (a Tandem
@@ -347,7 +352,8 @@ func newDefaultPumpState(now time.Time) *PumpState {
 	return &PumpState{
 		// A real pump keeps local time, so the emulator's default zone is the
 		// host's. -pump-timezone overrides it.
-		pumpTimeZone: time.Local,
+		pumpTimeZone:  time.Local,
+		pumpUTCOffset: localOffsetAt(now),
 
 		SerialNumber:    "11223344",
 		Model:           "Tandem Mobi",
@@ -1127,4 +1133,9 @@ func parseAPIVersion(raw string) (major, minor int, err error) {
 		return 0, 0, fmt.Errorf("version components must not be negative")
 	}
 	return major, minor, nil
+}
+
+func localOffsetAt(t time.Time) int {
+	_, offset := t.In(time.Local).Zone()
+	return offset
 }
