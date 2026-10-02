@@ -121,6 +121,15 @@ func (ps *PumpState) AppendHistory(event HistoryEvent) HistoryLogEntry {
 	return entry
 }
 
+// EraseHistory empties the log and restarts its sequence numbers at start, as a
+// pump whose log was erased does.
+func (ps *PumpState) EraseHistory(start uint32) {
+	ps.HistoryLog.mutex.Lock()
+	defer ps.HistoryLog.mutex.Unlock()
+	ps.HistoryLog.Entries = nil
+	ps.HistoryLog.NextSequence = start
+}
+
 // LatestHistoryTime is the latest instant any record in the log was written at,
 // zero for an empty log. It is not the last record's: a record written after the
 // clock was moved back is older than ones before it.

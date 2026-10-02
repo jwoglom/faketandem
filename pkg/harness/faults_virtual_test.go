@@ -599,3 +599,32 @@ func waitFor(t *testing.T, what string, cond func() bool) {
 	}
 	t.Fatalf("timed out waiting for %s", what)
 }
+
+func TestDropResponseNamingAHistoryRecordDropsOneNativeMessage(t *testing.T) {
+	rig := newFaultRig(t)
+	record := func(marker byte) *protocol.NativeMessage {
+		return &protocol.NativeMessage{
+			MessageType:    "HistoryLogStreamResponse",
+			Opcode:         129,
+			TxID:           probeTxID,
+			Characteristic: bluetooth.CharCurrentStatus,
+			Fragments:      [][]byte{{0, probeTxID, marker}},
+		}
+	}
+
+	mustDo(t, rig.mux, http.MethodPost, "/api/faults", `{"kind":"drop_response"}`)
+	mustDo(t, rig.mux, http.MethodPost, "/api/faults", `{"kind":"drop_response","message":"HistoryLogStreamResponse"}`)
+	for _, marker := range []byte{0xb1, 0xb2} {
+		if err := rig.router.SendNative(record(marker)); err != nil {
+			t.Fatalf("SendNative: %v", err)
+		}
+	}
+
+	got := rig.client.CollectNotifications(2, 300*time.Millisecond)
+	if len(got) != 1 || got[0] != "0007b2" {
+		t.Fatalf("central received %v, want only the second record", got)
+	}
+	if faults := mustDo(t, rig.mux, http.MethodGet, "/api/faults", "")["faults"].([]interface{}); len(faults) != 1 {
+		t.Errorf("the unscoped fault was consumed by a native message: %v", faults)
+	}
+}

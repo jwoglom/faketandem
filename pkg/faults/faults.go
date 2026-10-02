@@ -269,11 +269,22 @@ func (r *Registry) Remove(id int) bool {
 // decremented here and the fault is dropped once spent, so a caller must only
 // call Match when it is actually going to apply the result.
 func (r *Registry) Match(target Target, kinds ...string) *Fault {
+	return r.match(target, false, kinds)
+}
+
+// MatchNamed is Match restricted to faults scoped by message name, for the
+// natively-encoded messages (history records, alarm status) an unscoped fault
+// has never applied to.
+func (r *Registry) MatchNamed(target Target, kinds ...string) *Fault {
+	return r.match(target, true, kinds)
+}
+
+func (r *Registry) match(target Target, namedOnly bool, kinds []string) *Fault {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	for i, f := range r.faults {
-		if !kindAllowed(f.Kind, kinds) || !matches(f, target) {
+		if (namedOnly && f.Message == "") || !kindAllowed(f.Kind, kinds) || !matches(f, target) {
 			continue
 		}
 

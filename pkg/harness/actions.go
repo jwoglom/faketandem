@@ -64,6 +64,8 @@ func (h *Harness) stateActions() map[string]http.HandlerFunc {
 		"suspend":         h.actionSuspend,
 		"resume":          h.actionResume,
 		"history/append":  h.actionHistoryAppend,
+		"history/bulk":    h.actionHistoryBulk,
+		"history/erase":   h.actionHistoryErase,
 		"qualifyingevent": h.actionQualifyingEvent,
 		"time":            h.actionSetPumpTime,
 	}
@@ -576,12 +578,22 @@ func (h *Harness) actionHistoryAppend(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "%v", err)
 		return
 	}
-	if strings.TrimSpace(body.Type) == "" && body.TypeID == nil {
-		writeError(w, http.StatusBadRequest, "type or type_id is required")
+	seq, typeID, err := h.appendHistory(body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "%v", err)
 		return
 	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"sequence": seq,
+		"type_id":  typeID,
+		"history":  h.historySnapshot(),
+	})
+}
 
-	typeID := 0
+func (h *Harness) appendHistory(body historyAppendBody) (sequence uint32, typeID int, err error) {
+	if strings.TrimSpace(body.Type) == "" && body.TypeID == nil {
+		return 0, 0, fmt.Errorf("type or type_id is required")
+	}
 	if body.TypeID != nil {
 		typeID = *body.TypeID
 	} else if id, ok := state.HistoryTypeIDByName(body.Type); ok {
@@ -589,15 +601,65 @@ func (h *Harness) actionHistoryAppend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	when := h.pumpState.Now().Add(-secondsToDuration(body.SecondsAgo))
-	seq := h.pumpState.AddHistoryLogEntryAt(typeID, body.Type, when, body.Data)
+	sequence = h.pumpState.AddHistoryLogEntryAt(typeID, body.Type, when, body.Data)
+	log.Debugf("harness: appended history record %s (typeId=%d) at %s as sequence %d",
+		body.Type, typeID, when.Format(time.RFC3339), sequence)
+	return sequence, typeID, nil
+}
 
-	log.Infof("harness: appended history record %s (typeId=%d) at %s as sequence %d",
-		body.Type, typeID, when.Format(time.RFC3339), seq)
+type historyBulkBody struct {
+	// Records are appended in order, each as /api/state/history/append would.
+	Records []historyAppendBody `json:"records"`
+}
+
+// actionHistoryBulk stages a long history in one call: a pump that has been
+// running for days before the driver first connects.
+func (h *Harness) actionHistoryBulk(w http.ResponseWriter, r *http.Request) {
+	var body historyBulkBody
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "%v", err)
+		return
+	}
+	var first, last uint32
+	for i, record := range body.Records {
+		seq, _, err := h.appendHistory(record)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "record %d: %v", i, err)
+			return
+		}
+		if i == 0 {
+			first = seq
+		}
+		last = seq
+	}
+	log.Infof("harness: appended %d history records (%d...%d)", len(body.Records), first, last)
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"sequence": seq,
-		"type_id":  typeID,
-		"history":  h.historySnapshot(),
+		"count":          len(body.Records),
+		"first_sequence": first,
+		"last_sequence":  last,
 	})
+}
+
+type historyEraseBody struct {
+	// StartSequence is the number the next record gets; 0 or absent means 1.
+	StartSequence uint32 `json:"start_sequence,omitempty"`
+}
+
+// actionHistoryErase empties the pump's history log and restarts its sequence
+// numbers, which a driver sees as a log holding less than it has already read.
+func (h *Harness) actionHistoryErase(w http.ResponseWriter, r *http.Request) {
+	var body historyEraseBody
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "%v", err)
+		return
+	}
+	start := body.StartSequence
+	if start == 0 {
+		start = 1
+	}
+	h.pumpState.EraseHistory(start)
+	log.Infof("harness: history log erased; sequence numbers restart at %d", start)
+	writeJSON(w, http.StatusOK, map[string]interface{}{"history": h.historySnapshot()})
 }
 
 type qualifyingEventBody struct {

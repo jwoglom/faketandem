@@ -257,6 +257,13 @@ curl -X POST http://127.0.0.1:8080/api/state/resume -d '{"clear_alarms":false}'
 curl -X POST http://127.0.0.1:8080/api/state/history/append \
   -d '{"type":"BolusCompleted","seconds_ago":3600,"data":{"bolusId":9,"unitsDelivered":1.5}}'
 
+# Stage a long history in one call, oldest first ...
+curl -X POST http://127.0.0.1:8080/api/state/history/bulk \
+  -d '{"records":[{"type":"PumpingSuspended","seconds_ago":7200},{"type":"PumpingResumed","seconds_ago":6600}]}'
+
+# ... or erase it, restarting the sequence numbers (at 1 unless start_sequence says otherwise)
+curl -X POST http://127.0.0.1:8080/api/state/history/erase -d '{}'
+
 # Raise an arbitrary qualifying-event bitmask (here: remainingInsulin)
 curl -X POST http://127.0.0.1:8080/api/state/qualifyingevent -d '{"bitmask":262144}'
 ```
@@ -391,6 +398,11 @@ curl -X POST http://127.0.0.1:8080/api/faults \
 # so the central sees a message that starts and never finishes (virtual only)
 curl -X POST http://127.0.0.1:8080/api/faults \
   -d '{"kind":"drop_fragment","characteristic":"CurrentStatus","index":1,"every":true}'
+
+# Lose one record of the next history stream. Natively encoded messages
+# (history records, alarm status) only match a fault that names them.
+curl -X POST http://127.0.0.1:8080/api/faults \
+  -d '{"kind":"drop_response","message":"HistoryLogStreamResponse"}'
 
 # Or thin the stream: lose every 5th notification fragment, wherever it falls
 curl -X POST http://127.0.0.1:8080/api/faults \
