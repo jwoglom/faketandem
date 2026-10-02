@@ -130,6 +130,9 @@ func (h *Harness) applyClock(body clockBody) error {
 		}
 		h.manual = nil
 		h.pumpState.SetClock(state.RealClock{})
+		if h.simulator != nil {
+			h.simulator.Rebase()
+		}
 
 	case ClockModeManual:
 		now := h.pumpState.Now()
@@ -150,6 +153,10 @@ func (h *Harness) applyClock(body clockBody) error {
 		// getting here into a time the caller asked to be exact.
 		h.manual.Freeze(body.Frozen)
 		h.manual.Set(now)
+		// Set, not advanced: the pump was not delivering across the jump.
+		if h.simulator != nil {
+			h.simulator.Rebase()
+		}
 
 	default:
 		return fmt.Errorf("unknown clock mode %q (expected %q or %q)", body.Mode, ClockModeReal, ClockModeManual)

@@ -160,6 +160,8 @@ curl -X PUT http://127.0.0.1:8080/api/clock -d '{"mode":"real","pump_offset_seco
 after (`prior_pump_seconds`, `pump_seconds`), the clock and the history tail.
 
 `POST /api/clock/advance` returns `409` while the pump is on the real clock.
+Advancing is time passing: the simulator delivers over the step. Setting the
+clock with a `PUT` is not: the next tick counts from the new reading.
 
 ### State snapshot and direct writes
 
@@ -269,6 +271,10 @@ unsuspended pump) returns `409`.
 50-record tail in `GET /api/state` is a convenience and stays as it was, but a
 scenario that runs for a while loses records off the front of it without being
 told; this endpoint does not.
+
+The snapshot's history also carries `latest_time`, the latest instant any
+record was written at, which is not the last record's once the clock has been
+moved back.
 
 `since` is exclusive — the last sequence you already have — so a poller hands
 back the previous page's `next_since` unchanged. `limit` defaults to 200 and is

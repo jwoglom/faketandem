@@ -130,6 +130,21 @@ func (ps *PumpState) EraseHistory(start uint32) {
 	ps.HistoryLog.NextSequence = start
 }
 
+// LatestHistoryTime is the latest instant any record in the log was written at,
+// zero for an empty log. It is not the last record's: a record written after the
+// clock was moved back is older than ones before it.
+func (ps *PumpState) LatestHistoryTime() time.Time {
+	ps.HistoryLog.mutex.Lock()
+	defer ps.HistoryLog.mutex.Unlock()
+	var latest time.Time
+	for _, e := range ps.HistoryLog.Entries {
+		if e.Timestamp.After(latest) {
+			latest = e.Timestamp
+		}
+	}
+	return latest
+}
+
 // EncodeRecord renders the entry as the 26 bytes a HistoryLogStreamResponse
 // carries.
 //

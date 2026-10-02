@@ -540,3 +540,32 @@ func TestHistoryBulkAppendsInOrderAndEraseRestartsTheNumbering(t *testing.T) {
 		t.Errorf("a record with no type = %d, want 400", code)
 	}
 }
+
+func TestSettingTheClockForwardDeliversNothingOverTheJump(t *testing.T) {
+	_, ps, _, mux := testHarness(t)
+	putManualClock(t, mux)
+	mustDo(t, mux, http.MethodPut, "/api/state", `{"reservoir_units":200,"battery_percent":100,"basal_rate":1.0}`)
+
+	mustDo(t, mux, http.MethodPut, "/api/clock",
+		fmt.Sprintf(`{"mode":"manual","now":%q,"frozen":true}`, testInstant.Add(10*time.Hour).Format(time.RFC3339)))
+	mustDo(t, mux, http.MethodPost, "/api/clock/advance", `{"seconds":60}`)
+
+	if got := ps.GetReservoirLevel(); got < 199.9 {
+		t.Errorf("reservoir at %.2f U after setting the clock 10 h ahead and stepping a minute, want ~200", got)
+	}
+	if got := ps.GetBatteryLevel(); got != 100 {
+		t.Errorf("battery at %d%%, want 100%%", got)
+	}
+}
+
+func TestHistorySnapshotReportsTheLatestDatedRecord(t *testing.T) {
+	_, ps, _, mux := testHarness(t)
+	putManualClock(t, mux)
+	ps.AppendHistory(state.HistoryEvent{TypeID: state.HistoryPumpingResumed, Name: "PumpingResumed", When: testInstant.Add(time.Hour)})
+	ps.AppendHistory(state.HistoryEvent{TypeID: state.HistoryPumpingResumed, Name: "PumpingResumed", When: testInstant})
+
+	history := mustDo(t, mux, http.MethodGet, "/api/state", "")["history"].(map[string]interface{})
+	if got, want := history["latest_time"], testInstant.Add(time.Hour).Format(time.RFC3339); got != want {
+		t.Errorf("latest_time = %v, want the later-dated %v, not the last record's", got, want)
+	}
+}

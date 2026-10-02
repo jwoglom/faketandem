@@ -97,6 +97,15 @@ func (s *Simulator) Tick() {
 	s.update()
 }
 
+// Rebase makes the next update count from the clock's current reading, so a
+// clock that was set rather than advanced simulates no delivery over the jump.
+func (s *Simulator) Rebase() {
+	now := s.pumpState.Now()
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.lastUpdate = now
+}
+
 // elapsedSincePrevious returns how much pump time has passed since the last
 // update, and records this one. The first update after Start has no previous
 // instant, so it counts as one interval.
