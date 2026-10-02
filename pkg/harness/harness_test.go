@@ -895,3 +895,17 @@ func TestPairingCodeUpdateReachesObservers(t *testing.T) {
 		t.Errorf("observers saw %v, want a second notification of 111111", observed)
 	}
 }
+
+func TestStatePutStagesDeliveryLimits(t *testing.T) {
+	_, ps, _, mux := testHarness(t)
+
+	body := mustDo(t, mux, http.MethodPut, "/api/state", `{"max_bolus_milliunits":6000,"max_basal_milliunits":2000}`)
+
+	limits := body["state"].(map[string]interface{})["limits"].(map[string]interface{})
+	if limits["max_bolus_milliunits"] != 6000.0 || limits["max_basal_milliunits"] != 2000.0 {
+		t.Errorf("snapshot limits = %v", limits)
+	}
+	if got := ps.GetDeliveryLimits(); got.MaxBolusMilliunits != 6000 || got.MaxBasalMilliunits != 2000 {
+		t.Errorf("pump limits = %+v", got)
+	}
+}

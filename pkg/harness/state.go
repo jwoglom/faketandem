@@ -26,6 +26,7 @@ type Snapshot struct {
 	Bolus      bolusSnapshot      `json:"bolus"`
 	LastBolus  *lastBolusSnapshot `json:"last_bolus"`
 	ControlIQ  controlIQSnapshot  `json:"control_iq"`
+	Limits     limitsSnapshot     `json:"limits"`
 	Insulin    insulinSnapshot    `json:"insulin"`
 	Battery    batterySnapshot    `json:"battery"`
 	CGM        cgmSnapshot        `json:"cgm"`
@@ -41,7 +42,7 @@ type Snapshot struct {
 	// IDPProfiles are the insulin delivery profiles in slot order; slot 0 is active.
 	IDPProfiles []state.IDPProfile `json:"idp_profiles"`
 	History     historySnapshot    `json:"history"`
-	RequestLog   requestLogSnapshot `json:"request_log"`
+	RequestLog  requestLogSnapshot `json:"request_log"`
 }
 
 type identitySnapshot struct {
@@ -110,6 +111,14 @@ type controlIQSnapshot struct {
 	Mode              int  `json:"mode"`
 	Weight            int  `json:"weight"`
 	TotalDailyInsulin int  `json:"total_daily_insulin"`
+}
+
+// limitsSnapshot is the pump's delivery limits, in milliunits (per hour for basal).
+type limitsSnapshot struct {
+	MaxBolusMilliunits        int `json:"max_bolus_milliunits"`
+	MaxBolusDefaultMilliunits int `json:"max_bolus_default_milliunits"`
+	MaxBasalMilliunits        int `json:"max_basal_milliunits"`
+	MaxBasalDefaultMilliunits int `json:"max_basal_default_milliunits"`
 }
 
 type insulinSnapshot struct {
@@ -314,6 +323,7 @@ func (h *Harness) Snapshot() Snapshot {
 			Weight:            controlIQ.Weight,
 			TotalDailyInsulin: controlIQ.TotalDailyInsulin,
 		},
+		Limits:        limitsSnapshot(ps.GetDeliveryLimits()),
 		Insulin:       insulin,
 		Battery:       battery,
 		CGM:           cgm,
@@ -427,6 +437,23 @@ type stateUpdate struct {
 	WorkflowMode      *string  `json:"workflow_mode,omitempty"`
 	// IDPProfiles replaces every profile; an empty list leaves the pump with none.
 	IDPProfiles *[]state.IDPProfile `json:"idp_profiles,omitempty"`
+	// MaxBolusMilliunits and MaxBasalMilliunits stage the pump's delivery limits
+	// (milliunits; per hour for basal), as SetMax*LimitRequest would set them.
+	MaxBolusMilliunits *int `json:"max_bolus_milliunits,omitempty"`
+	MaxBasalMilliunits *int `json:"max_basal_milliunits,omitempty"`
+}
+
+func applyDeliveryLimits(ps *state.PumpState, u stateUpdate) []string {
+	var applied []string
+	if u.MaxBolusMilliunits != nil {
+		ps.SetMaxBolusMilliunits(*u.MaxBolusMilliunits)
+		applied = append(applied, "max_bolus_milliunits")
+	}
+	if u.MaxBasalMilliunits != nil {
+		ps.SetMaxBasalMilliunits(*u.MaxBasalMilliunits)
+		applied = append(applied, "max_basal_milliunits")
+	}
+	return applied
 }
 
 // applyStateUpdate writes the named fields and returns the names it applied.
@@ -443,6 +470,7 @@ func (h *Harness) applyStateUpdate(u stateUpdate) []string {
 		ps.SetReservoirLevel(*u.ReservoirUnits)
 		applied = append(applied, "reservoir_units")
 	}
+	applied = append(applied, applyDeliveryLimits(ps, u)...)
 	if u.BatteryPercent != nil {
 		ps.SetBatteryLevel(*u.BatteryPercent)
 		applied = append(applied, "battery_percent")

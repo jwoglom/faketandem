@@ -186,8 +186,8 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "BolusPermissionChangeReasonRequest", true))
 
 	// Global pump settings handlers
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "GlobalMaxBolusSettingsRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "BasalLimitSettingsRequest", true))
+	r.RegisterHandler(NewDeliveryLimitsReadHandler(r.bridge, "GlobalMaxBolusSettingsRequest"))
+	r.RegisterHandler(NewDeliveryLimitsReadHandler(r.bridge, "BasalLimitSettingsRequest"))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "LocalizationRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "PumpSettingsRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "SendTipsControlGenericTestRequest", true))
@@ -236,8 +236,8 @@ func (r *Router) registerHandlers() {
 	// Settings write handlers (write value, update readback)
 	r.RegisterHandler(NewSetModesHandler(r.bridge))
 	r.RegisterHandler(NewSettingsWriteHandler(r.bridge, r.settingsManager, "ChangeControlIQSettingsRequest", "ControlIQSettingsRequest"))
-	r.RegisterHandler(NewSettingsWriteHandler(r.bridge, r.settingsManager, "SetMaxBolusLimitRequest", "GlobalMaxBolusSettingsRequest"))
-	r.RegisterHandler(NewSettingsWriteHandler(r.bridge, r.settingsManager, "SetMaxBasalLimitRequest", "BasalLimitSettingsRequest"))
+	r.RegisterHandler(NewDeliveryLimitWriteHandler(r.bridge, "SetMaxBolusLimitRequest"))
+	r.RegisterHandler(NewDeliveryLimitWriteHandler(r.bridge, "SetMaxBasalLimitRequest"))
 	// NOTE: SetSleepScheduleResponse has both an (int status) and a (byte[]
 	// raw) single-arg constructor of the same arity; cliparser currently
 	// resolves this to the int ctor via JVM reflection order, but that

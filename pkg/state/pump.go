@@ -79,6 +79,10 @@ type PumpState struct {
 	// closed loop by default makes most of the control surface untestable.
 	ClosedLoopEnabled bool
 
+	// deliveryLimits backs the max bolus and max basal reads and writes, and
+	// InitiateBolusRequest refuses a bolus above the max.
+	deliveryLimits DeliveryLimits
+
 	// Weight (kg) and TotalDailyInsulin (units) back the ControlIQInfo response.
 	Weight            int
 	TotalDailyInsulin int
@@ -375,6 +379,7 @@ func newDefaultPumpState(now time.Time) *PumpState {
 		LastBolus: &LastBolusRecord{},
 
 		ClosedLoopEnabled: false,
+		deliveryLimits:    DefaultDeliveryLimits(),
 		Weight:            70,
 
 		BolusRateUnitsPerSecond: DefaultBolusRateUnitsPerSecond,
