@@ -213,8 +213,11 @@ units (minutes after midnight, milliunits/hour). `ProfileStatusRequest`,
 `IDPSettingsRequest` and `IDPSegmentRequest` read them, and `CreateIDPRequest`
 and `SetIDPSegmentRequest` change them as a pump would: at most 6 profiles and 16
 segments, no two segments at one start time, segment 0 fixed at midnight, and a
-nonzero status for anything refused. The profile does not drive delivery;
-`basal_rate` does.
+nonzero status for anything refused. `basal_rate` is the rate in force. A request
+that writes the active profile sets it to that profile's segment at the pump's
+time of day, rescaling a running temp rate by its percent, as a pump does; it
+does not follow later segment boundaries, and staging `idp_profiles` leaves it
+alone.
 
 ### Pump-initiated actions
 
