@@ -3,6 +3,7 @@ package state
 import (
 	"reflect"
 	"testing"
+	"time"
 )
 
 func seg(startTime, basalRate int) IDPSegment {
@@ -128,5 +129,58 @@ func TestStagedProfilesAreCopies(t *testing.T) {
 
 	if profile, _ := ps.IDPProfile(1); profile.Segments[0].BasalRate != 800 {
 		t.Errorf("basal rate %d, want 800", profile.Segments[0].BasalRate)
+	}
+}
+
+func TestAWriteToTheActiveProfilePutsItsRateInForce(t *testing.T) {
+	ps := NewPumpState()
+	ps.SetClock(NewManualClock(time.Date(2026, 10, 2, 7, 30, 0, 0, time.UTC)))
+	ps.SetPumpTimeZone(time.UTC)
+	ps.SetIDPProfiles(profileWith(seg(0, 800)))
+	ps.Basal.CurrentRate = 0.8
+	ps.Basal.TempBasalActive = true
+	ps.Basal.TempBasalPercent = 50
+	ps.Basal.TempBasalRate = 0.4
+
+	if status := ps.ApplyIDPSegment(1, IDPCreateSegment, 1, seg(360, 1200)); status != IDPStatusOK {
+		t.Fatalf("status %d", status)
+	}
+
+	if ps.Basal.CurrentRate != 1.2 {
+		t.Errorf("rate in force %v, want the 06:00 segment's 1.2", ps.Basal.CurrentRate)
+	}
+	if ps.Basal.TempBasalRate != 0.6 {
+		t.Errorf("temp rate %v, want 50%% of 1.2", ps.Basal.TempBasalRate)
+	}
+}
+
+func TestAWriteToAnInactiveProfileLeavesTheRateInForce(t *testing.T) {
+	ps := NewPumpState()
+	ps.SetClock(NewManualClock(time.Date(2026, 10, 2, 7, 30, 0, 0, time.UTC)))
+	ps.SetPumpTimeZone(time.UTC)
+	profiles := profileWith(seg(0, 800))
+	profiles = append(profiles, IDPProfile{ID: 2, Name: "Q", Segments: []IDPSegment{seg(0, 500)}})
+	ps.SetIDPProfiles(profiles)
+	ps.Basal.CurrentRate = 0.8
+
+	if status := ps.ApplyIDPSegment(2, IDPModifySegment, 0, seg(0, 1500)); status != IDPStatusOK {
+		t.Fatalf("status %d", status)
+	}
+
+	if ps.Basal.CurrentRate != 0.8 {
+		t.Errorf("rate in force %v, want the active profile's 0.8", ps.Basal.CurrentRate)
+	}
+}
+
+func TestCreatingTheFirstProfilePutsItsRateInForce(t *testing.T) {
+	ps := NewPumpState()
+	ps.SetIDPProfiles(nil)
+
+	if _, ok := ps.CreateIDP("TandemKitProfile", seg(0, 650), 240, false, -1); !ok {
+		t.Fatal("CreateIDP refused on an empty pump")
+	}
+
+	if ps.Basal.CurrentRate != 0.65 {
+		t.Errorf("rate in force %v, want 0.65", ps.Basal.CurrentRate)
 	}
 }

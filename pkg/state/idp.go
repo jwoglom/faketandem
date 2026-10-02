@@ -109,27 +109,55 @@ func (ps *PumpState) idpProfileIndexUnlocked(idpID int) int {
 // ActiveIDPSegmentIndex is the index of the active profile's segment in force at the pump's local
 // time of day, or 0 with no profile.
 func (ps *PumpState) ActiveIDPSegmentIndex() int {
-	now := ps.PumpLocalNow()
-	minutes := now.Hour()*60 + now.Minute()
+	minutes := ps.pumpMinuteOfDay()
 
 	ps.mutex.RLock()
 	defer ps.mutex.RUnlock()
 	if len(ps.idpProfiles) == 0 {
 		return 0
 	}
+	return segmentInForce(ps.idpProfiles[0].Segments, minutes)
+}
+
+func (ps *PumpState) pumpMinuteOfDay() int {
+	now := ps.PumpLocalNow()
+	return now.Hour()*60 + now.Minute()
+}
+
+func segmentInForce(segments []IDPSegment, minutes int) int {
 	active := 0
-	for i, s := range ps.idpProfiles[0].Segments {
-		if s.StartTime <= minutes && s.StartTime >= ps.idpProfiles[0].Segments[active].StartTime {
+	for i, s := range segments {
+		if s.StartTime <= minutes && s.StartTime >= segments[active].StartTime {
 			active = i
 		}
 	}
 	return active
 }
 
+// followActiveProfileUnlocked puts the active profile's rate at minutes in force, as a pump does
+// the moment its active profile is written. A running temp rate is a percent of that rate, so it
+// is rescaled with it.
+func (ps *PumpState) followActiveProfileUnlocked(minutes int) {
+	if len(ps.idpProfiles) == 0 || len(ps.idpProfiles[0].Segments) == 0 {
+		return
+	}
+	segments := ps.idpProfiles[0].Segments
+	rate := float64(segments[segmentInForce(segments, minutes)].BasalRate) / 1000
+	if rate == ps.Basal.CurrentRate {
+		return
+	}
+	log.Infof("Basal rate in force follows the active profile: %.3f -> %.3f U/hr", ps.Basal.CurrentRate, rate)
+	ps.Basal.CurrentRate = rate
+	if ps.Basal.TempBasalActive && ps.Basal.TempBasalPercent > 0 {
+		ps.Basal.TempBasalRate = rate * float64(ps.Basal.TempBasalPercent) / 100
+	}
+}
+
 // CreateIDP adds a profile with one segment at midnight, or a copy of sourceID's segments when
 // sourceID names an existing profile, and returns its id. The first profile a pump holds becomes
 // the active one, since slot 0 is.
 func (ps *PumpState) CreateIDP(name string, first IDPSegment, insulinDuration int, carbEntry bool, sourceID int) (int, bool) {
+	minutes := ps.pumpMinuteOfDay()
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
 
@@ -157,6 +185,7 @@ func (ps *PumpState) CreateIDP(name string, first IDPSegment, insulinDuration in
 
 	ps.idpProfiles = append(ps.idpProfiles, profile)
 	log.Infof("Created IDP %d %q with %d segment(s)", id, name, len(profile.Segments))
+	ps.followActiveProfileUnlocked(minutes)
 	return id, true
 }
 
@@ -166,6 +195,7 @@ func (ps *PumpState) CreateIDP(name string, first IDPSegment, insulinDuration in
 // time is not confirmed. No two segments may share a start time, segment 0 stays at midnight and
 // cannot be deleted, and a profile holds at most MaxIDPSegments.
 func (ps *PumpState) ApplyIDPSegment(idpID int, op IDPSegmentOperation, segmentIndex int, segment IDPSegment) int {
+	minutes := ps.pumpMinuteOfDay()
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
 
@@ -181,6 +211,9 @@ func (ps *PumpState) ApplyIDPSegment(idpID int, op IDPSegmentOperation, segmentI
 		return IDPStatusRejected
 	}
 	ps.idpProfiles[pi].Segments = segments
+	if pi == 0 {
+		ps.followActiveProfileUnlocked(minutes)
+	}
 	return IDPStatusOK
 }
 
