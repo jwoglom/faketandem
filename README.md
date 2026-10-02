@@ -168,7 +168,7 @@ clock with a `PUT` is not: the next tick counts from the new reading.
 `GET /api/state` returns everything a driver could observe plus the pump-side
 truth behind it: identity, clock, auth and pairing, connection and radio, basal
 (profile, current, suspend reason, temp rate), the bolus in progress, the last
-bolus record, Control-IQ, reservoir, battery, CGM, standing alerts,
+bolus record, Control-IQ, the delivery `limits`, reservoir, battery, CGM, standing alerts,
 `alarms_history` (every alarm that has been raised *and cleared*, with both
 ends of the interval, which `alerts` cannot show), the tail of the history log,
 and the request log's current sequence number.
@@ -191,7 +191,14 @@ Settable fields: `reservoir_units`, `battery_percent`, `battery_charging`,
 `control_iq_mode`, `weight`, `total_daily_insulin`,
 `bolus_rate_units_per_second`, `cgm_egv`, `cgm_session_active`, `pairing_code`,
 `time_since_reset`, `api_version_major`, `api_version_minor`, `clear_alerts`,
-`workflow_mode`, `idp_profiles`.
+`workflow_mode`, `idp_profiles`, `max_bolus_milliunits`, `max_basal_milliunits`.
+
+The delivery limits are pump state in milliunits (per hour for basal), as
+`GlobalMaxBolusSettingsResponse` and `BasalLimitSettingsResponse` carry them:
+`SetMaxBolusLimitRequest` and `SetMaxBasalLimitRequest` change them, and
+`InitiateBolusRequest` above the max bolus is answered with status 1 and starts
+nothing. The status a real pump refuses with has not been confirmed. A temp rate
+above the max basal is not refused.
 
 `workflow_mode` is the cartridge procedure the pump has open (`none`,
 `change_cartridge` or `fill_tubing`), reported in the snapshot too. The pump
@@ -375,7 +382,7 @@ curl -X POST http://127.0.0.1:8080/api/faults \
 curl -X POST http://127.0.0.1:8080/api/faults \
   -d '{"kind":"delay_response","message":"CurrentBolusStatusRequest","delay_ms":2000,"every":true}'
 
-# Answer the next two with an ErrorResponse instead (see the caveat below)
+# Refuse the next two: answer ErrorResponse and do not act on them
 curl -X POST http://127.0.0.1:8080/api/faults \
   -d '{"kind":"error_response","message":"InitiateBolusRequest","error_code":3,"count":2}'
 
@@ -440,7 +447,9 @@ cliparser — pumpX2 has no encodable `ErrorResponse` class — so it is framed 
 the native encoder in `pkg/protocol` and sent on `CurrentStatus`, where the
 driver looks for it, whatever characteristic the rejected request arrived on.
 The cargo is `[requestCodeId][errorCodeId]`: the opcode of the request being
-rejected and the `error_code` the fault carries. Clearing
+rejected and the `error_code` the fault carries. The request is refused, not
+handled, so the pump's state does not change; a fault scoped by a response
+opcode alone is only seen on the response path, after the handler ran. Clearing
 `handler.ErrorResponseEncoder` makes the fault behave as a drop and say so in
 the emulator log and in the request log's `note` field, rather than letting a
 harness believe it exercised an error path it did not. Note that a driver may

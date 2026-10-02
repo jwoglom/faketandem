@@ -29,7 +29,10 @@ const (
 	KindDropResponse = "drop_response"
 	// KindDelayResponse holds the response back for a configured duration.
 	KindDelayResponse = "delay_response"
-	// KindErrorResponse replaces the response with a protocol ErrorResponse.
+	// KindErrorResponse answers the request with a protocol ErrorResponse in
+	// place of handling it, so the pump's state does not change: a refusal.
+	// One scoped by a response opcode alone is matched on the response path,
+	// after the handler has run.
 	KindErrorResponse = "error_response"
 	// KindDisconnect drops the link, either instead of answering the request
 	// or partway through the response's fragments.

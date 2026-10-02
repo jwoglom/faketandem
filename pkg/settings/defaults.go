@@ -445,17 +445,8 @@ func registerBolusAndBasalDefaults(manager *Manager) {
 
 // registerGlobalSettingsDefaults registers defaults for global pump settings messages
 func registerGlobalSettingsDefaults(manager *Manager) {
-	// GlobalMaxBolusSettingsResponse(int maxBolus, int maxBolusDefault)
-	registerConstant(manager, "GlobalMaxBolusSettingsRequest", map[string]interface{}{
-		"maxBolus":        2500, // 25.0 units * 100
-		"maxBolusDefault": 2500,
-	})
-
-	// BasalLimitSettingsResponse(long basalLimit, long basalLimitDefault)
-	registerConstant(manager, "BasalLimitSettingsRequest", map[string]interface{}{
-		"basalLimit":        500, // 5.0 U/hr * 100
-		"basalLimitDefault": 500,
-	})
+	// GlobalMaxBolusSettings and BasalLimitSettings are answered from pump state
+	// (state.DeliveryLimits), which their writes change.
 
 	// LocalizationResponse(int glucoseUOM, int languageSelected, int regionSetting,
 	// long languagesAvailableBitmask)

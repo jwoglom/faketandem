@@ -313,10 +313,9 @@ func TestErrorResponseFaultSendsARealErrorResponse(t *testing.T) {
 		t.Errorf("errorCodeId = %d, want the armed error code 3", parsed.Payload[1])
 	}
 
-	// The state change still happened: an error_response fault answers with an
-	// error, it does not undo the request.
-	if !rig.pumpState.IsPumpingSuspended() {
-		t.Error("the state change was not applied before the error went out")
+	// A pump that answers ErrorResponse refused the request: nothing changed.
+	if rig.pumpState.IsPumpingSuspended() {
+		t.Error("the refused request was applied anyway")
 	}
 	if resp := rig.lastResponseEntry(t); resp.Message != "ErrorResponse" || resp.FragmentsSent != 1 {
 		t.Errorf("the log recorded %+v, want the ErrorResponse that actually went out", resp)
