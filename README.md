@@ -191,6 +191,10 @@ Settable fields: `reservoir_units`, `battery_percent`, `battery_charging`,
 `time_since_reset`, `api_version_major`, `api_version_minor`, `clear_alerts`,
 `workflow_mode`, `idp_profiles`, `max_bolus_milliunits`, `max_basal_milliunits`.
 
+`SetPumpSoundsRequest` sets the sounds it flags in its change bitmask, and the
+next `PumpGlobalsResponse` reports them (`bolusAnnun` is pumpX2's name for the
+general sound); the CGM alert sounds have no field there and are not kept.
+
 The delivery limits are pump state in milliunits (per hour for basal), as
 `GlobalMaxBolusSettingsResponse` and `BasalLimitSettingsResponse` carry them:
 `SetMaxBolusLimitRequest` and `SetMaxBasalLimitRequest` change them, and
