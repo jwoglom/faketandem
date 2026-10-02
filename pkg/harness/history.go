@@ -59,10 +59,13 @@ type historyEntrySnapshot struct {
 
 // historySnapshot is the tail of the history log carried in GET /api/state.
 type historySnapshot struct {
-	Count         int                    `json:"count"`
-	FirstSequence uint32                 `json:"first_sequence"`
-	LastSequence  uint32                 `json:"last_sequence"`
-	Entries       []historyEntrySnapshot `json:"entries"`
+	Count         int    `json:"count"`
+	FirstSequence uint32 `json:"first_sequence"`
+	LastSequence  uint32 `json:"last_sequence"`
+	// LatestTime is the latest instant any record was written at, which a
+	// harness that moves the clock about needs and the tail cannot give.
+	LatestTime string                 `json:"latest_time,omitempty"`
+	Entries    []historyEntrySnapshot `json:"entries"`
 }
 
 // historyPage is the body of GET /api/history.
