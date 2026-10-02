@@ -176,6 +176,10 @@ func (h *InitiateBolusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpStat
 		return nil, fmt.Errorf("invalid bolus units: %.2f (totalVolume=%d mU)", bolusUnits, totalVolumeMilliunits)
 	}
 
+	if maxBolus := pumpState.GetDeliveryLimits().MaxBolusMilliunits; int(totalVolumeMilliunits) > maxBolus {
+		return h.refuseAboveMaxBolus(msg, bolusID, totalVolumeMilliunits, maxBolus)
+	}
+
 	log.Infof("Initiating bolus: %.2f units (%d mU), bolusID=%d, typeBitmask=%d, food=%d mU, correction=%d mU, carbs=%dg, bg=%d",
 		bolusUnits, totalVolumeMilliunits, bolusID, bolusTypeBitmask, foodVolume, correctionVolume, bolusCarbs, bolusBG)
 
@@ -424,4 +428,19 @@ func (h *CancelBolusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState 
 		Immediate:       true,
 		StateChanges:    stateChanges,
 	}, nil
+}
+
+// refuseAboveMaxBolus answers a bolus over the pump's max bolus without starting it. pumpX2 names
+// no status for this refusal; any nonzero status is a refusal to a driver, and 1 is assumed.
+func (h *InitiateBolusHandler) refuseAboveMaxBolus(msg *pumpx2.ParsedMessage, bolusID uint32, requested int64, maxBolus int) (*Response, error) {
+	log.Warnf("Refusing bolus %d: %d mU is above the max bolus of %d mU", bolusID, requested, maxBolus)
+	response, err := h.bridge.EncodeMessage(msg.TxID, "InitiateBolusResponse", map[string]interface{}{
+		"status":       1,
+		"bolusId":      bolusID,
+		"statusTypeId": 1,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode InitiateBolusResponse: %w", err)
+	}
+	return &Response{ResponseMessage: response, Immediate: true}, nil
 }
