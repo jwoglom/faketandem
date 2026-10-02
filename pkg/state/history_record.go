@@ -121,6 +121,15 @@ func (ps *PumpState) AppendHistory(event HistoryEvent) HistoryLogEntry {
 	return entry
 }
 
+// EraseHistory empties the log and restarts its sequence numbers at start, as a
+// pump whose log was erased does.
+func (ps *PumpState) EraseHistory(start uint32) {
+	ps.HistoryLog.mutex.Lock()
+	defer ps.HistoryLog.mutex.Unlock()
+	ps.HistoryLog.Entries = nil
+	ps.HistoryLog.NextSequence = start
+}
+
 // EncodeRecord renders the entry as the 26 bytes a HistoryLogStreamResponse
 // carries.
 //

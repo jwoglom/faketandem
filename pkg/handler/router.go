@@ -684,6 +684,14 @@ func (r *Router) SendNative(msg *protocol.NativeMessage) error {
 		return nil
 	}
 
+	if fault := r.matchNativeDrop(msg); fault != nil {
+		log.Warnf("Fault %d (drop_response): suppressing native %s txID=%d", fault.ID, msg.MessageType, msg.TxID)
+		r.recordSuppressed(msg.Characteristic, &pumpx2.EncodedMessage{
+			MessageType: msg.MessageType, TxID: int(msg.TxID), Opcode: int(msg.Opcode), Packets: msg.PacketsHex(),
+		}, fault.Kind, "native message suppressed")
+		return nil
+	}
+
 	fragments := r.refragmentNative(msg)
 
 	log.Infof("Sending native %s on %s: txID=%d, %d packet(s)",
@@ -697,6 +705,19 @@ func (r *Router) SendNative(msg *protocol.NativeMessage) error {
 	}
 
 	return nil
+}
+
+// matchNativeDrop consumes a drop_response fault that names msg, which is how a
+// scenario loses one record of a history stream.
+func (r *Router) matchNativeDrop(msg *protocol.NativeMessage) *faults.Fault {
+	if r.faultRegistry == nil {
+		return nil
+	}
+	return r.faultRegistry.MatchNamed(faults.Target{
+		Opcode:         int(msg.Opcode),
+		Message:        msg.MessageType,
+		Characteristic: msg.Characteristic.String(),
+	}, faults.KindDropResponse)
 }
 
 // refragmentNative re-frames a natively-encoded message for the link's ATT

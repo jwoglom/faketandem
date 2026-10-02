@@ -3,6 +3,7 @@ package harness
 import (
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -504,5 +505,38 @@ func TestSettingThePumpTimeToALocalTime(t *testing.T) {
 		if code, _ := do(t, mux, http.MethodPost, "/api/state/time", bad); code != http.StatusBadRequest {
 			t.Errorf("%s = %d, want 400", bad, code)
 		}
+	}
+}
+
+func TestHistoryBulkAppendsInOrderAndEraseRestartsTheNumbering(t *testing.T) {
+	_, ps, _, mux := testHarness(t)
+	records := make([]string, 0, 300)
+	for i := 300; i > 0; i-- {
+		records = append(records, fmt.Sprintf(`{"type":"PumpingResumed","seconds_ago":%d}`, i*60))
+	}
+
+	body := mustDo(t, mux, http.MethodPost, "/api/state/history/bulk", `{"records":[`+strings.Join(records, ",")+`]}`)
+	if body["count"] != 300.0 || body["last_sequence"].(float64)-body["first_sequence"].(float64) != 299 {
+		t.Fatalf("bulk append = %v", body)
+	}
+	entries := historyEntries(t, mux)
+	if len(entries) != 300 {
+		t.Fatalf("history holds %d records, want 300", len(entries))
+	}
+	first, _ := time.Parse(time.RFC3339, entries[0]["time"].(string))
+	if want := testInstant.Add(-300 * time.Minute); !first.Equal(want) {
+		t.Errorf("first record at %v, want %v", first, want)
+	}
+
+	mustDo(t, mux, http.MethodPost, "/api/state/history/erase", `{}`)
+	if got := len(historyEntries(t, mux)); got != 0 {
+		t.Errorf("erased history holds %d records", got)
+	}
+	if seq := ps.RecordPumpingResumed(); seq != 1 {
+		t.Errorf("the first record after an erase is %d, want 1", seq)
+	}
+
+	if code, _ := do(t, mux, http.MethodPost, "/api/state/history/bulk", `{"records":[{"seconds_ago":1}]}`); code != http.StatusBadRequest {
+		t.Errorf("a record with no type = %d, want 400", code)
 	}
 }
