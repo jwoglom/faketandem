@@ -67,20 +67,9 @@ const (
 // quickBolusReadback decodes the raw cargo rather than the named fields, which
 // differ between pumpX2 versions.
 func quickBolusReadback(msg *pumpx2.ParsedMessage) (map[string]interface{}, error) {
-	raw, ok := cargoValue(msg, "cargo")
-	if !ok {
-		return nil, fmt.Errorf("no cargo field")
-	}
-	rawHex, ok := raw.(string)
-	if !ok {
-		return nil, fmt.Errorf("cargo is %T, not a hex string", raw)
-	}
-	b, err := hex.DecodeString(rawHex)
+	b, err := rawCargo(msg, 7)
 	if err != nil {
-		return nil, fmt.Errorf("cargo %q is not hex: %w", rawHex, err)
-	}
-	if len(b) != 7 {
-		return nil, fmt.Errorf("cargo %q is %d bytes, want 7", rawHex, len(b))
+		return nil, err
 	}
 
 	changed := b[6]
@@ -98,6 +87,64 @@ func quickBolusReadback(msg *pumpx2.ParsedMessage) (map[string]interface{}, erro
 		values["quickBolusIncrementCarbs"] = int(binary.LittleEndian.Uint16(b[4:6]))
 	}
 	return values, nil
+}
+
+// NewPumpSoundsHandler handles SetPumpSoundsRequest, reflecting the sounds it
+// flags in PumpGlobalsResponse the way the pump does.
+func NewPumpSoundsHandler(bridge *pumpx2.Bridge, sm *settings.Manager) *SettingsWriteHandler {
+	h := NewSettingsWriteHandler(bridge, sm, "SetPumpSoundsRequest", "PumpGlobalsRequest")
+	h.readbackValues = pumpSoundsReadback
+	return h
+}
+
+// SetPumpSoundsRequest cargo: a reserved byte, then the quick bolus, general,
+// reminder, alert and alarm annunciations, two CGM alert bytes, and a bitmask of
+// the sounds the pump applies. PumpGlobalsResponse calls the general one
+// bolusAnnun. The CGM alert sounds have no PumpGlobals field.
+var pumpSoundsByBit = []struct {
+	bit   byte
+	index int
+	field string
+}{
+	{0x02, 1, "quickBolusAnnun"},
+	{0x04, 2, "bolusAnnun"},
+	{0x08, 3, "reminderAnnun"},
+	{0x10, 4, "alertAnnun"},
+	{0x20, 5, "alarmAnnun"},
+}
+
+func pumpSoundsReadback(msg *pumpx2.ParsedMessage) (map[string]interface{}, error) {
+	b, err := rawCargo(msg, 9)
+	if err != nil {
+		return nil, err
+	}
+	values := map[string]interface{}{}
+	for _, sound := range pumpSoundsByBit {
+		if b[8]&sound.bit != 0 {
+			values[sound.field] = int(b[sound.index])
+		}
+	}
+	return values, nil
+}
+
+// rawCargo is the message's cargo bytes, which must be exactly length long.
+func rawCargo(msg *pumpx2.ParsedMessage, length int) ([]byte, error) {
+	raw, ok := cargoValue(msg, "cargo")
+	if !ok {
+		return nil, fmt.Errorf("no cargo field")
+	}
+	rawHex, ok := raw.(string)
+	if !ok {
+		return nil, fmt.Errorf("cargo is %T, not a hex string", raw)
+	}
+	b, err := hex.DecodeString(rawHex)
+	if err != nil {
+		return nil, fmt.Errorf("cargo %q is not hex: %w", rawHex, err)
+	}
+	if len(b) != length {
+		return nil, fmt.Errorf("cargo %q is %d bytes, want %d", rawHex, len(b), length)
+	}
+	return b, nil
 }
 
 // MessageType returns the message type

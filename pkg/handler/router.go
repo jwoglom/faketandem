@@ -245,7 +245,7 @@ func (r *Router) registerHandlers() {
 	// ordering isn't JLS-guaranteed, so this is fragile.
 	r.RegisterHandler(NewSettingsWriteHandler(r.bridge, r.settingsManager, "SetSleepScheduleRequest", "ControlIQSleepScheduleRequest"))
 	r.RegisterHandler(NewQuickBolusSettingsHandler(r.bridge, r.settingsManager))
-	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetPumpSoundsRequest"))
+	r.RegisterHandler(NewPumpSoundsHandler(r.bridge, r.settingsManager))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetPumpAlertSnoozeRequest"))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetAutoOffAlertRequest"))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetBgReminderRequest"))
