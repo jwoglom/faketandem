@@ -75,3 +75,43 @@ func (h *TimeSinceResetHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpSta
 		},
 	}, nil
 }
+
+// ChangeTimeDateHandler handles ChangeTimeDateRequest: it sets the pump's clock
+// to the requested date and time and writes the TimeChanged/DateChange records
+// a pump writes for it.
+type ChangeTimeDateHandler struct {
+	bridge *pumpx2.Bridge
+}
+
+// NewChangeTimeDateHandler creates a change time/date handler.
+func NewChangeTimeDateHandler(bridge *pumpx2.Bridge) *ChangeTimeDateHandler {
+	return &ChangeTimeDateHandler{bridge: bridge}
+}
+
+// MessageType returns the message type this handler processes
+func (h *ChangeTimeDateHandler) MessageType() string {
+	return "ChangeTimeDateRequest"
+}
+
+// RequiresAuth returns true if this message requires authentication
+func (h *ChangeTimeDateHandler) RequiresAuth() bool {
+	return true
+}
+
+// HandleMessage processes a ChangeTimeDateRequest. tandemEpochTime is the new
+// clock reading in pump-epoch seconds, as local time.
+func (h *ChangeTimeDateHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
+	requested, ok := cargoInt(msg, "tandemEpochTime")
+	if !ok || requested <= 0 {
+		return nil, fmt.Errorf("ChangeTimeDateRequest without a tandemEpochTime: %v", msg.Cargo)
+	}
+	prior, after := pumpState.SetPumpWallClock(uint32(requested))
+	log.Infof("Handling ChangeTimeDateRequest: txID=%d pump clock %d -> %d (%+d s)",
+		msg.TxID, prior, after, int64(after)-int64(prior))
+
+	response, err := h.bridge.EncodeMessage(msg.TxID, "ChangeTimeDateResponse", map[string]interface{}{"status": 0})
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode ChangeTimeDateResponse: %w", err)
+	}
+	return &Response{ResponseMessage: response, Immediate: true}, nil
+}

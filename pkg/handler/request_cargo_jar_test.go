@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"encoding/binary"
+	"encoding/hex"
 	"os"
 	"testing"
 
@@ -303,4 +305,33 @@ func TestRemoteEntryAndChallengeRequests_CargoFieldNames(t *testing.T) {
 	// cliparser at all with any non-default value. Its handler reads
 	// "cgmSensorType", which matches the field name in pumpX2's
 	// SetSensorTypeRequest.java.
+}
+
+func TestChangeTimeDateRequest_SetsThePumpsClock(t *testing.T) {
+	bridge := testBridge(t)
+	pumpState := state.NewPumpState()
+	target := pumpState.PumpTimeNow() - 3*3600
+
+	// cliparser resolves the one-argument constructor to the byte[] one, so the cargo goes in raw.
+	cargo := make([]byte, 4)
+	binary.LittleEndian.PutUint32(cargo, target)
+	msg := roundTrip(t, bridge, bluetooth.CharControl, "ChangeTimeDateRequest", map[string]interface{}{
+		"raw": hex.EncodeToString(cargo),
+	})
+	assertCargoInt(t, msg, int64(target), "tandemEpochTime")
+
+	resp, err := NewChangeTimeDateHandler(bridge).HandleMessage(msg, pumpState)
+	if err != nil {
+		t.Fatalf("ChangeTimeDateHandler failed: %v", err)
+	}
+	if resp == nil || resp.ResponseMessage == nil || len(resp.ResponseMessage.Packets) == 0 {
+		t.Fatal("ChangeTimeDateHandler produced no ChangeTimeDateResponse packets")
+	}
+	if got := pumpState.PumpTimeNow(); got < target || got > target+2 {
+		t.Errorf("pump clock reads %d after the change, want %d", got, target)
+	}
+	entries := pumpState.GetHistoryLogEntries(1, ^uint32(0))
+	if len(entries) == 0 || entries[0].TypeID != state.HistoryTimeChanged {
+		t.Errorf("no TimeChanged record written: %v", entries)
+	}
 }

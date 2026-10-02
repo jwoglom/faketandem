@@ -70,26 +70,38 @@ driver assertion about a dose's start or end second is exact rather than
 There are two separate offsets between the emulator's clock and what goes on
 the wire, and they mean different things.
 
-**`pump_timezone` is the pump's local-time convention, not a lie.** A Tandem
-pump keeps its clock in local time with no zone attached: its pump-epoch
-seconds count from 2008-01-01 00:00:00 *as read on the pump's own clock*, and
-every consumer decodes on that assumption — TandemKit's
-`Dates.fromJan12008ToUnixEpochSeconds` subtracts `TimeZone.current.secondsFromGMT()`.
-The emulator therefore encodes with
+**`pump_timezone` is what the pump's clock was set to, not a lie.** A Tandem
+pump holds a date and time with no zone attached: its pump-epoch seconds count
+from 2008-01-01 00:00:00 *as read on the pump's own clock*, and every consumer
+decodes them as local time — TandemKit's `Dates.fromJan12008ToUnixEpochSeconds`
+subtracts `TimeZone.current.secondsFromGMT()`. The emulator therefore encodes
+with
 
 ```
 pump_time_seconds = unix(instant) - 1199145600 + pump_timezone_offset_seconds + pump_offset_seconds
 ```
 
-and a driver in the same zone decodes exactly the original instant back out.
-Emitting UTC-based seconds instead (which this emulator used to do) puts every
-timestamp one UTC offset from the pump's own record — four hours in EDT —
-which is invisible until something compares a dose's second. The zone defaults
-to the host's (or `-pump-timezone`); a `PUT` moves the pump to any zone, which
-is how a test reproduces a traveling pump or a DST boundary. `UTC` turns the
-convention off. `pump_timezone_offset_seconds` is read-only: the zone's offset
-in force at `pump_now`, so a test never has to work out which side of a DST
-transition the pump is on.
+and a driver whose zone has the same offset decodes exactly the original
+instant back out. Emitting UTC-based seconds instead (which this emulator used
+to do) puts every timestamp one UTC offset from the pump's own record — four
+hours in EDT — which is invisible until something compares a dose's second.
+
+Naming a zone in a `PUT` sets the pump's clock to that zone's local time *at
+that moment*, the way a user sets a pump. The offset is then fixed: a pump does
+not follow DST, and a `PUT` that leaves `pump_timezone` out does not move its
+clock. The default is the host's zone at startup (or `-pump-timezone`); `UTC`
+turns the convention off. `pump_timezone_offset_seconds` is read-only: how far
+the pump's clock is set ahead of UTC.
+
+**Setting the pump's date and time** moves that offset the way a pump does, and
+writes the records a pump writes for it: a `TimeChanged` record (type 13) when
+the time of day moves and a `DateChange` record (type 14) when the date does,
+both stamped on the new clock, while records already in the log keep their old
+stamps. A driver does it with `ChangeTimeDateRequest`; a user on
+the pump's own screen with `POST /api/state/time`, which tells no connected
+driver. Each record in `/api/history` carries the `wire_offset_seconds` it was
+written under, which is how a timeline turns a record from before the change
+back into its instant.
 
 **`pump_offset_seconds` is a lie the pump tells about the time**, not a change
 to the emulator's clock: it shifts every timestamp on the wire
@@ -107,8 +119,11 @@ modes and stacks on top of the zone.
   wire**, with both offsets applied.
 
 Either is derivable from the other with the two offsets `/api/clock` reports,
-and every path — protocol handler, harness action, simulator tick, backdated
-staged record — obeys it.
+or for a history record with its own `wire_offset_seconds`, and every path —
+protocol handler, harness action, simulator tick, backdated staged record —
+obeys it. The live fields (a running bolus's or temp rate's start) are encoded
+under the current setting, so they move when the clock is set; what a real pump
+reports for them across a clock change has not been checked.
 
 ```bash
 # What the clock is doing now
@@ -125,8 +140,13 @@ curl -X POST http://127.0.0.1:8080/api/clock/advance -d '{"seconds":30}'
 # through the jump (a temp rate expiring mid-bolus) happens in order
 curl -X POST http://127.0.0.1:8080/api/clock/advance -d '{"seconds":30,"ticks":6}'
 
-# Move the pump's clock to another zone (wire timestamps move, delivery does not)
+# Set the pump's clock to local time in another zone (wire timestamps move,
+# delivery does not); it stays at that offset across DST
 curl -X PUT http://127.0.0.1:8080/api/clock -d '{"pump_timezone":"America/New_York"}'
+
+# The user sets the pump's clock on the pump: three hours back, or to a date and time
+curl -X POST http://127.0.0.1:8080/api/state/time -d '{"delta_seconds":-10800}'
+curl -X POST http://127.0.0.1:8080/api/state/time -d '{"local_time":"2024-03-06T01:15:00"}'
 
 # Back to the host wall clock
 curl -X PUT http://127.0.0.1:8080/api/clock -d '{"mode":"real","pump_offset_seconds":0}'
@@ -135,7 +155,9 @@ curl -X PUT http://127.0.0.1:8080/api/clock -d '{"mode":"real","pump_offset_seco
 `GET /api/clock` reports `mode`, `now`, `frozen`, `pump_now`,
 `pump_time_seconds`, `pump_offset_seconds`, `pump_timezone`,
 `pump_timezone_offset_seconds` and `time_since_reset`. An unknown
-`pump_timezone` returns `400`.
+`pump_timezone` returns `400`. `POST /api/state/time` takes exactly one of
+`delta_seconds` and `local_time` and returns the clock's reading before and
+after (`prior_pump_seconds`, `pump_seconds`), the clock and the history tail.
 
 `POST /api/clock/advance` returns `409` while the pump is on the real clock.
 

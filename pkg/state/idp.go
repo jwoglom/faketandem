@@ -109,7 +109,7 @@ func (ps *PumpState) idpProfileIndexUnlocked(idpID int) int {
 // ActiveIDPSegmentIndex is the index of the active profile's segment in force at the pump's local
 // time of day, or 0 with no profile.
 func (ps *PumpState) ActiveIDPSegmentIndex() int {
-	now := ps.PumpNow().In(ps.GetPumpTimeZone())
+	now := ps.PumpLocalNow()
 	minutes := now.Hour()*60 + now.Minute()
 
 	ps.mutex.RLock()

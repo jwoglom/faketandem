@@ -46,7 +46,7 @@ func main() {
 	var virtualAckAfterHandling = flag.Bool("virtual-ack-after-handling", false, "virtual transport only: run the write handler synchronously and ack the write afterwards, reproducing the Linux/gatt ordering instead of real-pump ordering")
 	var apiAddr = flag.String("api-addr", api.DefaultAddr, "address the HTTP/WebSocket API server listens on")
 	var uiDir = flag.String("ui-dir", "", "directory to serve the web UI from (default: the 'ui' directory beside the executable, else ./ui)")
-	var pumpTimeZone = flag.String("pump-timezone", "", "IANA time zone the emulated pump keeps its clock in, e.g. 'America/New_York' (default: the host's local zone; 'UTC' disables the local-time convention). A Tandem pump holds local time with no zone attached and every consumer decodes its wire timestamps on that assumption, so this is the zone pump-epoch seconds are encoded in. Changeable at runtime via PUT /api/clock.")
+	var pumpTimeZone = flag.String("pump-timezone", "", "IANA time zone whose local time the emulated pump's clock is set to at startup, e.g. 'America/New_York' (default: the host's local zone; 'UTC' disables the local-time convention). A Tandem pump holds a date and time with no zone attached and every consumer decodes its wire timestamps as local time; the offset is fixed at startup and does not follow DST. Changeable at runtime via PUT /api/clock, POST /api/state/time and ChangeTimeDateRequest.")
 	var requestLogSize = flag.Int("request-log-size", reqlog.DefaultCapacity, "how many messages the integration-harness request log (GET /api/log) retains")
 
 	flag.Parse()
@@ -405,6 +405,6 @@ func applyPumpTimeZone(pumpState *state.PumpState, zone string) {
 		}
 		pumpState.SetPumpTimeZone(loc)
 	}
-	log.Infof("Pump clock: local time in %s (UTC offset %+d s right now); wire timestamps are seconds since 2008-01-01 as read on that clock",
-		pumpState.GetPumpTimeZone(), pumpState.PumpTimeZoneOffsetSeconds(pumpState.PumpNow()))
+	log.Infof("Pump clock: set to local time in %s (UTC offset %+d s, fixed until the clock is set again); wire timestamps are seconds since 2008-01-01 as read on that clock",
+		pumpState.GetPumpTimeZone(), pumpState.PumpTimeZoneOffsetSeconds())
 }

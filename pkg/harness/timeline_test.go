@@ -447,3 +447,62 @@ func TestClockAcceptsAPumpTimeZone(t *testing.T) {
 		t.Errorf("an unknown zone = %d, want 400", code)
 	}
 }
+
+func TestSettingThePumpTimeMovesItsClockAndKeepsOlderStamps(t *testing.T) {
+	_, _, _, mux := testHarness(t)
+	putManualClock(t, mux)
+	mustDo(t, mux, http.MethodPut, "/api/clock", `{"mode":"manual","frozen":true,"pump_timezone":"America/New_York"}`)
+	mustDo(t, mux, http.MethodPost, "/api/state/suspend", `{"reason":"user"}`)
+
+	body := mustDo(t, mux, http.MethodPost, "/api/state/time", `{"delta_seconds":-10800}`)
+	if got := body["pump_seconds"].(float64) - body["prior_pump_seconds"].(float64); got != -10800 {
+		t.Errorf("the pump's clock moved %v s, want -10800", got)
+	}
+
+	entries := historyEntries(t, mux)
+	suspended := recordsOfType(entries, "PumpingSuspended")[0]
+	changed := recordsOfType(entries, "TimeChanged")
+	if len(changed) != 1 {
+		t.Fatalf("got %d TimeChanged records, want 1", len(changed))
+	}
+	zoneOffset, skew := clockOffsets(t, mux)
+	for _, record := range []map[string]interface{}{suspended, changed[0]} {
+		instant := decodeWire(record["pump_seconds"].(float64), record["wire_offset_seconds"].(float64))
+		if want, _ := time.Parse(time.RFC3339, record["time"].(string)); !instant.Equal(want) {
+			t.Errorf("%s decodes to %v with its own offset, want %v", record["type"], instant, want)
+		}
+	}
+	if got, want := changed[0]["wire_offset_seconds"].(float64), zoneOffset+skew; got != want {
+		t.Errorf("a record written after the change carries %v, want the clock's %v", got, want)
+	}
+	if got, want := suspended["wire_offset_seconds"].(float64), zoneOffset+skew+10800; got != want {
+		t.Errorf("a record written before the change carries %v, want the old %v", got, want)
+	}
+
+	// A PUT that does not name a zone leaves the pump's clock where it was set.
+	mustDo(t, mux, http.MethodPut, "/api/clock", `{"mode":"manual","frozen":true,"pump_offset_seconds":0}`)
+	if got, _ := clockOffsets(t, mux); got != zoneOffset {
+		t.Errorf("a PUT without pump_timezone moved the offset to %v from %v", got, zoneOffset)
+	}
+}
+
+func TestSettingThePumpTimeToALocalTime(t *testing.T) {
+	_, _, _, mux := testHarness(t)
+	putManualClock(t, mux)
+
+	body := mustDo(t, mux, http.MethodPost, "/api/state/time", `{"local_time":"2024-03-06T01:15:00"}`)
+	want := state.PumpTimeSeconds(time.Date(2024, time.March, 6, 1, 15, 0, 0, time.UTC))
+	if got := uint32(body["pump_seconds"].(float64)); got != want {
+		t.Errorf("pump_seconds = %d, want %d", got, want)
+	}
+	entries := historyEntries(t, mux)
+	if len(recordsOfType(entries, "DateChange")) != 1 {
+		t.Errorf("a change to the next day wrote no DateChange: %v", entries)
+	}
+
+	for _, bad := range []string{`{}`, `{"delta_seconds":1,"local_time":"2024-03-06T01:15:00"}`, `{"local_time":"tomorrow"}`} {
+		if code, _ := do(t, mux, http.MethodPost, "/api/state/time", bad); code != http.StatusBadRequest {
+			t.Errorf("%s = %d, want 400", bad, code)
+		}
+	}
+}

@@ -40,31 +40,32 @@ func (h *Harness) handleStateAction(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	switch action {
-	case "bolus/start":
-		h.actionBolusStart(w, r)
-	case "bolus/stall":
-		h.actionBolusStall(w, r)
-	case "bolus/resume":
-		h.actionBolusResume(w, r)
-	case "bolus/abort":
-		h.actionBolusEnd(w, r, state.BolusEndReasonStopped)
-	case "bolus/complete":
-		h.actionBolusEnd(w, r, state.BolusEndReasonCompleted)
-	case "tempbasal/start":
-		h.actionTempBasalStart(w, r)
-	case "tempbasal/stop":
-		h.actionTempBasalStop(w, r)
-	case "suspend":
-		h.actionSuspend(w, r)
-	case "resume":
-		h.actionResume(w, r)
-	case "history/append":
-		h.actionHistoryAppend(w, r)
-	case "qualifyingevent":
-		h.actionQualifyingEvent(w, r)
-	default:
+	handle, ok := h.stateActions()[action]
+	if !ok {
 		writeError(w, http.StatusNotFound, "unknown state action %q", action)
+		return
+	}
+	handle(w, r)
+}
+
+func (h *Harness) stateActions() map[string]http.HandlerFunc {
+	return map[string]http.HandlerFunc{
+		"bolus/start":  h.actionBolusStart,
+		"bolus/stall":  h.actionBolusStall,
+		"bolus/resume": h.actionBolusResume,
+		"bolus/abort": func(w http.ResponseWriter, r *http.Request) {
+			h.actionBolusEnd(w, r, state.BolusEndReasonStopped)
+		},
+		"bolus/complete": func(w http.ResponseWriter, r *http.Request) {
+			h.actionBolusEnd(w, r, state.BolusEndReasonCompleted)
+		},
+		"tempbasal/start": h.actionTempBasalStart,
+		"tempbasal/stop":  h.actionTempBasalStop,
+		"suspend":         h.actionSuspend,
+		"resume":          h.actionResume,
+		"history/append":  h.actionHistoryAppend,
+		"qualifyingevent": h.actionQualifyingEvent,
+		"time":            h.actionSetPumpTime,
 	}
 }
 
@@ -623,4 +624,48 @@ func (h *Harness) actionQualifyingEvent(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"bitmask": body.Bitmask})
+}
+
+type setPumpTimeBody struct {
+	// DeltaSeconds moves the pump's clock by that much (negative: back).
+	DeltaSeconds *float64 `json:"delta_seconds,omitempty"`
+	// LocalTime sets the pump's clock to that date and time of day, as its
+	// screen shows it ("2026-10-02T08:30:00", no zone).
+	LocalTime string `json:"local_time,omitempty"`
+}
+
+// actionSetPumpTime sets the pump's date and time as a user on the pump's own
+// screen does: the clock moves, the TimeChanged/DateChange records are written,
+// and nothing is sent to a connected driver.
+func (h *Harness) actionSetPumpTime(w http.ResponseWriter, r *http.Request) {
+	var body setPumpTimeBody
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "%v", err)
+		return
+	}
+
+	var target uint32
+	switch {
+	case body.DeltaSeconds != nil && body.LocalTime == "":
+		target = uint32(int64(h.pumpState.PumpTimeNow()) + int64(math.Round(*body.DeltaSeconds)))
+	case body.LocalTime != "" && body.DeltaSeconds == nil:
+		local, err := time.Parse("2006-01-02T15:04:05", body.LocalTime)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "local_time: %v", err)
+			return
+		}
+		target = state.PumpTimeSeconds(local)
+	default:
+		writeError(w, http.StatusBadRequest, "give exactly one of delta_seconds and local_time")
+		return
+	}
+
+	prior, after := h.pumpState.SetPumpWallClock(target)
+	log.Infof("harness: pump clock set on the pump from %d to %d (%+d s)", prior, after, int64(after)-int64(prior))
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"prior_pump_seconds": prior,
+		"pump_seconds":       after,
+		"clock":              h.clockSnapshot(),
+		"history":            h.historySnapshot(),
+	})
 }
