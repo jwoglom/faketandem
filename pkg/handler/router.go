@@ -343,6 +343,11 @@ func (r *Router) RouteMessage(charType bluetooth.CharacteristicType, msg *pumpx2
 		return fmt.Errorf("authentication required for %s", msg.MessageType)
 	}
 
+	if fault := r.matchRefusal(charType, msg); fault != nil {
+		refused := &pumpx2.EncodedMessage{MessageType: msg.MessageType, TxID: msg.TxID}
+		return r.sendErrorResponse(charType, refused, fault, msg.Opcode)
+	}
+
 	// Handle the message
 	response, err := handler.HandleMessage(msg, r.pumpState)
 	if err != nil {
@@ -562,6 +567,19 @@ func (r *Router) matchResponseFault(charType bluetooth.CharacteristicType, msg *
 		faults.KindErrorResponse,
 		faults.KindDisconnect,
 	)
+}
+
+// matchRefusal consumes an error_response fault armed for this request, which
+// the pump answers in place of acting on it.
+func (r *Router) matchRefusal(charType bluetooth.CharacteristicType, msg *pumpx2.ParsedMessage) *faults.Fault {
+	if r.faultRegistry == nil {
+		return nil
+	}
+	return r.faultRegistry.Match(faults.Target{
+		Opcode:         msg.Opcode,
+		Message:        msg.MessageType,
+		Characteristic: charType.String(),
+	}, faults.KindErrorResponse)
 }
 
 // sendErrorResponse replaces a response with a protocol ErrorResponse, via the

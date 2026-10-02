@@ -347,7 +347,7 @@ curl -X POST http://127.0.0.1:8080/api/faults \
 curl -X POST http://127.0.0.1:8080/api/faults \
   -d '{"kind":"delay_response","message":"CurrentBolusStatusRequest","delay_ms":2000,"every":true}'
 
-# Answer the next two with an ErrorResponse instead (see the caveat below)
+# Refuse the next two: answer ErrorResponse and do not act on them
 curl -X POST http://127.0.0.1:8080/api/faults \
   -d '{"kind":"error_response","message":"InitiateBolusRequest","error_code":3,"count":2}'
 
@@ -407,7 +407,9 @@ cliparser — pumpX2 has no encodable `ErrorResponse` class — so it is framed 
 the native encoder in `pkg/protocol` and sent on `CurrentStatus`, where the
 driver looks for it, whatever characteristic the rejected request arrived on.
 The cargo is `[requestCodeId][errorCodeId]`: the opcode of the request being
-rejected and the `error_code` the fault carries. Clearing
+rejected and the `error_code` the fault carries. The request is refused, not
+handled, so the pump's state does not change; a fault scoped by a response
+opcode alone is only seen on the response path, after the handler ran. Clearing
 `handler.ErrorResponseEncoder` makes the fault behave as a drop and say so in
 the emulator log and in the request log's `note` field, rather than letting a
 harness believe it exercised an error path it did not. Note that a driver may
