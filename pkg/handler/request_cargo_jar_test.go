@@ -335,3 +335,25 @@ func TestChangeTimeDateRequest_SetsThePumpsClock(t *testing.T) {
 		t.Errorf("no TimeChanged record written: %v", entries)
 	}
 }
+
+// A full 255-record slice: cliparser prints the one-byte count signed, as -1, and the handler
+// once read that as "no count" and streamed a single record.
+func TestHistoryLogRequestForAFullSliceStreamsEveryRecord(t *testing.T) {
+	bridge := testBridge(t)
+	pumpState := state.NewPumpState()
+	for i := 0; i < 300; i++ {
+		pumpState.RecordPumpingResumed()
+	}
+
+	msg := roundTrip(t, bridge, bluetooth.CharCurrentStatus, "HistoryLogRequest", map[string]interface{}{
+		"startLog":     300,
+		"numberOfLogs": 255,
+	})
+	resp, err := NewHistoryLogHandler(bridge).HandleMessage(msg, pumpState)
+	if err != nil {
+		t.Fatalf("HistoryLogHandler: %v", err)
+	}
+	if got := len(resp.NativeNotifications); got != 255 {
+		t.Errorf("streamed %d records, want 255 (cargo %v)", got, msg.Cargo)
+	}
+}

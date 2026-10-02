@@ -67,8 +67,9 @@ func (h *HistoryLogHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *
 		startLog = uint32(val)
 	}
 	numberOfLogs := uint32(1)
-	if val, ok := cargoInt(msg, "numberOfLogs"); ok && val > 0 {
-		numberOfLogs = uint32(val)
+	if val, ok := cargoInt(msg, "numberOfLogs"); ok && val != 0 {
+		// One unsigned byte on the wire, which cliparser prints signed: 255 arrives as -1.
+		numberOfLogs = uint32(val) & 0xFF
 	}
 	if numberOfLogs > 255 {
 		numberOfLogs = 255
