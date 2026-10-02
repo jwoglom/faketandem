@@ -1,6 +1,7 @@
 package state
 
 import (
+	"encoding/binary"
 	"testing"
 	"time"
 )
@@ -172,7 +173,7 @@ func TestPumpTimeFor_RoundTripsThroughTandemKitsDecoder(t *testing.T) {
 				ps.SetPumpTimeZone(loc)
 
 				wire := ps.PumpTimeFor(instant)
-				offset := ps.PumpTimeZoneOffsetSeconds(instant)
+				offset := ps.PumpTimeZoneOffsetSeconds()
 
 				if got := swiftDecodeJan12008(wire, offset); !got.Equal(instant) {
 					t.Errorf("%d decoded with offset %d = %v, want the original %v", wire, offset, got, instant)
@@ -202,7 +203,7 @@ func TestPumpTimeFor_SkewIsAddedOnTopOfTheZone(t *testing.T) {
 
 	// -0400 in July: local time runs four hours behind UTC, so the wire value
 	// is 4 h smaller than the UTC-based encoding.
-	if got, want := ps.PumpTimeZoneOffsetSeconds(instant), -4*3600; got != want {
+	if got, want := ps.PumpTimeZoneOffsetSeconds(), -4*3600; got != want {
 		t.Fatalf("zone offset = %d, want %d", got, want)
 	}
 	if got, want := ps.PumpTimeFor(instant), PumpTimeSeconds(instant)-4*3600; got != want {
@@ -214,7 +215,7 @@ func TestPumpTimeFor_SkewIsAddedOnTopOfTheZone(t *testing.T) {
 		t.Errorf("PumpTimeFor with an 8 s skew = %d, want %d", got, want)
 	}
 	// A driver in the same zone decodes the pump's lie, not the true instant.
-	decoded := swiftDecodeJan12008(ps.PumpTimeFor(instant), ps.PumpTimeZoneOffsetSeconds(instant))
+	decoded := swiftDecodeJan12008(ps.PumpTimeFor(instant), ps.PumpTimeZoneOffsetSeconds())
 	if want := instant.Add(8 * time.Second); !decoded.Equal(want) {
 		t.Errorf("decoded = %v, want the skewed %v", decoded, want)
 	}
@@ -236,5 +237,119 @@ func TestPumpTimeZone_DefaultsToTheHostZone(t *testing.T) {
 	ps.SetPumpTimeZone(nil)
 	if got := ps.GetPumpTimeZone(); got != time.UTC {
 		t.Errorf("a nil zone = %v, want UTC", got)
+	}
+}
+
+func TestPumpClockDoesNotFollowDST(t *testing.T) {
+	loc, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Fatalf("LoadLocation: %v", err)
+	}
+	// 01:00 EST on the US spring-forward day; clocks in New York jump at 07:00 UTC.
+	before := time.Date(2024, time.March, 10, 6, 0, 0, 0, time.UTC)
+	clock := NewFrozenClock(before)
+	ps := NewPumpState()
+	ps.SetClock(clock)
+	ps.SetPumpTimeZone(loc)
+
+	clock.Advance(2 * time.Hour)
+	after := clock.Now()
+
+	if got, want := ps.PumpTimeZoneOffsetSeconds(), -5*3600; got != want {
+		t.Errorf("offset after the transition = %d, want the %d it was set to", got, want)
+	}
+	if got, want := ps.PumpTimeFor(after)-ps.PumpTimeFor(before), uint32(2*3600); got != want {
+		t.Errorf("the pump's clock moved %d s over 2 h, want %d", got, want)
+	}
+	if got := ps.PumpLocalNow().Hour(); got != 3 {
+		t.Errorf("the pump reads %d:00, want 3:00 (EST kept, not EDT)", got)
+	}
+
+	ps.SetPumpTimeZone(loc)
+	if got, want := ps.PumpTimeZoneOffsetSeconds(), -4*3600; got != want {
+		t.Errorf("offset after setting the clock again = %d, want %d", got, want)
+	}
+}
+
+func historyOfType(ps *PumpState, typeID int) []HistoryLogEntry {
+	var out []HistoryLogEntry
+	for _, e := range ps.HistoryLog.Entries {
+		if e.TypeID == typeID {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+func TestSetPumpWallClockAcrossMidnightWritesBothRecords(t *testing.T) {
+	// 23:30 on the pump, set three hours ahead.
+	instant := time.Date(2024, time.July, 4, 23, 30, 0, 0, time.UTC)
+	ps := NewPumpState()
+	ps.SetClock(NewFrozenClock(instant))
+	ps.SetPumpTimeZone(time.UTC)
+	before := ps.AppendHistory(HistoryEvent{TypeID: HistoryPumpingSuspended, Name: "PumpingSuspended"})
+
+	prior, after := ps.SetPumpWallClock(ps.PumpTimeNow() + 3*3600)
+
+	if after-prior != 3*3600 {
+		t.Fatalf("clock moved %d s, want %d", after-prior, 3*3600)
+	}
+	if got, want := ps.PumpTimeZoneOffsetSeconds(), 3*3600; got != want {
+		t.Errorf("offset = %d, want %d", got, want)
+	}
+	if !ps.Now().Equal(instant) {
+		t.Errorf("setting the pump's clock moved the true time to %v", ps.Now())
+	}
+	if got := ps.HistoryLog.Entries[0]; got.PumpTime != before.PumpTime {
+		t.Errorf("an older record was restamped: %d, was %d", got.PumpTime, before.PumpTime)
+	}
+
+	timeChanged := historyOfType(ps, HistoryTimeChanged)
+	dateChanged := historyOfType(ps, HistoryDateChange)
+	if len(timeChanged) != 1 || len(dateChanged) != 1 {
+		t.Fatalf("got %d TimeChanged and %d DateChange records, want one of each", len(timeChanged), len(dateChanged))
+	}
+	tc := timeChanged[0]
+	if tc.PumpTime != after {
+		t.Errorf("TimeChanged stamped %d, want the new clock's %d", tc.PumpTime, after)
+	}
+	if got, want := tc.Data["timePrior"], int64(23*3600+30*60)*1000; got != want {
+		t.Errorf("timePrior = %v, want %d", got, want)
+	}
+	if got, want := tc.Data["timeAfter"], int64(2*3600+30*60)*1000; got != want {
+		t.Errorf("timeAfter = %v, want %d", got, want)
+	}
+	dc := dateChanged[0].Data
+	if got, want := dc["dateAfter"].(uint32)-dc["datePrior"].(uint32), uint32(1); got != want {
+		t.Errorf("date moved %d days, want %d", got, want)
+	}
+
+	// TandemKit's HistoryTimestampReconciler: the two deltas sum to the shift.
+	shift := (tc.Data["timeAfter"].(int64)-tc.Data["timePrior"].(int64))/1000 +
+		int64(dc["dateAfter"].(uint32)-dc["datePrior"].(uint32))*86400
+	if shift != 3*3600 {
+		t.Errorf("the records describe a %d s shift, want %d", shift, 3*3600)
+	}
+
+	record := ps.HistoryLog.Entries[len(ps.HistoryLog.Entries)-1].EncodeRecord()
+	if got := binary.LittleEndian.Uint32(record[10:14]); got != dc["datePrior"].(uint32) {
+		t.Errorf("encoded datePrior = %d, want %v", got, dc["datePrior"])
+	}
+}
+
+func TestSetPumpWallClockWritesOnlyWhatMoved(t *testing.T) {
+	instant := time.Date(2024, time.July, 4, 12, 0, 0, 0, time.UTC)
+	ps := NewPumpState()
+	ps.SetClock(NewFrozenClock(instant))
+	ps.SetPumpTimeZone(time.UTC)
+
+	ps.SetPumpWallClock(ps.PumpTimeNow() - 600)
+	if len(historyOfType(ps, HistoryTimeChanged)) != 1 || len(historyOfType(ps, HistoryDateChange)) != 0 {
+		t.Errorf("a same-day change wrote %v", ps.HistoryLog.Entries)
+	}
+
+	ps.SetPumpWallClock(ps.PumpTimeNow() + 86400)
+	if len(historyOfType(ps, HistoryTimeChanged)) != 1 || len(historyOfType(ps, HistoryDateChange)) != 1 {
+		t.Errorf("a whole-day change wrote %v", ps.HistoryLog.Entries)
 	}
 }

@@ -221,10 +221,11 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewCartridgeModeHandler(r.bridge, "ExitFillTubingModeRequest", state.WorkflowFillTubing, false))
 	r.RegisterHandler(NewCartridgeHandler(r.bridge, "FillCannulaRequest"))
 
+	r.RegisterHandler(NewChangeTimeDateHandler(r.bridge))
+
 	// Simple control handlers (log and return success)
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "DismissNotificationRequest"))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "PlaySoundRequest"))
-	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "ChangeTimeDateRequest"))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "DisconnectPumpRequest"))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "UserInteractionRequest"))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "StreamDataPreflightRequest"))

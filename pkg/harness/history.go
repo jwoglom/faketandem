@@ -23,9 +23,13 @@ const (
 //	PumpSeconds  what actually went on the wire: pump-epoch seconds with the
 //	          pump-clock skew and the pump's time zone applied.
 //
-// `/api/clock` reports both offsets, so either can be derived from the other:
+// Each record carries the offset it was written under, so either can be
+// derived from the other:
 //
-//	unix(Time) = PumpSeconds + 1199145600 - pump_timezone_offset_seconds - pump_offset_seconds
+//	unix(Time) = PumpSeconds + 1199145600 - wire_offset_seconds
+//
+// which is pump_timezone_offset_seconds + pump_offset_seconds from /api/clock
+// for every record written since the pump's clock was last set.
 type historyEntrySnapshot struct {
 	Sequence uint32 `json:"sequence"`
 	TypeID   int    `json:"type_id"`
@@ -46,14 +50,22 @@ type historyEntrySnapshot struct {
 	Extra map[string]interface{} `json:"extra,omitempty"`
 	// SourceNibble is the high nibble of the record's type-ID word.
 	SourceNibble uint8 `json:"source_nibble"`
+	// WireOffsetSeconds is how far PumpSeconds runs ahead of Time: the offset
+	// the pump's clock was set to plus its skew, when the record was written.
+	// It differs from the offsets /api/clock reports for a record written
+	// before the clock was last set, which keeps its old stamp as on a pump.
+	WireOffsetSeconds int64 `json:"wire_offset_seconds"`
 }
 
 // historySnapshot is the tail of the history log carried in GET /api/state.
 type historySnapshot struct {
-	Count         int                    `json:"count"`
-	FirstSequence uint32                 `json:"first_sequence"`
-	LastSequence  uint32                 `json:"last_sequence"`
-	Entries       []historyEntrySnapshot `json:"entries"`
+	Count         int    `json:"count"`
+	FirstSequence uint32 `json:"first_sequence"`
+	LastSequence  uint32 `json:"last_sequence"`
+	// LatestTime is the latest instant any record was written at, which a
+	// harness that moves the clock about needs and the tail cannot give.
+	LatestTime string                 `json:"latest_time,omitempty"`
+	Entries    []historyEntrySnapshot `json:"entries"`
 }
 
 // historyPage is the body of GET /api/history.
@@ -164,15 +176,16 @@ func historyEntrySnapshots(entries []state.HistoryLogEntry) []historyEntrySnapsh
 	out := make([]historyEntrySnapshot, 0, len(entries))
 	for _, e := range entries {
 		out = append(out, historyEntrySnapshot{
-			Sequence:     e.Sequence,
-			TypeID:       e.TypeID,
-			Type:         e.Type,
-			Time:         formatTime(e.Timestamp),
-			PumpSeconds:  e.PumpTime,
-			PumpTime:     e.PumpTime,
-			Data:         e.Data,
-			Extra:        e.Extra,
-			SourceNibble: e.SourceNibble,
+			Sequence:          e.Sequence,
+			TypeID:            e.TypeID,
+			Type:              e.Type,
+			Time:              formatTime(e.Timestamp),
+			PumpSeconds:       e.PumpTime,
+			PumpTime:          e.PumpTime,
+			Data:              e.Data,
+			Extra:             e.Extra,
+			SourceNibble:      e.SourceNibble,
+			WireOffsetSeconds: int64(e.PumpTime) - (e.Timestamp.Unix() - state.TandemEpoch.Unix()),
 		})
 	}
 	return out

@@ -121,10 +121,10 @@ func TestPumpClockOffsetSkewsEmittedTimestamps(t *testing.T) {
 	if got := ps.GetPumpClockOffset(); got != 8*time.Second {
 		t.Errorf("GetPumpClockOffset() = %v", got)
 	}
-	if got, want := ps.PumpTimeNow(), PumpTimeSecondsIn(testInstant.Add(8*time.Second), ps.GetPumpTimeZone()); got != want {
+	if got, want := ps.PumpTimeNow(), PumpTimeSecondsIn(testInstant.Add(8*time.Second), time.FixedZone("", ps.PumpTimeZoneOffsetSeconds())); got != want {
 		t.Errorf("PumpTimeNow() = %d, want %d with an 8 s skew", got, want)
 	}
-	if got, want := ps.PumpTimeFor(testInstant), PumpTimeSecondsIn(testInstant, ps.GetPumpTimeZone())+8; got != want {
+	if got, want := ps.PumpTimeFor(testInstant), PumpTimeSecondsIn(testInstant, time.FixedZone("", ps.PumpTimeZoneOffsetSeconds()))+8; got != want {
 		t.Errorf("PumpTimeFor() = %d, want %d", got, want)
 	}
 	// The skew is a pump-clock lie, not a change to the emulator's own time:
@@ -217,5 +217,34 @@ func TestDefaultPumpStateUsesRealClock(t *testing.T) {
 	}
 	if delta := time.Since(ps.Now()); delta > time.Second || delta < -time.Second {
 		t.Errorf("default clock is %v away from wall time", delta)
+	}
+}
+
+func TestSimulatorDrainsTheBatteryOverAWeek(t *testing.T) {
+	ps := NewPumpState()
+	c := NewFrozenClock(testInstant)
+	ps.SetClock(c)
+	ps.SetBatteryLevel(100)
+	sim := NewSimulator(ps, time.Second)
+	sim.Tick()
+
+	c.Advance(time.Hour)
+	sim.Tick()
+	if got := ps.GetBatteryLevel(); got != 100 {
+		t.Errorf("battery at %d%% after an hour, want 100%% (0.6%% drained, carried)", got)
+	}
+
+	for i := 0; i < 3600; i++ {
+		c.Advance(time.Second)
+		sim.Tick()
+	}
+	if got := ps.GetBatteryLevel(); got != 99 {
+		t.Errorf("battery at %d%% after two hours of 1 s ticks, want 99%%", got)
+	}
+
+	c.Advance(7 * 24 * time.Hour)
+	sim.Tick()
+	if got := ps.GetBatteryLevel(); got != 0 {
+		t.Errorf("battery at %d%% a week later, want 0%%", got)
 	}
 }

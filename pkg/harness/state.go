@@ -368,12 +368,16 @@ func (h *Harness) historySnapshot() historySnapshot {
 	}
 	entries := h.pumpState.GetHistoryLogEntries(from, last)
 
-	return historySnapshot{
+	snapshot := historySnapshot{
 		Count:         count,
 		FirstSequence: first,
 		LastSequence:  last,
 		Entries:       historyEntrySnapshots(entries),
 	}
+	if latest := h.pumpState.LatestHistoryTime(); !latest.IsZero() {
+		snapshot.LatestTime = formatTime(latest)
+	}
+	return snapshot
 }
 
 func (h *Harness) requestLogSnapshot() requestLogSnapshot {

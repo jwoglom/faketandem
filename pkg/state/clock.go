@@ -1,6 +1,7 @@
 package state
 
 import (
+	"fmt"
 	"sync"
 	"time"
 )
@@ -170,18 +171,26 @@ func (ps *PumpState) PumpNow() time.Time {
 	return ps.Now().Add(ps.GetPumpClockOffset())
 }
 
-// SetPumpTimeZone sets the zone the pump keeps its clock in. A nil location
-// restores UTC; time.Local is the default.
+// SetPumpTimeZone sets the pump's clock to local time in loc, as a user setting
+// the pump's date and time to the local time would. A nil location means UTC.
+//
+// A Tandem pump has no notion of a time zone: it holds whatever date and time it
+// was last set to and keeps counting from there, so a DST transition or a trip
+// does not move it. The zone's UTC offset is therefore fixed here, at the
+// moment of setting, and stays in force until the pump's clock is set again.
 func (ps *PumpState) SetPumpTimeZone(loc *time.Location) {
 	if loc == nil {
 		loc = time.UTC
 	}
+	_, offset := ps.Now().In(loc).Zone()
 	ps.clockMtx.Lock()
 	defer ps.clockMtx.Unlock()
 	ps.pumpTimeZone = loc
+	ps.pumpUTCOffset = offset
 }
 
-// GetPumpTimeZone returns the zone the pump keeps its clock in.
+// GetPumpTimeZone returns the zone the pump's clock was last set to local time
+// in. After SetPumpWallClock it is a fixed zone named for the offset.
 func (ps *PumpState) GetPumpTimeZone() *time.Location {
 	ps.clockMtx.RLock()
 	defer ps.clockMtx.RUnlock()
@@ -191,36 +200,105 @@ func (ps *PumpState) GetPumpTimeZone() *time.Location {
 	return ps.pumpTimeZone
 }
 
-// PumpTimeZoneOffsetSeconds is the pump zone's UTC offset in force at t, in
-// seconds -- the quantity a decoder has to subtract back out to recover t. It
-// is reported on /api/clock so a test never has to guess which side of a DST
-// transition the pump is on.
-func (ps *PumpState) PumpTimeZoneOffsetSeconds(t time.Time) int {
-	_, offset := t.In(ps.GetPumpTimeZone()).Zone()
-	return offset
+// PumpTimeZoneOffsetSeconds is how far the pump's clock is set ahead of UTC,
+// apart from the skew: the quantity a decoder has to subtract back out. It is
+// reported on /api/clock.
+func (ps *PumpState) PumpTimeZoneOffsetSeconds() int {
+	ps.clockMtx.RLock()
+	defer ps.clockMtx.RUnlock()
+	return ps.pumpUTCOffset
+}
+
+// PumpLocalNow is the pump's own date and time of day, as its screen shows it.
+func (ps *PumpState) PumpLocalNow() time.Time {
+	return ps.PumpNow().In(time.FixedZone("", ps.PumpTimeZoneOffsetSeconds()))
 }
 
 // PumpTimeFor converts an instant on this pump's Clock into the pump-epoch
-// seconds the wire carries, applying the pump-clock skew and encoding in the
-// pump's own time zone. Every emitted timestamp (bolus start and end,
+// seconds the wire carries, applying the pump-clock skew and the offset the
+// pump's clock was set to. Every emitted timestamp (bolus start and end,
 // temp-rate start, history pumpTimeSec, TimeSinceResetResponse.currentTime)
-// goes through here, so one offset and one zone move all of them together.
+// goes through here, so one offset and one skew move all of them together.
 //
 // The formula is the inverse of TandemKit's Dates.fromJan12008ToUnixEpochSeconds:
 //
-//	wire = (t + skew).Unix() - 1199145600 + zoneOffsetAt(t + skew)
+//	wire = (t + skew).Unix() - 1199145600 + offset
 //
-// so a driver in the same zone decodes exactly t back out when the skew is 0.
+// so a driver whose zone has the same offset decodes exactly t back out when the
+// skew is 0.
 func (ps *PumpState) PumpTimeFor(t time.Time) uint32 {
-	return PumpTimeSecondsIn(t.Add(ps.GetPumpClockOffset()), ps.GetPumpTimeZone())
+	secs := t.Add(ps.GetPumpClockOffset()).Unix() - tandemEpochUnix + int64(ps.PumpTimeZoneOffsetSeconds())
+	if secs < 0 {
+		return 0
+	}
+	return uint32(secs)
 }
 
 // WallClockForPumpTime is the inverse of PumpTimeFor: the true instant on this
-// pump's Clock that a wire value of pumpSeconds stands for. It is what turns a
-// wire timestamp back into the snapshot's wall-clock field, so a record staged
-// by pump seconds and a record staged by instant agree.
+// pump's Clock that a wire value of pumpSeconds stands for under the pump's
+// current setting. It is what turns a wire timestamp back into the snapshot's
+// wall-clock field, so a record staged by pump seconds and a record staged by
+// instant agree.
 func (ps *PumpState) WallClockForPumpTime(pumpSeconds uint32) time.Time {
-	return PumpTimeToWallClockIn(pumpSeconds, ps.GetPumpTimeZone()).Add(-ps.GetPumpClockOffset())
+	unix := tandemEpochUnix + int64(pumpSeconds) - int64(ps.PumpTimeZoneOffsetSeconds())
+	return time.Unix(unix, 0).UTC().Add(-ps.GetPumpClockOffset())
+}
+
+// SetPumpWallClock sets the pump's date and time to pumpSeconds (pump-epoch
+// seconds as its screen would read them), as ChangeTimeDateRequest or a user on
+// the pump's own screen does, and records the change in the history log the way
+// the pump does: a TimeChanged record when the time of day moves and a
+// DateChange record when the date does, both stamped on the new clock. Records
+// already in the log keep the stamps they were written with.
+//
+// The change lands in the offset, not the skew: the skew stays a separate lie a
+// scenario controls. It returns the clock's reading before and after.
+func (ps *PumpState) SetPumpWallClock(pumpSeconds uint32) (prior, after uint32) {
+	prior = ps.PumpTimeNow()
+	delta := int64(pumpSeconds) - int64(prior)
+
+	ps.clockMtx.Lock()
+	ps.pumpUTCOffset += int(delta)
+	ps.pumpTimeZone = fixedZoneFor(ps.pumpUTCOffset)
+	ps.clockMtx.Unlock()
+
+	after = ps.PumpTimeNow()
+	rtc := ps.GetTimeSinceReset()
+	const secondsPerDay = 86400
+	if prior%secondsPerDay != after%secondsPerDay {
+		ps.AppendHistory(HistoryEvent{
+			TypeID: HistoryTimeChanged,
+			Name:   "TimeChanged",
+			Fields: map[string]interface{}{
+				"timePrior": int64(prior%secondsPerDay) * 1000,
+				"timeAfter": int64(after%secondsPerDay) * 1000,
+				"rawRTC":    rtc,
+			},
+		})
+	}
+	if prior/secondsPerDay != after/secondsPerDay {
+		ps.AppendHistory(HistoryEvent{
+			TypeID: HistoryDateChange,
+			Name:   "DateChange",
+			Fields: map[string]interface{}{
+				"datePrior":  prior / secondsPerDay,
+				"dateAfter":  after / secondsPerDay,
+				"rawRTCTime": rtc,
+			},
+		})
+	}
+	return prior, after
+}
+
+// fixedZoneFor names an offset the way time.Time prints one ("UTC-07:00").
+func fixedZoneFor(offsetSeconds int) *time.Location {
+	sign := '+'
+	abs := offsetSeconds
+	if abs < 0 {
+		sign = '-'
+		abs = -abs
+	}
+	return time.FixedZone(fmt.Sprintf("UTC%c%02d:%02d", sign, abs/3600, abs/60%60), offsetSeconds)
 }
 
 // GetBolusRate returns the simulated bolus delivery speed in units/second.

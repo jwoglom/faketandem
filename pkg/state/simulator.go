@@ -22,6 +22,9 @@ type Simulator struct {
 	// simulation instead of one tick's worth.
 	lastUpdate time.Time
 	mutex      sync.Mutex
+	// batteryDrainCarry is the drain, in percentage points, not yet taken off
+	// the whole-percent battery level. Guarded by the pump state's mutex.
+	batteryDrainCarry float64
 }
 
 // NewSimulator creates a new background simulator
@@ -92,6 +95,15 @@ func (s *Simulator) simulationLoop() {
 // deterministic pump with no wall-clock waiting anywhere.
 func (s *Simulator) Tick() {
 	s.update()
+}
+
+// Rebase makes the next update count from the clock's current reading, so a
+// clock that was set rather than advanced simulates no delivery over the jump.
+func (s *Simulator) Rebase() {
+	now := s.pumpState.Now()
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	s.lastUpdate = now
 }
 
 // elapsedSincePrevious returns how much pump time has passed since the last
@@ -316,10 +328,15 @@ func (s *Simulator) updateBattery(elapsed time.Duration) {
 	// Simple battery drain simulation
 	// Assume battery lasts ~7 days (168 hours)
 	// Drain 100% over 168 hours = ~0.595% per hour = ~0.0001653% per second
+	// The level is whole percent, so the fraction carries over to the next
+	// tick: truncating it per tick never drained at all at the 1 s ticker, and
+	// scaling it by 100 to compensate emptied a week's battery in 1.7 hours.
 	drainPerSecond := 100.0 / (7.0 * 24.0 * 3600.0)
-	drainAmount := drainPerSecond * elapsed.Seconds()
+	s.batteryDrainCarry += drainPerSecond * elapsed.Seconds()
+	whole := int(s.batteryDrainCarry)
+	s.batteryDrainCarry -= float64(whole)
 
-	s.pumpState.Battery.Percentage -= int(drainAmount * 100) // Scale for percentage
+	s.pumpState.Battery.Percentage -= whole
 	if s.pumpState.Battery.Percentage < 0 {
 		s.pumpState.Battery.Percentage = 0
 	}
