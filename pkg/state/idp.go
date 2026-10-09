@@ -157,6 +157,7 @@ func (ps *PumpState) followActiveProfileUnlocked(minutes int) {
 // sourceID names an existing profile, and returns its id. The first profile a pump holds becomes
 // the active one, since slot 0 is.
 func (ps *PumpState) CreateIDP(name string, first IDPSegment, insulinDuration int, carbEntry bool, sourceID int) (int, bool) {
+	ps.AdvanceBasalCycle(ps.Now())
 	minutes := ps.pumpMinuteOfDay()
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
@@ -195,6 +196,7 @@ func (ps *PumpState) CreateIDP(name string, first IDPSegment, insulinDuration in
 // time is not confirmed. No two segments may share a start time, segment 0 stays at midnight and
 // cannot be deleted, and a profile holds at most MaxIDPSegments.
 func (ps *PumpState) ApplyIDPSegment(idpID int, op IDPSegmentOperation, segmentIndex int, segment IDPSegment) int {
+	ps.AdvanceBasalCycle(ps.Now())
 	minutes := ps.pumpMinuteOfDay()
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()

@@ -236,7 +236,7 @@ func (r *Router) registerHandlers() {
 
 	// Settings write handlers (write value, update readback)
 	r.RegisterHandler(NewSetModesHandler(r.bridge))
-	r.RegisterHandler(NewSettingsWriteHandler(r.bridge, r.settingsManager, "ChangeControlIQSettingsRequest", "ControlIQSettingsRequest"))
+	r.RegisterHandler(NewControlIQSettingsHandler(r.bridge, r.settingsManager))
 	r.RegisterHandler(NewDeliveryLimitWriteHandler(r.bridge, "SetMaxBolusLimitRequest"))
 	r.RegisterHandler(NewDeliveryLimitWriteHandler(r.bridge, "SetMaxBasalLimitRequest"))
 	// NOTE: SetSleepScheduleResponse has both an (int status) and a (byte[]
@@ -882,6 +882,7 @@ func (r *Router) applyBasalChange(change StateChange) {
 		// back out of TempRateActivatedHistoryLog. RecordTempRateActivated is
 		// the single writer the harness path uses too, so the two agree.
 		r.pumpState.RecordTempRateActivated(basalState, r.pumpState.GetProfileBasalRate())
+		r.pumpState.RecordSetTempRateResponse(0, basalState.TempRateID)
 	}
 	if r.qeNotifier != nil {
 		if err := r.qeNotifier.NotifyBasalRateChange(oldRate, newRate, basalState.TempBasalActive); err != nil {

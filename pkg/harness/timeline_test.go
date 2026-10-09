@@ -248,8 +248,8 @@ func assertTempRateFields(t *testing.T, entries []map[string]interface{}) {
 		}
 	}
 	// Stopped straight away, so nearly the whole 30 minutes was left.
-	if left := fieldsOf(tempOff, "data")["timeLeft"].(float64); left < 1700 || left > 1800 {
-		t.Errorf("timeLeft = %v s, want close to the unrun 1800 s", left)
+	if left := fieldsOf(tempOff, "data")["timeLeft"].(float64); left < 1_740_000 || left > 1_800_000 {
+		t.Errorf("timeLeft = %v ms, want 29 or 30 whole minutes of the unrun 30", left)
 	}
 }
 

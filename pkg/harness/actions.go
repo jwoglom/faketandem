@@ -388,6 +388,9 @@ type suspendBody struct {
 	Reason string `json:"reason,omitempty"`
 	// Message overrides the alarm text recorded for an alarm-driven stop.
 	Message string `json:"message,omitempty"`
+	// KeepTemp leaves a running temp rate in force across an alarm suspend: no
+	// TempRateCompleted, and the temp rate runs again after the resume.
+	KeepTemp bool `json:"keep_temp,omitempty"`
 }
 
 // actionSuspend stops delivery on the pump itself, the way a real pump does
@@ -414,6 +417,10 @@ func (h *Harness) actionSuspend(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "unknown suspend reason %q (expected user, occlusion or alarm)", reason)
 		return
 	}
+	if body.KeepTemp && reason != SuspendReasonAlarm {
+		writeError(w, http.StatusBadRequest, "keep_temp is for an alarm suspend, not %q", reason)
+		return
+	}
 
 	if h.pumpState.IsPumpingSuspended() {
 		writeError(w, http.StatusConflict, "delivery is already suspended")
@@ -425,7 +432,11 @@ func (h *Harness) actionSuspend(w http.ResponseWriter, r *http.Request) {
 	// PumpingSuspended record that caused them -- and is the same call the
 	// protocol path makes, so a pump-initiated stop and a driver-commanded one
 	// leave identical logs.
-	outcome := h.pumpState.SuspendDelivery(reason)
+	suspend := h.pumpState.SuspendDelivery
+	if body.KeepTemp {
+		suspend = h.pumpState.SuspendDeliveryKeepingTemp
+	}
+	outcome := suspend(reason)
 	if !outcome.Changed {
 		writeError(w, http.StatusConflict, "delivery is already suspended")
 		return

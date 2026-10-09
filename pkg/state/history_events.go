@@ -129,16 +129,17 @@ func (ps *PumpState) RecordTempRateActivated(basal *BasalState, profileRate floa
 // uint32 at cargo 14, so the rate, the profile rate, the start and the
 // delivered volume have nowhere on the wire to go and are reported as context.
 // timeLeft is how much of the programmed duration was still to run, in
-// seconds: zero for a temp rate that expired on its own, positive for one cut
-// short by a stop or a suspend.
+// milliseconds counted in whole minutes, as Mobi exports carry it: zero for a
+// temp rate that expired on its own, positive for one cut short by a stop or a
+// suspend.
 func (ps *PumpState) RecordTempRateCompleted(temp TempRateSnapshot, profileRate float64, when time.Time) uint32 {
 	if when.IsZero() {
 		when = ps.Now()
 	}
 
-	timeLeft := 0.0
+	timeLeft := time.Duration(0)
 	if !temp.EndTime.IsZero() && temp.EndTime.After(when) {
-		timeLeft = temp.EndTime.Sub(when).Seconds()
+		timeLeft = temp.EndTime.Sub(when).Truncate(time.Minute)
 	}
 
 	delivered := 0.0
@@ -164,7 +165,7 @@ func (ps *PumpState) RecordTempRateCompleted(temp TempRateSnapshot, profileRate 
 	return ps.AddHistoryLogEntryAtWithExtra(HistoryTempRateCompleted, "TempRateCompleted", when,
 		map[string]interface{}{
 			"tempRateId": temp.TempRateID,
-			"timeLeft":   int(timeLeft),
+			"timeLeft":   int(timeLeft.Milliseconds()),
 		},
 		extra)
 }

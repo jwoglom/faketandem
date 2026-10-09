@@ -32,6 +32,8 @@ type SettingsWriteHandler struct {
 	readbackKey     string // which GenericSettings key to update on write
 	// readbackValues maps the request onto readbackKey's fields; nil copies the parsed cargo as-is.
 	readbackValues func(msg *pumpx2.ParsedMessage) (map[string]interface{}, error)
+	// apply moves pump state the write controls, beyond what reads report.
+	apply func(msg *pumpx2.ParsedMessage, pumpState *state.PumpState)
 }
 
 // NewSettingsWriteHandler creates a settings write handler
@@ -87,6 +89,30 @@ func quickBolusReadback(msg *pumpx2.ParsedMessage) (map[string]interface{}, erro
 		values["quickBolusIncrementCarbs"] = int(binary.LittleEndian.Uint16(b[4:6]))
 	}
 	return values, nil
+}
+
+// NewControlIQSettingsHandler handles ChangeControlIQSettingsRequest, which
+// switches Control-IQ on or off as well as storing its settings: a driver that
+// turns Control-IQ on reads it back as on.
+func NewControlIQSettingsHandler(bridge *pumpx2.Bridge, sm *settings.Manager) *SettingsWriteHandler {
+	h := NewSettingsWriteHandler(bridge, sm, "ChangeControlIQSettingsRequest", "ControlIQSettingsRequest")
+	h.apply = applyControlIQSwitch
+	return h
+}
+
+// ChangeControlIQSettingsRequest cargo: enabled, weight (lbs, LE), then three
+// bytes ending with the total daily insulin's.
+func applyControlIQSwitch(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) {
+	enabled, ok := cargoBool(msg, "enabled")
+	if !ok {
+		raw, err := rawCargo(msg, 6)
+		if err != nil {
+			log.Warnf("ChangeControlIQSettingsRequest without an enabled field: %v", err)
+			return
+		}
+		enabled = raw[0] == 1
+	}
+	pumpState.SetClosedLoopEnabled(enabled)
 }
 
 // NewPumpSoundsHandler handles SetPumpSoundsRequest, reflecting the sounds it
@@ -158,6 +184,9 @@ func (h *SettingsWriteHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpStat
 	log.Infof("Handling %s: txID=%d cargo=%v", h.msgType, msg.TxID, msg.Cargo)
 
 	h.updateReadback(msg)
+	if h.apply != nil {
+		h.apply(msg, pumpState)
+	}
 
 	params, ok := settingsWriteResponseParamsOverrides[h.responseType]
 	if !ok {

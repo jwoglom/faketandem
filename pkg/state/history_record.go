@@ -174,7 +174,7 @@ func (e HistoryLogEntry) EncodeRecord() []byte {
 // where buildCargo writes tempRateId two bytes early). Captured records from
 // real pumps agree with the parse offsets, so those are what we emit.
 func encodeHistoryPayload(payload []byte, typeID int, fields map[string]interface{}) {
-	if encodeClockChangePayload(payload, typeID, fields) {
+	if encodeClockChangePayload(payload, typeID, fields) || encodeBasalStatePayload(payload, typeID, fields) {
 		return
 	}
 	switch typeID {
@@ -255,26 +255,6 @@ func encodeHistoryPayload(payload []byte, typeID int, fields map[string]interfac
 		binary.LittleEndian.PutUint32(payload[0:4], uint32(fieldIntDefault(fields, 100, "preResumeState")))
 		binary.LittleEndian.PutUint16(payload[4:6], uint16(fieldInt(fields, "insulinAmount")))
 
-	case HistoryBasalRateChange:
-		// commandBasalRate f32 @0, baseBasalRate f32 @4, maxBasalRate f32 @8,
-		// insulinDeliveryProfile u16 @12, changeTypeId u8 @14
-		putFloat32(payload[0:4], fieldFloat(fields, "commandBasalRate", "commandedRate"))
-		putFloat32(payload[4:8], fieldFloat(fields, "baseBasalRate", "profileRate"))
-		putFloat32(payload[8:12], fieldFloat(fields, "maxBasalRate"))
-		binary.LittleEndian.PutUint16(payload[12:14], uint16(fieldInt(fields, "insulinDeliveryProfile")))
-		payload[14] = uint8(fieldInt(fields, "changeTypeId"))
-
-	case HistoryBasalDelivery:
-		// commandedRateSource u16 @0, basalDeliveryFlags u16 @2,
-		// commandedRate u16 @4, profileBasalRate u16 @6, algorithmRate u16 @8,
-		// tempRate u16 @10 -- all in milli-units/hour.
-		binary.LittleEndian.PutUint16(payload[0:2], uint16(fieldInt(fields, "commandedRateSource")))
-		binary.LittleEndian.PutUint16(payload[2:4], uint16(fieldInt(fields, "basalDeliveryFlags")))
-		binary.LittleEndian.PutUint16(payload[4:6], uint16(fieldInt(fields, "commandedRate")))
-		binary.LittleEndian.PutUint16(payload[6:8], uint16(fieldInt(fields, "profileBasalRate")))
-		binary.LittleEndian.PutUint16(payload[8:10], uint16(fieldInt(fields, "algorithmRate")))
-		binary.LittleEndian.PutUint16(payload[10:12], uint16(fieldInt(fields, "tempRate")))
-
 	case HistoryBolusDelivery:
 		// bolusID u16 @0, bolusDeliveryStatus u8 @2, bolusTypeBitmask u8 @3,
 		// bolusSource u8 @4, remoteId u8 @5, requestedNow u16 @6,
@@ -323,6 +303,63 @@ func encodeClockChangePayload(payload []byte, typeID int, fields map[string]inte
 
 // writeRawPayload lets a scenario supply payload bytes directly for an event
 // type with no dedicated encoder, via a "raw" field holding a []byte.
+// encodeBasalStatePayload writes the records that report basal delivery and
+// Control-IQ state: BasalRateChange, BasalDelivery, DailyBasal,
+// ControlIQPcmChange and SetTempRateResponse. It reports whether typeID was one
+// of them.
+func encodeBasalStatePayload(payload []byte, typeID int, fields map[string]interface{}) bool {
+	switch typeID {
+	case HistoryBasalRateChange:
+		// commandBasalRate f32 @0, baseBasalRate f32 @4, maxBasalRate f32 @8,
+		// insulinDeliveryProfile u16 @12, changeTypeId u8 @14
+		putFloat32(payload[0:4], fieldFloat(fields, "commandBasalRate", "commandedRate"))
+		putFloat32(payload[4:8], fieldFloat(fields, "baseBasalRate", "profileRate"))
+		putFloat32(payload[8:12], fieldFloat(fields, "maxBasalRate"))
+		binary.LittleEndian.PutUint16(payload[12:14], uint16(fieldInt(fields, "insulinDeliveryProfile")))
+		payload[14] = uint8(fieldInt(fields, "changeTypeId"))
+
+	case HistoryBasalDelivery:
+		// commandedRateSource u16 @0, basalDeliveryFlags u16 @2,
+		// commandedRate u16 @4, profileBasalRate u16 @6, algorithmRate u16 @8,
+		// tempRate u16 @10 -- all in milli-units/hour.
+		binary.LittleEndian.PutUint16(payload[0:2], uint16(fieldInt(fields, "commandedRateSource")))
+		binary.LittleEndian.PutUint16(payload[2:4], uint16(fieldInt(fields, "basalDeliveryFlags")))
+		binary.LittleEndian.PutUint16(payload[4:6], uint16(fieldInt(fields, "commandedRate")))
+		binary.LittleEndian.PutUint16(payload[6:8], uint16(fieldInt(fields, "profileBasalRate")))
+		binary.LittleEndian.PutUint16(payload[8:10], uint16(fieldInt(fields, "algorithmRate")))
+		binary.LittleEndian.PutUint16(payload[10:12], uint16(fieldInt(fields, "tempRate")))
+
+	case HistoryDailyBasal:
+		// dailyTotalBasal f32 @0, lastBasalRate f32 @4, iob f32 @8,
+		// finalEventForDay u8 @12, batteryChargeRaw u8 @13, lipoMv u16 @14
+		putFloat32(payload[0:4], fieldFloat(fields, "dailyTotalBasal"))
+		putFloat32(payload[4:8], fieldFloat(fields, "lastBasalRate"))
+		putFloat32(payload[8:12], fieldFloat(fields, "iob"))
+		payload[12] = uint8(fieldFlag(fields, "finalEventForDay"))
+		payload[13] = uint8(fieldInt(fields, "batteryChargeRaw"))
+		binary.LittleEndian.PutUint16(payload[14:16], uint16(fieldInt(fields, "lipoMv")))
+
+	case HistoryControlIQPcmChange:
+		// currentPcm, previousPcm, pumpSuspended, calculationAvailable,
+		// cgmAvailable, closedLoopPreferred, sufficientClosedLoopParams: u8 @0..6
+		for i, key := range []string{
+			"currentPcm", "previousPcm", "pumpSuspended", "calculationAvailable",
+			"cgmAvailable", "closedLoopPreferred", "sufficientClosedLoopParams",
+		} {
+			payload[i] = uint8(fieldFlag(fields, key))
+		}
+
+	case HistorySetTempRateResponse:
+		// status u8 @0, unknown11 u8 @1, tempRateId u16 @2
+		payload[0] = uint8(fieldInt(fields, "status"))
+		payload[1] = uint8(fieldInt(fields, "unknown11"))
+		binary.LittleEndian.PutUint16(payload[2:4], uint16(fieldInt(fields, "tempRateId")))
+	default:
+		return false
+	}
+	return true
+}
+
 func writeRawPayload(payload []byte, fields map[string]interface{}) {
 	raw, ok := fields["raw"].([]byte)
 	if !ok {
@@ -372,6 +409,18 @@ func fieldIntDefault(fields map[string]interface{}, fallback int, keys ...string
 }
 
 // fieldFloat reads the first present key as a float.
+// fieldFlag reads a field that may be given as a bool or as a number, as the
+// one-byte flags and small enums of a record are.
+func fieldFlag(fields map[string]interface{}, key string) int {
+	if b, ok := fields[key].(bool); ok {
+		if b {
+			return 1
+		}
+		return 0
+	}
+	return fieldInt(fields, key)
+}
+
 func fieldFloat(fields map[string]interface{}, keys ...string) float64 {
 	for _, key := range keys {
 		value, ok := fields[key]

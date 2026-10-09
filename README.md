@@ -191,7 +191,9 @@ Settable fields: `reservoir_units`, `battery_percent`, `battery_charging`,
 `control_iq_mode`, `weight`, `total_daily_insulin`,
 `bolus_rate_units_per_second`, `cgm_egv`, `cgm_session_active`, `pairing_code`,
 `time_since_reset`, `api_version_major`, `api_version_minor`, `clear_alerts`,
-`workflow_mode`, `idp_profiles`, `max_bolus_milliunits`, `max_basal_milliunits`.
+`workflow_mode`, `idp_profiles`, `max_bolus_milliunits`, `max_basal_milliunits`,
+`basal_cycle_enabled`, `controliq_algorithm_rate`, `cgm_available` (see
+[Basal cycle](#basal-cycle)).
 
 `SetPumpSoundsRequest` sets the sounds it flags in its change bitmask, and the
 next `PumpGlobalsResponse` reports them (`bolusAnnun` is pumpX2's name for the
@@ -221,7 +223,76 @@ nonzero status for anything refused. `basal_rate` is the rate in force. A reques
 that writes the active profile sets it to that profile's segment at the pump's
 time of day, rescaling a running temp rate by its percent, as a pump does; it
 does not follow later segment boundaries, and staging `idp_profiles` leaves it
-alone.
+alone. With the basal cycle on, it does.
+
+`ChangeControlIQSettingsRequest` switches Control-IQ on or off
+(`closed_loop_enabled`) as well as storing its settings, so a driver that turns
+Control-IQ on reads it back as on.
+
+### Basal cycle
+
+A Tandem pump delivers basal in 5-minute cycles: at each it writes a
+`BasalDelivery` (279) record and delivers the next 300 seconds at that record's
+`commandedRate`. A change of rate takes effect at the next 279, so a temp rate
+set and replaced between two 279s is never delivered. `CurrentBasalStatus`
+shows a command at once; only delivery waits.
+
+The emulator models this when `basal_cycle_enabled` is set, and is off by
+default: basal is then delivered continuously and no 279, `DailyBasal`,
+`ControlIQPcmChange` or `SetTempRateResponse` record is written, so scenarios
+that stage their own 279s are unaffected.
+
+```bash
+curl -X PUT http://127.0.0.1:8080/api/state \
+  -d '{"basal_rate":1.0,"basal_cycle_enabled":true}'
+
+# Control-IQ, delivering a scripted 2.2 U/hr each cycle
+curl -X PUT http://127.0.0.1:8080/api/state \
+  -d '{"closed_loop_enabled":true,"controliq_algorithm_rate":2.2}'
+
+# Lose the CGM: Control-IQ runs the profile from the next cycle
+curl -X PUT http://127.0.0.1:8080/api/state -d '{"cgm_available":false}'
+```
+
+`basal_cycle_enabled` is applied after every other key in the same `PUT`, so
+the first 279, written the moment the cycle goes on, sees the rest of the
+update, and the cadence runs from that instant. While the cycle is on,
+`closed_loop_enabled` is the pump's switch rather than a flag: it writes the
+`ControlIQPcmChange` below, and turning Control-IQ on ends a running temp rate
+with its `TempRateCompleted`.
+
+
+- Every 279 carries `commandedRateSource` (0 suspended, 1 profile, 2 temp,
+  3 Control-IQ), `commandedRate`, `profileBasalRate`, `tempRate` and
+  `algorithmRate`, all in milliunits/hour. A temp rate's is exactly its percent
+  of the profile rate, rounded to the milliunit, not to 0.01 U/hr.
+- Reservoir, `iob` and `tdd` move by the cycle's insulin at its 279.
+- Each cycle's insulin is in the daily total 10 seconds after its 279, and a
+  `DailyBasal` record carrying the total is written 90 seconds after it. The
+  total starts again at the pump's midnight.
+- A suspend does not take back the cycle under way; later 279s say suspended.
+  A resume after a suspend that spanned a 279 writes a 279 at the resume and
+  restarts the cadence from it. A resume within the suspend's own cycle writes
+  none, and delivery restarts at the next 279.
+- The active profile's segment boundaries are followed at each 279, rescaling a
+  running temp rate as a pump does. A rate staged with `basal_rate` holds until
+  the next boundary.
+- With Control-IQ on, each 279 is source 3 at `controliq_algorithm_rate` (U/hr;
+  negative, the default, runs the profile rate), or source 1 without a CGM.
+  Every change of mode is written as a `ControlIQPcmChange` (230) record
+  (`currentPcm` 0 no control, 1 open loop, 2 no CGM, 3 closed loop): a suspend,
+  a resume or a switch at once, a CGM lost or found at the next 279.
+- Every temp rate set over Bluetooth writes a `SetTempRateResponse` (309) record
+  with its `tempRateId`; one started with `/api/state/tempbasal/start` (the
+  pump's own screen) has none.
+- Advancing the clock writes every 279 and record due over the step, in order
+  and at its own instant, however coarse the simulator's ticks. Setting the
+  clock writes none and keeps the cycle's phase.
+
+`GET /api/state` reports the cycle as `basal_cycle`: `enabled`, `next_cycle`
+(and `next_cycle_pump_seconds`), `latest_cycle`, the latest 279's `rate` (U/hr)
+and `source`, `daily_total_basal`, `pcm`, `cgm_available` and
+`controliq_algorithm_rate`.
 
 ### Pump-initiated actions
 
@@ -257,6 +328,9 @@ curl -X POST http://127.0.0.1:8080/api/state/tempbasal/stop
 
 # Stop and restart delivery. reason: user | occlusion | alarm
 curl -X POST http://127.0.0.1:8080/api/state/suspend -d '{"reason":"occlusion"}'
+# An alarm that stops delivery but leaves the temp rate in force: no
+# TempRateCompleted, and the temp rate runs again after the resume
+curl -X POST http://127.0.0.1:8080/api/state/suspend -d '{"reason":"alarm","keep_temp":true}'
 curl -X POST http://127.0.0.1:8080/api/state/resume
 curl -X POST http://127.0.0.1:8080/api/state/resume -d '{"clear_alarms":false}'
 
@@ -316,6 +390,9 @@ consumer never has to know whether a record came from the protocol handler, a
 harness action or a simulator tick. Old field names (`units`, `minutes`,
 `unitsDelivered`, `endReasonId`, …) are still accepted as **input** aliases when
 staging history, so existing scenario files keep working.
+
+`TempRateCompleted.timeLeft` is in milliseconds, whole minutes, as a pump writes
+it.
 
 ### Request log
 

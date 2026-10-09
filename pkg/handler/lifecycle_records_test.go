@@ -66,8 +66,9 @@ func stopTempRate(t *testing.T, router *Router) {
 
 // assertTempRateCompleted checks the one thing a driver's timeline needs from a
 // TempRateCompleted: which temp rate it closes, when it closed, and how much of
-// the programmed duration was still to run.
-func assertTempRateCompleted(t *testing.T, entry state.HistoryLogEntry, tempRateID int, when time.Time, timeLeft int) {
+// the programmed duration was still to run (timeLeftSeconds, which the record
+// carries in milliseconds).
+func assertTempRateCompleted(t *testing.T, entry state.HistoryLogEntry, tempRateID int, when time.Time, timeLeftSeconds int) {
 	t.Helper()
 
 	if got, want := len(entry.Data), 2; got != want {
@@ -77,8 +78,8 @@ func assertTempRateCompleted(t *testing.T, entry state.HistoryLogEntry, tempRate
 	if got := entry.Data["tempRateId"]; got != tempRateID {
 		t.Errorf("TempRateCompleted tempRateId = %v, want the %d it closed", got, tempRateID)
 	}
-	if got := entry.Data["timeLeft"]; got != timeLeft {
-		t.Errorf("TempRateCompleted timeLeft = %v, want %d seconds", got, timeLeft)
+	if got := entry.Data["timeLeft"]; got != timeLeftSeconds*1000 {
+		t.Errorf("TempRateCompleted timeLeft = %v ms, want %d s", got, timeLeftSeconds)
 	}
 	if !entry.Timestamp.Equal(when) {
 		t.Errorf("TempRateCompleted stamped at %v, want the true end instant %v", entry.Timestamp, when)
@@ -264,5 +265,28 @@ func TestDriverBolusCancelReportsTheRightEndReason(t *testing.T) {
 	router.applyStateChange(StateChange{Type: StateChangeBolus, Data: &state.BolusState{Active: false}})
 	if got := recordCount(t, ps, "BolusCompleted"); got != 1 {
 		t.Errorf("a repeated cancel wrote %d BolusCompleted records in total, want 1", got)
+	}
+}
+
+// TestABluetoothTempRateWritesItsSetTempRateResponseWithTheBasalCycle: a pump
+// keeps a SetTempRateResponse record for every temp rate set over Bluetooth,
+// with its id, after the activation. Only the basal cycle writes it.
+func TestABluetoothTempRateWritesItsSetTempRateResponseWithTheBasalCycle(t *testing.T) {
+	router, ps, _ := newLifecycleRouter(t)
+	startTempRate(t, router, ps, 1, 150, 1.5, 30*time.Minute)
+	if got := recordCount(t, ps, "SetTempRateResponse"); got != 0 {
+		t.Fatalf("%d SetTempRateResponse records with the cycle off, want none", got)
+	}
+
+	ps.SetBasalCycleEnabled(true)
+	startTempRate(t, router, ps, 2, 50, 0.5, 30*time.Minute)
+
+	responses := recordsOfType(t, ps, "SetTempRateResponse")
+	if len(responses) != 1 || responses[0].Data["tempRateId"] != 2 || responses[0].Data["status"] != 0 {
+		t.Fatalf("SetTempRateResponse records = %+v, want one for temp rate 2", responses)
+	}
+	activated := recordsOfType(t, ps, "TempRateActivated")
+	if responses[0].Sequence <= activated[len(activated)-1].Sequence {
+		t.Error("the SetTempRateResponse record is not after the activation it answers")
 	}
 }

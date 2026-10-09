@@ -23,6 +23,7 @@ type Snapshot struct {
 	Auth       authSnapshot       `json:"auth"`
 	Connection connectionSnapshot `json:"connection"`
 	Basal      basalSnapshot      `json:"basal"`
+	BasalCycle basalCycleSnapshot `json:"basal_cycle"`
 	Bolus      bolusSnapshot      `json:"bolus"`
 	LastBolus  *lastBolusSnapshot `json:"last_bolus"`
 	ControlIQ  controlIQSnapshot  `json:"control_iq"`
@@ -79,6 +80,22 @@ type basalSnapshot struct {
 	TempEnd          string  `json:"temp_end,omitempty"`
 	TempRateID       int     `json:"temp_rate_id"`
 	TempPumpTimeSecs uint32  `json:"temp_start_pump_seconds,omitempty"`
+}
+
+// basalCycleSnapshot is the 5-minute basal cycle (basal_cycle_enabled): when
+// the next BasalDelivery record is due, and what the latest one said.
+type basalCycleSnapshot struct {
+	Enabled              bool    `json:"enabled"`
+	NextCycle            string  `json:"next_cycle,omitempty"`
+	NextCyclePumpSeconds uint32  `json:"next_cycle_pump_seconds,omitempty"`
+	LatestCycle          string  `json:"latest_cycle,omitempty"`
+	Rate                 float64 `json:"rate"`
+	Source               int     `json:"source"`
+	DailyTotalBasal      float64 `json:"daily_total_basal"`
+	PCM                  int     `json:"pcm"`
+	CGMAvailable         bool    `json:"cgm_available"`
+	// ControlIQAlgorithmRate is negative while Control-IQ runs the profile rate.
+	ControlIQAlgorithmRate float64 `json:"controliq_algorithm_rate"`
 }
 
 type bolusSnapshot struct {
@@ -280,6 +297,11 @@ func (h *Harness) Snapshot() Snapshot {
 
 	controlIQ := ps.GetControlIQInfo()
 	lastBolus := h.lastBolusSnapshot()
+	cycle := ps.GetBasalCycle()
+	nextCycle := time.Time{}
+	if cycle.Enabled {
+		nextCycle = cycle.Next
+	}
 
 	return Snapshot{
 		Identity: identity,
@@ -315,6 +337,18 @@ func (h *Harness) Snapshot() Snapshot {
 			StartTime:          formatTime(bolus.StartTime),
 			StartPumpSeconds:   pumpTimeOrZero(ps, bolus.StartTime),
 			RateUnitsPerSecond: bolusRate,
+		},
+		BasalCycle: basalCycleSnapshot{
+			Enabled:                cycle.Enabled,
+			NextCycle:              formatTime(nextCycle),
+			NextCyclePumpSeconds:   pumpTimeOrZero(ps, nextCycle),
+			LatestCycle:            formatTime(cycle.Latest),
+			Rate:                   cycle.Rate,
+			Source:                 cycle.Source,
+			DailyTotalBasal:        cycle.DailyTotalBasal,
+			PCM:                    cycle.PCM,
+			CGMAvailable:           cycle.CGMAvailable,
+			ControlIQAlgorithmRate: cycle.AlgorithmRate,
 		},
 		LastBolus: lastBolus,
 		ControlIQ: controlIQSnapshot{
@@ -445,6 +479,33 @@ type stateUpdate struct {
 	// (milliunits; per hour for basal), as SetMax*LimitRequest would set them.
 	MaxBolusMilliunits *int `json:"max_bolus_milliunits,omitempty"`
 	MaxBasalMilliunits *int `json:"max_basal_milliunits,omitempty"`
+	// BasalCycleEnabled delivers basal in 5-minute cycles, each with its
+	// BasalDelivery record (see state/basal_cycle.go). Turning it on writes the
+	// first record at once.
+	BasalCycleEnabled *bool `json:"basal_cycle_enabled,omitempty"`
+	// ControlIQAlgorithmRate is the rate, in U/hr, Control-IQ runs at each
+	// cycle while closed loop is on; negative runs the profile rate.
+	ControlIQAlgorithmRate *float64 `json:"controliq_algorithm_rate,omitempty"`
+	// CGMAvailable is whether Control-IQ has a CGM. Without one it runs the
+	// profile from the next cycle.
+	CGMAvailable *bool `json:"cgm_available,omitempty"`
+}
+
+func applyBasalCycle(ps *state.PumpState, u stateUpdate) []string {
+	var applied []string
+	if u.ControlIQAlgorithmRate != nil {
+		ps.SetControlIQAlgorithmRate(*u.ControlIQAlgorithmRate)
+		applied = append(applied, "controliq_algorithm_rate")
+	}
+	if u.CGMAvailable != nil {
+		ps.SetCGMAvailable(*u.CGMAvailable)
+		applied = append(applied, "cgm_available")
+	}
+	if u.BasalCycleEnabled != nil {
+		ps.SetBasalCycleEnabled(*u.BasalCycleEnabled)
+		applied = append(applied, "basal_cycle_enabled")
+	}
+	return applied
 }
 
 func applyDeliveryLimits(ps *state.PumpState, u stateUpdate) []string {
@@ -538,6 +599,8 @@ func (h *Harness) applyStateUpdate(u stateUpdate) []string {
 	applied = append(applied, h.applyWorkflowMode(u)...)
 	applied = append(applied, h.applyIDPProfiles(u)...)
 	applied = append(applied, h.applyDirectFields(u)...)
+	// Last, so the first 279 sees everything else this update staged.
+	applied = append(applied, applyBasalCycle(ps, u)...)
 	return applied
 }
 

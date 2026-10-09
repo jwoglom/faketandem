@@ -44,7 +44,13 @@ func (ps *PumpState) EndTempRate(when time.Time) (temp TempRateSnapshot, profile
 	if when.IsZero() {
 		when = ps.Now()
 	}
+	ps.advanceBasalCycleTo(when)
+	return ps.endTempRate(when)
+}
 
+// endTempRate is EndTempRate without bringing the basal cycle up to when, for
+// the cycle itself.
+func (ps *PumpState) endTempRate(when time.Time) (temp TempRateSnapshot, profileRate float64, ok bool) {
 	temp, profileRate, ok = ps.takeActiveTempRate()
 	if !ok {
 		return temp, profileRate, false
@@ -172,6 +178,20 @@ type SuspendOutcome struct {
 // order it happened. The protocol path used to set only the flag, which left a
 // temp rate running forever in the log and a bolus with a start and no end.
 func (ps *PumpState) SuspendDelivery(reason string) SuspendOutcome {
+	return ps.suspendDelivery(reason, false)
+}
+
+// SuspendDeliveryKeepingTemp is SuspendDelivery for an alarm that leaves the
+// running temp rate in force: no TempRateCompleted, and the temp rate runs
+// again after the resume, to its programmed end. A Mobi does this on some
+// alarm suspends.
+func (ps *PumpState) SuspendDeliveryKeepingTemp(reason string) SuspendOutcome {
+	return ps.suspendDelivery(reason, true)
+}
+
+func (ps *PumpState) suspendDelivery(reason string, keepTemp bool) SuspendOutcome {
+	now := ps.Now()
+	ps.AdvanceBasalCycle(now)
 	outcome := SuspendOutcome{
 		PreviousRate: ps.GetBasalRate(),
 		ProfileRate:  ps.GetProfileBasalRate(),
@@ -185,12 +205,15 @@ func (ps *PumpState) SuspendDelivery(reason string) SuspendOutcome {
 	if record, ok := ps.EndBolus(BolusEndReasonStopped, nil); ok {
 		outcome.Bolus = &record
 	}
-	if temp, profileRate, ok := ps.EndTempRate(time.Time{}); ok {
-		outcome.TempRate = &temp
-		outcome.ProfileRate = profileRate
+	if !keepTemp {
+		if temp, profileRate, ok := ps.EndTempRate(now); ok {
+			outcome.TempRate = &temp
+			outcome.ProfileRate = profileRate
+		}
 	}
 
 	ps.RecordPumpingSuspended(reason)
+	ps.basalCycleSuspended(now)
 	log.Infof("Delivery suspended (%s)", reason)
 	return outcome
 }
@@ -199,11 +222,14 @@ func (ps *PumpState) SuspendDelivery(reason string) SuspendOutcome {
 // reports false when delivery was not suspended, in which case nothing was
 // recorded -- a resume that resumes nothing is not a transition.
 func (ps *PumpState) ResumeDelivery() bool {
+	now := ps.Now()
+	ps.AdvanceBasalCycle(now)
 	if !ps.compareAndSetSuspended(false, "") {
 		return false
 	}
 
 	ps.RecordPumpingResumed()
+	ps.basalCycleResumed(now)
 	log.Info("Delivery resumed")
 	return true
 }
