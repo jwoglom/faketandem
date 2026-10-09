@@ -101,6 +101,7 @@ func (s *Simulator) Tick() {
 // clock that was set rather than advanced simulates no delivery over the jump.
 func (s *Simulator) Rebase() {
 	now := s.pumpState.Now()
+	s.pumpState.RebaseBasalCycle()
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 	s.lastUpdate = now
@@ -149,8 +150,14 @@ func (s *Simulator) update() {
 	// insulin for this interval goes in at the rate that was actually running.
 	s.expireTempRate()
 
-	// Update basal delivery
-	s.updateBasalDelivery(elapsed)
+	if s.pumpState.BasalCycleEnabled() {
+		// The cycle delivers each 279's insulin itself.
+		for _, ended := range s.pumpState.AdvanceBasalCycle(s.pumpState.Now()) {
+			s.notifyTempRateExpired(ended, s.pumpState.GetProfileBasalRate())
+		}
+	} else {
+		s.updateBasalDelivery(elapsed)
+	}
 
 	// Update battery
 	s.updateBattery(elapsed)
@@ -268,7 +275,10 @@ func (s *Simulator) expireTempRate() {
 		return
 	}
 	log.Info("Temp basal expired, returning to normal basal rate")
+	s.notifyTempRateExpired(ended, profileRate)
+}
 
+func (s *Simulator) notifyTempRateExpired(ended TempRateSnapshot, profileRate float64) {
 	s.mutex.Lock()
 	notifier := s.eventNotifier
 	s.mutex.Unlock()

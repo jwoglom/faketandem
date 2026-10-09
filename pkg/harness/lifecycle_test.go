@@ -20,10 +20,11 @@ func recordTime(t *testing.T, entry map[string]interface{}) time.Time {
 
 // assertTempRateCompleted checks what a timeline needs from a
 // TempRateCompleted: the temp rate it closes, the instant it closed, and how
-// much of the programmed duration was still to run. tempRateId and timeLeft are
+// much of the programmed duration was still to run (timeLeftSeconds, which the
+// record carries in milliseconds). tempRateId and timeLeft are
 // the only fields the record format carries; everything descriptive is in the
 // JSON-only extra.
-func assertTempRateCompleted(t *testing.T, entry map[string]interface{}, tempRateID int, when time.Time, timeLeft int) {
+func assertTempRateCompleted(t *testing.T, entry map[string]interface{}, tempRateID int, when time.Time, timeLeftSeconds int) {
 	t.Helper()
 
 	data := fieldsOf(entry, "data")
@@ -33,8 +34,8 @@ func assertTempRateCompleted(t *testing.T, entry map[string]interface{}, tempRat
 	if got := data["tempRateId"]; got != float64(tempRateID) {
 		t.Errorf("TempRateCompleted tempRateId = %v, want the %d it closed", got, tempRateID)
 	}
-	if got := data["timeLeft"]; got != float64(timeLeft) {
-		t.Errorf("TempRateCompleted timeLeft = %v, want %d seconds", got, timeLeft)
+	if got := data["timeLeft"]; got != float64(timeLeftSeconds*1000) {
+		t.Errorf("TempRateCompleted timeLeft = %v ms, want %d s", got, timeLeftSeconds)
 	}
 	if got := recordTime(t, entry); !got.Equal(when) {
 		t.Errorf("TempRateCompleted stamped at %v, want the true end instant %v", got, when)

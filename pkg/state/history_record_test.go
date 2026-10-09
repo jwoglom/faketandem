@@ -144,6 +144,55 @@ func TestEncodeRecord_AgainstCapturedRecords(t *testing.T) {
 			},
 			want: "03002fe5951a6bc90200000000000000a03f0000a04000001000",
 		},
+		{
+			name: "DailyBasal",
+			entry: HistoryLogEntry{
+				TypeID: HistoryDailyBasal, PumpTime: 445935621, Sequence: 180238,
+				Data: map[string]interface{}{
+					"dailyTotalBasal": float32Bits(0x40b528fa), "lastBasalRate": float32Bits(0x3f651eb8),
+					"iob": 0.0, "finalEventForDay": false, "batteryChargeRaw": 65, "lipoMv": 3904,
+				},
+			},
+			want: "51000570941a0ec00200fa28b540b81e653f000000000041400f",
+		},
+		{
+			name: "ControlIQPcmChangeSuspend",
+			entry: HistoryLogEntry{
+				TypeID: HistoryControlIQPcmChange, PumpTime: 580773244, Sequence: 490889, SourceNibble: 1,
+				Data: map[string]interface{}{
+					"currentPcm": 0, "previousPcm": 3, "pumpSuspended": true, "calculationAvailable": true,
+					"cgmAvailable": true, "closedLoopPreferred": true, "sufficientClosedLoopParams": true,
+				},
+			},
+			want: "e6107ce59d22897d070000030101010101000000000000000000",
+		},
+		{
+			name: "ControlIQPcmChangeClosedLoop",
+			entry: HistoryLogEntry{
+				TypeID: HistoryControlIQPcmChange, PumpTime: 580720759, Sequence: 488634, SourceNibble: 1,
+				Data: map[string]interface{}{
+					"currentPcm": 3, "previousPcm": 2, "pumpSuspended": 0, "calculationAvailable": 1,
+					"cgmAvailable": 1, "closedLoopPreferred": 1, "sufficientClosedLoopParams": 1,
+				},
+			},
+			want: "e61077189d22ba74070003020001010101000000000000000000",
+		},
+		{
+			name: "SetTempRateResponse",
+			entry: HistoryLogEntry{
+				TypeID: HistorySetTempRateResponse, PumpTime: 591098918, Sequence: 723593, SourceNibble: 1,
+				Data:   map[string]interface{}{"status": 0, "unknown11": 0, "tempRateId": 5014},
+			},
+			want: "351126743b23890a0b0000009613000000000000000000000000",
+		},
+		{
+			name: "SetTempRateResponseRefused",
+			entry: HistoryLogEntry{
+				TypeID: HistorySetTempRateResponse, PumpTime: 591099216, Sequence: 723628, SourceNibble: 1,
+				Data:   map[string]interface{}{"status": 1, "unknown11": 1, "tempRateId": 0},
+			},
+			want: "351150753b23ac0a0b0001010000000000000000000000000000",
+		},
 	}
 
 	for _, c := range cases {

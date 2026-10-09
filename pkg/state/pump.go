@@ -61,6 +61,9 @@ type PumpState struct {
 	// History Log
 	HistoryLog *HistoryLogState
 
+	// basalCycle is the 5-minute delivery cycle; see basal_cycle.go.
+	basalCycle *basalCycle
+
 	// Pump mode
 	PumpingSuspended bool
 	workflowMode     WorkflowMode
@@ -417,6 +420,7 @@ func newDefaultPumpState(now time.Time) *PumpState {
 			TransmitterID: "80AB12",
 		},
 
+		basalCycle: newBasalCycle(),
 		HistoryLog: &HistoryLogState{
 			NextSequence: 1,
 			Entries:      make([]HistoryLogEntry, 0),
@@ -816,6 +820,7 @@ func (ps *PumpState) RUnlock() {
 
 // SetBasalState updates the basal state
 func (ps *PumpState) SetBasalState(basal *BasalState) {
+	ps.AdvanceBasalCycle(ps.Now())
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
 	ps.Basal = basal
@@ -1021,12 +1026,25 @@ func (ps *PumpState) IsClosedLoopEnabled() bool {
 }
 
 // SetClosedLoopEnabled turns Control-IQ closed-loop control on or off.
+//
+// With the basal cycle on, the switch is the pump's: the change is written as a
+// ControlIQPcmChange, and turning Control-IQ on ends a running temp rate.
 func (ps *PumpState) SetClosedLoopEnabled(enabled bool) {
+	now := ps.Now()
+	ps.AdvanceBasalCycle(now)
 	ps.mutex.Lock()
-	defer ps.mutex.Unlock()
-
+	changed := ps.ClosedLoopEnabled != enabled
 	ps.ClosedLoopEnabled = enabled
+	ps.mutex.Unlock()
 	log.Infof("Control-IQ closed loop set to %v", enabled)
+
+	if !changed || !ps.BasalCycleEnabled() {
+		return
+	}
+	if enabled {
+		ps.EndTempRate(now)
+	}
+	ps.basalCycleClosedLoopChanged(now)
 }
 
 // ControlIQSnapshot is a point-in-time view of the Control-IQ related state

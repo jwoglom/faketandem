@@ -82,6 +82,10 @@ const (
 	HistoryControlIQUserModeChange   = 229
 	HistoryBasalIQSettingsChange     = 142
 
+	// Control-IQ state changes and Bluetooth temp rate sets
+	HistoryControlIQPcmChange  = 230
+	HistorySetTempRateResponse = 309
+
 	// IDP events
 	HistoryIDPAction  = 69
 	HistoryIDPBolus   = 70
@@ -147,6 +151,8 @@ var historyTypeIDByName = map[string]int{
 	"HypoMinimizerSuspend":    HistoryHypoMinimizerSuspend,
 	"HypoMinimizerResume":     HistoryHypoMinimizerResume,
 	"ControlIQUserModeChange": HistoryControlIQUserModeChange,
+	"ControlIQPcmChange":      HistoryControlIQPcmChange,
+	"SetTempRateResponse":     HistorySetTempRateResponse,
 }
 
 // HistoryTypeIDByName returns the numeric history-log type ID for a record
