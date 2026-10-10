@@ -136,6 +136,10 @@ func (h *SetTempRateHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState 
 		durationMinutes = int(val)
 	}
 
+	if !tempRateIsSupported(percentage, durationMinutes) {
+		return h.refuseUnsupportedTempRate(msg, percentage, durationMinutes)
+	}
+
 	// A percentage temp rate applies to the PROFILE basal rate, not to whatever
 	// rate happens to be running: using GetBasalRate() here compounded
 	// percentages whenever one temp rate replaced another.
@@ -190,6 +194,33 @@ func (h *SetTempRateHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState 
 		Immediate:       true,
 		StateChanges:    stateChanges,
 	}, nil
+}
+
+// pumpX2's SetTempRateRequest bounds: the pump answers an error outside them.
+const (
+	minTempRatePercent = 0
+	maxTempRatePercent = 250
+	minTempRateMinutes = 15
+	maxTempRateMinutes = 72 * 60
+)
+
+func tempRateIsSupported(percent, minutes int) bool {
+	return percent >= minTempRatePercent && percent <= maxTempRatePercent &&
+		minutes >= minTempRateMinutes && minutes <= maxTempRateMinutes
+}
+
+// refuseUnsupportedTempRate answers without starting a temp rate or using a tempRateId. pumpX2
+// names no status for this refusal; any nonzero status is a refusal to a driver, and 1 is assumed.
+func (h *SetTempRateHandler) refuseUnsupportedTempRate(msg *pumpx2.ParsedMessage, percent, minutes int) (*Response, error) {
+	log.Warnf("Refusing temp rate of %d%% for %d minutes: outside %d-%d%% and %d-%d minutes",
+		percent, minutes, minTempRatePercent, maxTempRatePercent, minTempRateMinutes, maxTempRateMinutes)
+	response, err := h.bridge.EncodeMessage(msg.TxID, "SetTempRateResponse", map[string]interface{}{
+		"raw": setTempRateResponseRawCargo(1, 0),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode SetTempRateResponse: %w", err)
+	}
+	return &Response{ResponseMessage: response, Immediate: true}, nil
 }
 
 // StopTempRateHandler handles StopTempRateRequest messages

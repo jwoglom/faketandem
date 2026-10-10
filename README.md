@@ -204,7 +204,9 @@ The delivery limits are pump state in milliunits (per hour for basal), as
 `SetMaxBolusLimitRequest` and `SetMaxBasalLimitRequest` change them, and
 `InitiateBolusRequest` above the max bolus is answered with status 1 and starts
 nothing. The status a real pump refuses with has not been confirmed. A temp rate
-above the max basal is not refused.
+above the max basal is not refused. `SetTempRateRequest` outside pumpX2's bounds,
+0-250% for 15 minutes to 72 hours, is answered with status 1 (also unconfirmed)
+and starts nothing.
 
 `workflow_mode` is the cartridge procedure the pump has open (`none`,
 `change_cartridge` or `fill_tubing`), reported in the snapshot too. The pump
