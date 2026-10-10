@@ -204,6 +204,7 @@ func (s *Simulator) updateBolusDelivery() *LastBolusRecord {
 	// Update delivered amount
 	oldDelivered := s.pumpState.Bolus.UnitsDelivered
 	s.pumpState.Bolus.UnitsDelivered = expectedDelivered
+	s.pumpState.recordBolusDeliveryUnlocked()
 
 	// Deduct from reservoir
 	deltaDelivered := s.pumpState.Bolus.UnitsDelivered - oldDelivered
@@ -226,8 +227,6 @@ func (s *Simulator) updateBolusDelivery() *LastBolusRecord {
 		s.pumpState.Bolus.Active = false
 		log.Infof("Bolus delivery complete: %.2f units delivered", s.pumpState.Bolus.UnitsDelivered)
 
-		// Update IOB (simple calculation - in reality this would decay over time)
-		s.pumpState.IOB += s.pumpState.Bolus.UnitsTotal
 		s.pumpState.TDD += s.pumpState.Bolus.UnitsTotal
 
 		// Record the completed bolus so LastBolusStatus can report it. This is
@@ -317,17 +316,10 @@ func (s *Simulator) updateBasalDelivery(elapsed time.Duration) {
 		s.pumpState.Reservoir.CurrentUnits = 0
 	}
 
-	// Update IOB and TDD
-	s.pumpState.IOB += basalDelivered
 	s.pumpState.TDD += basalDelivered
 
-	// Decay IOB slightly (very simplified - real IOB calculation is complex)
-	// Assume insulin action time of ~4 hours
-	iobDecayPerSecond := s.pumpState.IOB / (4.0 * 3600.0)
-	s.pumpState.IOB -= iobDecayPerSecond * elapsed.Seconds()
-	if s.pumpState.IOB < 0 {
-		s.pumpState.IOB = 0
-	}
+	profileDelivered := s.pumpState.Basal.CurrentRate / 3600.0 * elapsed.Seconds()
+	s.pumpState.iob.recordBasalDeviation(s.pumpState.Now(), basalDelivered-profileDelivered)
 }
 
 // updateBattery simulates battery drain over elapsed pump time.

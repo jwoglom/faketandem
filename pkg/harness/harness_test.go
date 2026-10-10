@@ -321,6 +321,10 @@ func TestStatePutSetsFieldsWithoutRaisingEvents(t *testing.T) {
 	if got := ps.GetTimeSinceReset(); got != 300 {
 		t.Errorf("time_since_reset = %d", got)
 	}
+	insulin := body["state"].(map[string]interface{})["insulin"].(map[string]interface{})
+	if insulin["iob"] != 3.5 || insulin["swan_iob"] != 3.5 || insulin["iob_type"] != float64(state.IOBTypeSwan6Hr) {
+		t.Errorf("insulin under Control-IQ = %v", insulin)
+	}
 
 	// Staging state is not the pump doing something: no qualifying events.
 	if bits := transport.qualifyingEventBits(); len(bits) != 0 {

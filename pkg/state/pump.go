@@ -47,7 +47,7 @@ type PumpState struct {
 	// Insulin Delivery
 	Basal *BasalState
 	Bolus *BolusState
-	IOB   float64 // Insulin on board
+	iob   insulinOnBoard
 	TDD   float64 // Total daily dose
 
 	// Physical State
@@ -394,7 +394,6 @@ func newDefaultPumpState(now time.Time) *PumpState {
 		BolusRateUnitsPerSecond: DefaultBolusRateUnitsPerSecond,
 		TotalDailyInsulin:       40,
 
-		IOB: 0.0,
 		TDD: 0.0,
 
 		Reservoir: &ReservoirState{
@@ -566,13 +565,6 @@ func (ps *PumpState) GetSerialNumber() string {
 	defer ps.mutex.RUnlock()
 
 	return ps.SerialNumber
-}
-
-// GetIOB returns the pump's current insulin-on-board estimate, in units.
-func (ps *PumpState) GetIOB() float64 {
-	ps.mutex.RLock()
-	defer ps.mutex.RUnlock()
-	return ps.IOB
 }
 
 // GetReservoirLevel returns the current reservoir level

@@ -342,9 +342,8 @@ func TestControlIQIOBReportsMilliunits(t *testing.T) {
 	bridge := testBridge(t)
 
 	pumpState := state.NewPumpState()
-	pumpState.Lock()
-	pumpState.IOB = 2.5
-	pumpState.Unlock()
+	pumpState.SetClock(state.NewFrozenClock(time.Date(2024, time.March, 5, 12, 0, 0, 0, time.UTC)))
+	pumpState.SetIOB(2.5)
 
 	parsed := handleAndParse(t, bridge, NewControlIQIOBHandler(bridge, "ControlIQIOBRequest"), pumpState)
 	if parsed.MessageType != "ControlIQIOBResponse" {
@@ -352,6 +351,23 @@ func TestControlIQIOBReportsMilliunits(t *testing.T) {
 	}
 	assertCargoInt(t, parsed, 2500, "mudaliarIOB")
 	assertCargoInt(t, parsed, 2500, "mudaliarTotalIOB")
+	assertCargoInt(t, parsed, 5*3600, "timeRemainingSeconds")
+	assertCargoInt(t, parsed, state.IOBTypeMudaliar, "iobType")
+}
+
+// TestControlIQIOBUnderControlIQIsTheSwanType: a driver reads the IOB the pump
+// shows from swan6hrIOB when iobType is 1.
+func TestControlIQIOBUnderControlIQIsTheSwanType(t *testing.T) {
+	bridge := testBridge(t)
+
+	pumpState := state.NewPumpState()
+	pumpState.SetClock(state.NewFrozenClock(time.Date(2024, time.March, 5, 12, 0, 0, 0, time.UTC)))
+	pumpState.SetIOB(2.5)
+	pumpState.SetClosedLoopEnabled(true)
+
+	parsed := handleAndParse(t, bridge, NewControlIQIOBHandler(bridge, "ControlIQIOBRequest"), pumpState)
+	assertCargoInt(t, parsed, state.IOBTypeSwan6Hr, "iobType")
+	assertCargoInt(t, parsed, 2500, "swan6hrIOB")
 }
 
 // TestCurrentBatteryReportsPercent guards the remaining number on these
