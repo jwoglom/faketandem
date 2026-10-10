@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/jwoglom/faketandem/pkg/bluetooth"
+	"github.com/jwoglom/faketandem/pkg/pumpx2"
 	"github.com/jwoglom/faketandem/pkg/state"
 )
 
@@ -62,4 +63,39 @@ func TestInitiateBolusAboveTheMaxBolusIsRefused(t *testing.T) {
 		t.Fatalf("parsing InitiateBolusResponse: %v", err)
 	}
 	assertCargoInt(t, parsed, 1, "status")
+}
+
+// pumpX2's encoder will not build a SetTempRateRequest outside its bounds, so the request is built by hand.
+func TestSetTempRateOutsideThePumpsBoundsIsRefused(t *testing.T) {
+	bridge := testBridge(t)
+
+	for _, c := range []struct {
+		percent, minutes int
+		accepted         bool
+	}{
+		{250, 30, true}, {0, 15, true}, {100, 72 * 60, true},
+		{251, 30, false}, {300, 30, false}, {-1, 30, false}, {150, 14, false}, {150, 72*60 + 1, false},
+	} {
+		msg := &pumpx2.ParsedMessage{
+			MessageType: "SetTempRateRequest",
+			TxID:        7,
+			Cargo:       map[string]interface{}{"percent": c.percent, "minutes": c.minutes},
+		}
+		resp, err := NewSetTempRateHandler(bridge).HandleMessage(msg, state.NewPumpState())
+		if err != nil {
+			t.Fatalf("%d%% for %d min: %v", c.percent, c.minutes, err)
+		}
+		if started := len(resp.StateChanges) == 1; started != c.accepted {
+			t.Errorf("%d%% for %d min: started a temp rate = %v, want %v", c.percent, c.minutes, started, c.accepted)
+		}
+		parsed, err := bridge.ParseMessage(bluetooth.CharControl, resp.ResponseMessage.Packets)
+		if err != nil {
+			t.Fatalf("parsing SetTempRateResponse: %v", err)
+		}
+		wantStatus := int64(1)
+		if c.accepted {
+			wantStatus = 0
+		}
+		assertCargoInt(t, parsed, wantStatus, "status")
+	}
 }
