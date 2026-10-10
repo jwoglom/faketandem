@@ -2,6 +2,7 @@ package handler
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/jwoglom/faketandem/pkg/pumpx2"
 	"github.com/jwoglom/faketandem/pkg/state"
@@ -93,10 +94,11 @@ func (h *BolusCalcDataSnapshotHandler) HandleMessage(msg *pumpx2.ParsedMessage, 
 	// Provide current bolus calculation data. BolusCalcDataSnapshotResponse's
 	// real constructor takes 13 fields (int/long amounts scaled by 1000, per
 	// pumpX2's convention elsewhere) -- see BolusCalcDataSnapshotResponse.java.
+	iob := pumpState.GetIOB()
 	calcData := map[string]interface{}{
 		"isUnacked":                 false,
 		"correctionFactor":          50,                          // mg/dL/U - placeholder
-		"iob":                       int64(pumpState.IOB * 1000), // milli-units
+		"iob":                       int64(math.Round(iob * 1000)), // milli-units
 		"cartridgeRemainingInsulin": 20000,                       // milli-units - placeholder
 		"targetBg":                  100,                         // mg/dL - placeholder
 		"isf":                       50,                          // mg/dL/U - placeholder
@@ -110,7 +112,7 @@ func (h *BolusCalcDataSnapshotHandler) HandleMessage(msg *pumpx2.ParsedMessage, 
 	}
 
 	log.Debugf("Bolus calc data: IOB=%.2f, basal=%.2f, bolusID=%d",
-		pumpState.IOB, pumpState.GetBasalRate(), pumpState.GetNextBolusID())
+		iob, pumpState.GetBasalRate(), pumpState.GetNextBolusID())
 
 	response, err := h.bridge.EncodeMessage(
 		msg.TxID,

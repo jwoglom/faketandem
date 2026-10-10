@@ -266,7 +266,9 @@ with its `TempRateCompleted`.
   3 Control-IQ), `commandedRate`, `profileBasalRate`, `tempRate` and
   `algorithmRate`, all in milliunits/hour. A temp rate's is exactly its percent
   of the profile rate, rounded to the milliunit, not to 0.01 U/hr.
-- Reservoir, `iob` and `tdd` move by the cycle's insulin at its 279.
+- Reservoir and `tdd` move by the cycle's insulin at its 279, and the Swan IOB
+  by what it delivers above or below the profile (see
+  [Insulin on board](#insulin-on-board)).
 - Each cycle's insulin is in the daily total 10 seconds after its 279, and a
   `DailyBasal` record carrying the total is written 90 seconds after it. The
   total starts again at the pump's midnight.
@@ -293,6 +295,30 @@ with its `TempRateCompleted`.
 (and `next_cycle_pump_seconds`), `latest_cycle`, the latest 279's `rate` (U/hr)
 and `source`, `daily_total_basal`, `pcm`, `cgm_available` and
 `controliq_algorithm_rate`.
+
+### Insulin on board
+
+`ControlIQIOBResponse` carries two figures, and `iobType` says which one the
+pump shows (pumpX2's `getPumpDisplayedIOB`):
+
+- `mudaliarIOB` is bolus insulin alone, over the active profile's
+  `insulin_duration` (5 hours with no profile). It is shown with Control-IQ off
+  (`iobType` 0). `mudaliarTotalIOB` is the full size of the boluses it counts,
+  and `timeRemainingSeconds` the time until the last of them stops counting.
+- `swan6hrIOB` also counts basal delivered above and below the profile rate (a
+  temp rate, Control-IQ, a suspend), over six hours, and never goes below zero.
+  It is shown with Control-IQ on (`iobType` 1).
+
+A bolus counts what it has delivered so far, dated at its start, and a bolus
+cut short counts what it delivered. Tandem does not publish either curve, so
+each dose decays linearly over its duration: what is left of a bolus is never
+more than the bolus, and none of it is left once the duration has passed.
+`NonControlIQIOBResponse` reports the Mudaliar figures.
+
+`PUT /api/state` with `iob` replaces every dose the pump has counted with one of
+that many units given now, which then wears off like a bolus. `GET /api/state`
+reports `insulin.iob` (the one shown), `iob_type`, `mudaliar_iob` and
+`swan_iob`.
 
 ### Pump-initiated actions
 

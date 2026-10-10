@@ -2,6 +2,7 @@ package handler
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/jwoglom/faketandem/pkg/pumpx2"
 	"github.com/jwoglom/faketandem/pkg/state"
@@ -351,10 +352,9 @@ func (h *ControlIQIOBHandler) RequiresAuth() bool { return true }
 
 // HandleMessage returns dynamic IOB
 func (h *ControlIQIOBHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
-	pumpState.RLock()
-	iob := int(pumpState.IOB * 1000)
-	timeOffset := pumpState.TimeSinceReset
-	pumpState.RUnlock()
+	iob := pumpState.ReadIOB()
+	milliunits := func(units float64) int64 { return int64(math.Round(units * 1000)) }
+	timeRemaining := int64(iob.TimeRemaining.Seconds())
 
 	// ControlIQIOBResponse(long mudaliarIOB, long timeRemainingSeconds,
 	// long mudaliarTotalIOB, long swan6hrIOB, int iobType)
@@ -362,17 +362,17 @@ func (h *ControlIQIOBHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState
 	var cargo map[string]interface{}
 	if h.resType == "ControlIQIOBResponse" {
 		cargo = map[string]interface{}{
-			"mudaliarIOB":          iob,
-			"timeRemainingSeconds": timeOffset,
-			"mudaliarTotalIOB":     iob,
-			"swan6hrIOB":           iob,
-			"iobType":              0,
+			"mudaliarIOB":          milliunits(iob.Mudaliar),
+			"timeRemainingSeconds": timeRemaining,
+			"mudaliarTotalIOB":     milliunits(iob.MudaliarTotal),
+			"swan6hrIOB":           milliunits(iob.Swan6Hr),
+			"iobType":              iob.Type,
 		}
 	} else {
 		cargo = map[string]interface{}{
-			"iob":           iob,
-			"timeRemaining": timeOffset,
-			"totalIOB":      iob,
+			"iob":           milliunits(iob.Mudaliar),
+			"timeRemaining": timeRemaining,
+			"totalIOB":      milliunits(iob.MudaliarTotal),
 		}
 	}
 

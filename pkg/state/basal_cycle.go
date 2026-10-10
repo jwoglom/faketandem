@@ -362,7 +362,7 @@ func (ps *PumpState) writeBasalCycle(at time.Time) {
 	units := rate * BasalCycleLength.Hours()
 	ps.mutex.Lock()
 	ps.Reservoir.CurrentUnits = math.Max(0, ps.Reservoir.CurrentUnits-units)
-	ps.IOB += units
+	ps.iob.recordBasalDeviation(at, units-float64(profileMilli)/1000*BasalCycleLength.Hours())
 	ps.TDD += units
 	ps.mutex.Unlock()
 
@@ -388,7 +388,7 @@ func (ps *PumpState) applyBasalCycleEvent(event basalCycleEvent) {
 		c.dailyTotal += event.units
 	case cycleDailyRecord:
 		ps.mutex.RLock()
-		iob := ps.IOB
+		iob := ps.ReadIOBUnlocked().Displayed()
 		battery := ps.Battery.Percentage
 		ps.mutex.RUnlock()
 		ps.AddHistoryLogEntryAt(HistoryDailyBasal, "DailyBasal", event.at, map[string]interface{}{

@@ -140,10 +140,10 @@ func (ps *PumpState) takeActiveBolus(endReasonID int, deliveredOverride *float64
 			if ps.Reservoir.CurrentUnits < 0 {
 				ps.Reservoir.CurrentUnits = 0
 			}
-			ps.IOB += extra
 			ps.TDD += extra
 		}
 		ps.Bolus.UnitsDelivered = *delivered
+		ps.recordBolusDeliveryUnlocked()
 	}
 
 	ps.Bolus.Active = false

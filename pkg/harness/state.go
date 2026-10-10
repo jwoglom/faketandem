@@ -141,8 +141,14 @@ type limitsSnapshot struct {
 type insulinSnapshot struct {
 	ReservoirUnits float64 `json:"reservoir_units"`
 	ReservoirMax   float64 `json:"reservoir_max"`
-	IOB            float64 `json:"iob"`
-	TDD            float64 `json:"tdd"`
+	// IOB is the one the pump shows: MudaliarIOB, bolus insulin alone, with
+	// Control-IQ off (iob_type 0), and Swan6HrIOB, which also counts basal above
+	// and below the profile, with it on (iob_type 1).
+	IOB         float64 `json:"iob"`
+	IOBType     int     `json:"iob_type"`
+	MudaliarIOB float64 `json:"mudaliar_iob"`
+	Swan6HrIOB  float64 `json:"swan_iob"`
+	TDD         float64 `json:"tdd"`
 }
 
 type batterySnapshot struct {
@@ -245,10 +251,14 @@ func (h *Harness) Snapshot() Snapshot {
 	suspendReason := ps.SuspendReason()
 	workflowMode := ps.WorkflowModeUnlocked()
 	idpProfiles := ps.IDPProfilesUnlocked()
+	iob := ps.ReadIOBUnlocked()
 	insulin := insulinSnapshot{
 		ReservoirUnits: ps.Reservoir.CurrentUnits,
 		ReservoirMax:   ps.Reservoir.MaxUnits,
-		IOB:            ps.IOB,
+		IOB:            iob.Displayed(),
+		IOBType:        iob.Type,
+		MudaliarIOB:    iob.Mudaliar,
+		Swan6HrIOB:     iob.Swan6Hr,
 		TDD:            ps.TDD,
 	}
 	battery := batterySnapshot{Percentage: ps.Battery.Percentage, Charging: ps.Battery.Charging}
@@ -458,6 +468,8 @@ type stateUpdate struct {
 	BatteryCharging   *bool    `json:"battery_charging,omitempty"`
 	BasalRate         *float64 `json:"basal_rate,omitempty"`
 	Suspended         *bool    `json:"suspended,omitempty"`
+	// IOB stages insulin on board as one dose given now, in place of every
+	// dose the pump has counted; it then wears off like a bolus.
 	IOB               *float64 `json:"iob,omitempty"`
 	TDD               *float64 `json:"tdd,omitempty"`
 	ClosedLoopEnabled *bool    `json:"closed_loop_enabled,omitempty"`
@@ -508,6 +520,14 @@ func applyBasalCycle(ps *state.PumpState, u stateUpdate) []string {
 	return applied
 }
 
+func applyIOB(ps *state.PumpState, u stateUpdate) []string {
+	if u.IOB == nil {
+		return nil
+	}
+	ps.SetIOB(*u.IOB)
+	return []string{"iob"}
+}
+
 func applyDeliveryLimits(ps *state.PumpState, u stateUpdate) []string {
 	var applied []string
 	if u.MaxBolusMilliunits != nil {
@@ -553,6 +573,7 @@ func (h *Harness) applyStateUpdate(u stateUpdate) []string {
 		})
 		applied = append(applied, "basal_rate")
 	}
+	applied = append(applied, applyIOB(ps, u)...)
 	if u.Suspended != nil {
 		// Staging only: the flag moves, but nothing is ended and no
 		// PumpingSuspended/PumpingResumed record is written. POST
@@ -636,10 +657,6 @@ func (h *Harness) applyDirectFields(u stateUpdate) []string {
 	if u.BatteryCharging != nil {
 		ps.Battery.Charging = *u.BatteryCharging
 		applied = append(applied, "battery_charging")
-	}
-	if u.IOB != nil {
-		ps.IOB = *u.IOB
-		applied = append(applied, "iob")
 	}
 	if u.TDD != nil {
 		ps.TDD = *u.TDD
