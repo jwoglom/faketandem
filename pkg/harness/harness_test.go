@@ -604,6 +604,21 @@ func TestSuspendStopsBolusAndTempRateAndRaisesEverything(t *testing.T) {
 	}
 }
 
+func TestOcclusionStandsInAlarmStatusUntilCleared(t *testing.T) {
+	_, ps, _, mux := testHarness(t)
+	const occlusionBit = uint64(1) << 2
+
+	mustDo(t, mux, http.MethodPost, "/api/state/suspend", `{"reason":"occlusion"}`)
+	if mask := ps.GetAlarmBitmask(); mask != occlusionBit {
+		t.Errorf("alarm bitmask = 0x%x while the occlusion stands, want OCCLUSION_ALARM (0x%x)", mask, occlusionBit)
+	}
+
+	mustDo(t, mux, http.MethodPost, "/api/state/resume", "")
+	if mask := ps.GetAlarmBitmask(); mask != 0 {
+		t.Errorf("alarm bitmask = 0x%x after the resume cleared the occlusion, want 0", mask)
+	}
+}
+
 func TestSuspendByUserRaisesNoAlarm(t *testing.T) {
 	_, ps, transport, mux := testHarness(t)
 

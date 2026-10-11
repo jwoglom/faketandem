@@ -328,7 +328,9 @@ Each action moves every driver-visible response consistently and raises the
 qualifying events a real pump would raise. A suspend is not a flag: it halts an
 in-progress bolus and any running temp rate, records each ending in the history
 log, raises an alarm when the reason is one, and emits a qualifying event for
-each — the pile-up a driver's reconciliation actually has to survive.
+each — the pile-up a driver's reconciliation actually has to survive. An
+occlusion stands in `AlarmStatusResponse` as `OCCLUSION_ALARM` until the alarm
+is cleared.
 
 ```bash
 # A bolus the pump started itself (source id 0, not the app's 8), taking 50 s
