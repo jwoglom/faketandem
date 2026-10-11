@@ -106,7 +106,9 @@ type PumpState struct {
 	// bit 3 PUMP_RESET_ALARM, bit 8 EMPTY_CARTRIDGE_ALARM, bit 18
 	// RESUME_PUMP_ALARM, and so on). Alarms are pump-raised conditions that stop
 	// or threaten insulin delivery, which is why they are modeled as a raw mask
-	// a scenario can set directly rather than derived from ActiveAlerts.
+	// a scenario can set directly. GetAlarmBitmask also reports the bit of each
+	// standing alert a pump raises as an alarm (alertAlarmBits), so it clears
+	// with the alert.
 	AlarmBitmask uint64
 
 	// nextBolusID backs GetNextBolusID's monotonic allocator.
@@ -910,11 +912,24 @@ func (ps *PumpState) SetAlarm(bit uint, active bool) {
 	}
 }
 
-// GetAlarmBitmask returns the pump's active-alarm bitmask.
+// alertAlarmBits maps the alerts a pump raises as alarms to their
+// AlarmStatusResponse bit.
+var alertAlarmBits = map[AlertType]uint{
+	AlertOcclusion: 2, // OCCLUSION_ALARM
+}
+
+// GetAlarmBitmask returns the pump's active-alarm bitmask: the bits set
+// directly, and those of the standing alerts in alertAlarmBits.
 func (ps *PumpState) GetAlarmBitmask() uint64 {
 	ps.mutex.RLock()
 	defer ps.mutex.RUnlock()
-	return ps.AlarmBitmask
+	mask := ps.AlarmBitmask
+	for _, alert := range ps.ActiveAlerts {
+		if bit, ok := alertAlarmBits[alert.Type]; ok {
+			mask |= uint64(1) << bit
+		}
+	}
+	return mask
 }
 
 // SetControlIQMode sets the ControlIQ mode
