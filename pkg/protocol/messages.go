@@ -13,8 +13,9 @@ import (
 const (
 	// OpcodeAlarmStatusResponse is AlarmStatusResponse (CURRENT_STATUS).
 	OpcodeAlarmStatusResponse uint8 = 71
-	// OpcodeErrorResponse is ErrorResponse (CURRENT_STATUS). pumpX2 declares it
-	// signed and variable-size.
+	// OpcodeErrorResponse is ErrorResponse (CURRENT_STATUS). pumpX2 and
+	// TandemKit declare it unsigned and variable-size: 2 bytes, or 26 with a
+	// signature trailer.
 	OpcodeErrorResponse uint8 = 77
 	// OpcodeHistoryLogStreamResponse is HistoryLogStreamResponse
 	// (HISTORY_LOG). pumpX2 spells it as the signed byte -127, which is 0x81.
@@ -53,8 +54,9 @@ type ErrorResponseOptions struct {
 	// ExtraBytes are appended after the two-byte [requestCodeId][errorCodeId]
 	// cargo; the driver exposes them as ErrorResponse.remainingBytes.
 	ExtraBytes []byte
-	// Signed appends the 24-byte trailer the real pump adds to this message
-	// (pumpX2 marks ErrorResponse signed=true). It is off by default because
+	// Signed appends a 24-byte signature trailer, the 26-byte form pumpX2's
+	// PacketArrayList and TandemKit's ErrorResponse.containsSignature accept,
+	// though both declare the message unsigned. It is off by default because
 	// the emulator usually has no pump-side HMAC key to sign with, and because
 	// an unsigned ErrorResponse fits in a single fragment -- which is what the
 	// driver's ErrorResponse path reads (it parses the first fragment directly

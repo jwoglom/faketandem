@@ -38,7 +38,6 @@ func TestSignedMessageTableCoversTheControlPath(t *testing.T) {
 		"BolusPermissionReleaseResponse",
 		"RemoteBgEntryResponse",
 		"RemoteCarbEntryResponse",
-		"ErrorResponse",
 	}
 	for _, name := range signed {
 		if !IsSignedMessage(name) {
@@ -57,6 +56,7 @@ func TestSignedMessageTableCoversTheControlPath(t *testing.T) {
 		"PumpVersionResponse",
 		"AlarmStatusResponse",
 		"TimeSinceResetResponse",
+		"ErrorResponse",
 	}
 	for _, name := range unsigned {
 		if IsSignedMessage(name) {

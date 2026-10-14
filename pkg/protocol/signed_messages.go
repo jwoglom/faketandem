@@ -54,7 +54,6 @@ var signedMessages = map[string]bool{
 	"EnterChangeCartridgeModeStateStreamResponse":           true,
 	"EnterFillTubingModeRequest":                            true,
 	"EnterFillTubingModeResponse":                           true,
-	"ErrorResponse":                                         true,
 	"ExitChangeCartridgeModeRequest":                        true,
 	"ExitChangeCartridgeModeResponse":                       true,
 	"ExitFillTubingModeRequest":                             true,
