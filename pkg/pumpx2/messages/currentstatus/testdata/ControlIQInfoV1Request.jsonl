@@ -1,0 +1,15 @@
+{"parse":{"key":"CURRENT_STATUS/104/ControlIQInfoV1Request/long","characteristic":"CURRENT_STATUS","fragments":["0006680601b41f3e"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/104/ControlIQInfoV1Request/ones","characteristic":"CURRENT_STATUS","fragments":["0099689900255c"],"jar":{"ok":true,"toString":"ControlIQInfoV1Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/104/ControlIQInfoV1Request/rand1","characteristic":"CURRENT_STATUS","fragments":["00386838006a72"],"jar":{"ok":true,"toString":"ControlIQInfoV1Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/104/ControlIQInfoV1Request/rand2","characteristic":"CURRENT_STATUS","fragments":["00616861004dc6"],"jar":{"ok":true,"toString":"ControlIQInfoV1Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/104/ControlIQInfoV1Request/small1","characteristic":"CURRENT_STATUS","fragments":["00d368d30022be"],"jar":{"ok":true,"toString":"ControlIQInfoV1Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/104/ControlIQInfoV1Request/small2","characteristic":"CURRENT_STATUS","fragments":["002c682c00ddbd"],"jar":{"ok":true,"toString":"ControlIQInfoV1Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/104/ControlIQInfoV1Request/sparse","characteristic":"CURRENT_STATUS","fragments":["00bc68bc0036a5"],"jar":{"ok":true,"toString":"ControlIQInfoV1Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/104/ControlIQInfoV1Request/zeros","characteristic":"CURRENT_STATUS","fragments":["00d468d400b527"],"jar":{"ok":true,"toString":"ControlIQInfoV1Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/104/ControlIQInfoV1Request/zeros-nochar","characteristic":"","fragments":["003d683d009f8d"],"jar":{"ok":true,"toString":"ControlIQInfoV1Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/104/ControlIQInfoV1Request/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["003d683d009f8d"],"jar":{"ok":true,"toString":"ControlIQInfoV1Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/104/ControlIQInfoV1Request/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["003d683d009f8d"],"jar":{"ok":true,"toString":"ControlIQInfoV1Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/104/ControlIQInfoV1Request/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["003d683d009f8d"],"jar":{"ok":true,"toString":"ControlIQInfoV1Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/104/ControlIQInfoV1Request/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["003d683d009f8d"],"jar":{"ok":true,"toString":"ControlIQInfoV1Request[cargo={}]"}}}
+{"encode":{"key":"ControlIQInfoV1Request/no-such-arity","txId":78,"message":"ControlIQInfoV1Request","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"ControlIQInfoV1Request/noargs","txId":169,"message":"ControlIQInfoV1Request","params":"{}","jar":{"ok":true,"messageName":"ControlIQInfoV1Request","txId":"-87","packets":["00a968a900b059"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}

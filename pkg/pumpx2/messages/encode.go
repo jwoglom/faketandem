@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"math"
 	"math/big"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -18,7 +19,7 @@ type Encoded struct {
 	Packets            []string
 	CharacteristicName string
 	CharacteristicUUID string
-	Message            *Message
+	Message            Message
 }
 
 // EncodeParamsJSON renders encode params as the single JSON object argument
@@ -67,17 +68,24 @@ func EncodeJSON(txID, messageName, paramsJSON string, env Env) (*Encoded, error)
 		orderedKeys = append(orderedKeys, m[1])
 	}
 
+	if _, err := messageTables(); err != nil {
+		return nil, err
+	}
 	c, ok := lookupEncodeClass(messageName)
 	if !ok {
 		return nil, exception("EncodeException", "Unknown message name: %s", messageName)
 	}
+	if len(values) == 0 {
+		return construct(c, -1, nil, txID, env)
+	}
 
-	for _, ctor := range c.Constructors {
-		if len(ctor.Params) != len(values) {
+	for ci := range c.Constructors {
+		params := c.Params(ci)
+		if len(params) != len(values) {
 			continue
 		}
-		in := make([]jsonValue, len(ctor.Params))
-		for i, p := range ctor.Params {
+		in := make([]jsonValue, len(params))
+		for i, p := range params {
 			if v, ok := values[p.Name]; ok {
 				in[i] = v
 			} else if i < len(orderedKeys) {
@@ -90,7 +98,7 @@ func EncodeJSON(txID, messageName, paramsJSON string, env Env) (*Encoded, error)
 				in[i] = jsonValue{kind: jsonAbsent}
 			}
 		}
-		return construct(c, ctor, in, txID, env)
+		return construct(c, ci, in, txID, env)
 	}
 	return nil, exception("EncodeException", "Unable to build message %s with params %s: no constructor was found with %d parameters", messageName, paramsJSON, len(values))
 }
@@ -109,38 +117,40 @@ func encodePositional(txID, messageName, paramsJSON string, env Env) (*Encoded, 
 		}
 		values[i] = v
 	}
+	if _, err := messageTables(); err != nil {
+		return nil, err
+	}
 	c, ok := lookupEncodeClass(messageName)
 	if !ok {
 		return nil, exception("EncodeException", "Unknown message name: %s", messageName)
 	}
-	for _, ctor := range c.Constructors {
-		if len(ctor.Params) == len(values) {
-			return construct(c, ctor, values, txID, env)
+	if len(values) == 0 {
+		return construct(c, -1, nil, txID, env)
+	}
+	for ci := range c.Constructors {
+		if len(c.Params(ci)) == len(values) {
+			return construct(c, ci, values, txID, env)
 		}
 	}
 	return nil, exception("EncodeException", "Unable to build message %s with params %s: no constructor was found with %d parameters", messageName, paramsJSON, len(values))
 }
 
-// construct runs one constructor and packetizes the result, as Main.encode does.
-func construct(c *Class, ctor Constructor, in []jsonValue, txIDStr string, env Env) (*Encoded, error) {
-	m := newMessage(c)
-	if len(ctor.Params) == 0 {
-		if err := runCtor(c, "", m, nil); err != nil {
-			return nil, err
+// construct runs constructor ci (-1 for the no-arg one, after which
+// cliparser fills in empty cargo) and packetizes the result, as Main.encode
+// does.
+func construct(c *Class, ci int, in []jsonValue, txIDStr string, env Env) (*Encoded, error) {
+	var m Message
+	var err error
+	if ci < 0 {
+		m, err = c.New()
+		if err == nil {
+			m.SetCargo([]byte{})
 		}
-		m.fillWithEmptyCargo()
 	} else {
-		converted := make(args, len(in))
-		for i, p := range ctor.Params {
-			v, err := convertToParameterType(in[i], p.Type)
-			if err != nil {
-				return nil, err
-			}
-			converted[i] = v
-		}
-		if err := runCtor(c, ctor.Signature(), m, converted); err != nil {
-			return nil, err
-		}
+		m, err = runConstructor(c, ci, in)
+	}
+	if err != nil {
+		return nil, illegalArgument("Unable to build message %s: %v", c.Name, err)
 	}
 
 	txInt, err := strconv.ParseInt(txIDStr, 10, 32)
@@ -153,36 +163,40 @@ func construct(c *Class, ctor Constructor, in []jsonValue, txIDStr string, env E
 		return nil, err
 	}
 	out := &Encoded{
-		MessageName:        c.SimpleName,
+		MessageName:        c.Name,
 		TxID:               strconv.Itoa(int(int8(txID))),
-		CharacteristicName: c.Props.Characteristic,
+		CharacteristicName: string(c.Props.Characteristic),
+		CharacteristicUUID: c.Props.Characteristic.UUID(),
 		Message:            m,
 	}
-	out.CharacteristicUUID, _ = CharacteristicUUID(c.Props.Characteristic)
 	for _, p := range packets {
 		out.Packets = append(out.Packets, hex.EncodeToString(p))
 	}
 	return out, nil
 }
 
-func runCtor(c *Class, sig string, m *Message, a args) (err error) {
-	var fn func(*Message, args)
-	if c.impl != nil {
-		fn = c.impl.ctors[sig]
-	}
-	if fn == nil {
-		if sig == "" {
-			return nil
+// runConstructor converts each value to its parameter's type, as
+// Main.convertToParameterType does, and calls the constructor with them.
+func runConstructor(c *Class, ci int, in []jsonValue) (Message, error) {
+	params := c.Params(ci)
+	fn := reflect.ValueOf(c.Constructors[ci].Func)
+	args := make([]reflect.Value, len(params))
+	for i, p := range params {
+		v, err := convertToParameterType(in[i], p.Type)
+		if err != nil {
+			return nil, err
 		}
-		return exception("faketandem.NotPorted", "%s(%s) has no Go port", c.Name, sig)
-	}
-	defer func() {
-		if r := recover(); r != nil {
-			err = illegalArgument("Unable to build message %s: %v", c.SimpleName, fromPanic(r))
+		argType := fn.Type().In(i)
+		if v != nil {
+			args[i] = reflect.ValueOf(v)
+			continue
 		}
-	}()
-	fn(m, a)
-	return nil
+		if argType.Kind() != reflect.Slice && argType.Kind() != reflect.Ptr {
+			return nil, exception("java.lang.NullPointerException", "null %s %s", p.Type, p.Name)
+		}
+		args[i] = reflect.Zero(argType)
+	}
+	return call(fn, args)
 }
 
 // --- org.json values ---
@@ -480,7 +494,7 @@ func (n javaNumber) String() string {
 	case "BigDecimal":
 		return n.dec.String()
 	default:
-		return jDouble(n.f)
+		return javaFloatString(n.f, 64)
 	}
 }
 
@@ -521,15 +535,14 @@ func convertToParameterType(v jsonValue, target string) (interface{}, error) {
 		return nil, nil
 	}
 	switch target {
-	case "int", "java.lang.Integer", "long", "java.lang.Long", "short", "java.lang.Short", "byte", "java.lang.Byte":
-		return convertToInteger(v, strings.TrimPrefix(strings.ToLower(target), "java.lang."))
-	case "double", "java.lang.Double", "float", "java.lang.Float":
-		return convertToFloating(v, target == "float" || target == "java.lang.Float")
-	case "boolean", "java.lang.Boolean":
+	case "int", "Integer", "long", "Long", "short", "Short", "byte", "Byte":
+		return convertToInteger(v, strings.ToLower(target))
+	case "double", "Double", "float", "Float":
+		return convertToFloating(v, target == "float" || target == "Float")
+	case "boolean", "Boolean":
 		return convertToBoolean(v)
-	case "java.lang.String":
-		s := v.toJavaString()
-		return &s, nil
+	case "String":
+		return v.toJavaString(), nil
 	case "byte[]":
 		if v.kind != jsonString {
 			return nil, illegalArgument("Cannot convert %s to byte[]", v.toJavaString())
@@ -539,7 +552,7 @@ func convertToParameterType(v jsonValue, target string) (interface{}, error) {
 			return nil, illegalArgument("Cannot decode hex string to byte array: %s", v.s)
 		}
 		return b, nil
-	case "java.math.BigInteger":
+	case "BigInteger":
 		if v.kind == jsonNumber && v.n.class == "BigInteger" {
 			return v.n.big, nil
 		}

@@ -17,6 +17,6 @@ directory. No local Gradle/JDK toolchain or pumpX2 checkout needed.
 
 To bump the version, update `PUMPX2_CLIPARSER_VERSION` in the `Makefile` and
 re-run `make jar`. A jitpack release can lag pumpX2's `dev` branch, which the
-Go port (`pkg/pumpx2/messages`) is generated from and checked against; build
+Go message types (`pkg/pumpx2/messages`) are checked against; build
 the jar from that branch (`./gradlew :cliparser:shadowJar`) to compare like
 with like.

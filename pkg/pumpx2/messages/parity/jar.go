@@ -90,7 +90,6 @@ func (e *CommandError) Error() string { return e.Message }
 // ParseResult is what a parse printed: the message's toString, or nothing
 // usable (an exception's text, or no message).
 type ParseResult struct {
-	Key      string `json:"key"`
 	OK       bool   `json:"ok"`
 	ToString string `json:"toString,omitempty"`
 }
@@ -119,18 +118,17 @@ func (j *Jar) JarParse(c ParseCase) (ParseResult, error) {
 	}
 	stdout, err := j.Run([]string{"parse", strings.Join(c.Fragments, " ")}, env)
 	if _, ok := err.(*CommandError); ok {
-		return ParseResult{Key: c.Key}, nil
+		return ParseResult{}, nil
 	}
 	if err != nil {
 		return ParseResult{}, err
 	}
 	dump, ok := MessageDump(stdout)
-	return ParseResult{Key: c.Key, OK: ok, ToString: dump}, nil
+	return ParseResult{OK: ok, ToString: dump}, nil
 }
 
 // EncodeResult is what an encode printed.
 type EncodeResult struct {
-	Key            string   `json:"key"`
 	OK             bool     `json:"ok"`
 	MessageName    string   `json:"messageName,omitempty"`
 	TxID           string   `json:"txId,omitempty"`
@@ -142,7 +140,7 @@ type EncodeResult struct {
 func (j *Jar) JarEncode(c EncodeCase) (EncodeResult, error) {
 	stdout, err := j.Run([]string{"encode", strconv.Itoa(c.TxID), c.Message, c.Params}, map[string]string{})
 	if _, ok := err.(*CommandError); ok {
-		return EncodeResult{Key: c.Key}, nil
+		return EncodeResult{}, nil
 	}
 	if err != nil {
 		return EncodeResult{}, err
@@ -159,8 +157,8 @@ func (j *Jar) JarEncode(c EncodeCase) (EncodeResult, error) {
 	}
 	if err := json.Unmarshal([]byte(line), &printed); err != nil {
 		// An encode whose constructor threw prints a stack trace and nothing on stdout.
-		return EncodeResult{Key: c.Key}, nil
+		return EncodeResult{}, nil
 	}
-	return EncodeResult{Key: c.Key, OK: true, MessageName: printed.MessageName, TxID: printed.TxID,
+	return EncodeResult{OK: true, MessageName: printed.MessageName, TxID: printed.TxID,
 		Packets: printed.Packets, Characteristic: printed.Characteristic}, nil
 }

@@ -1,0 +1,15 @@
+{"parse":{"key":"CURRENT_STATUS/68/AlertStatusRequest/long","characteristic":"CURRENT_STATUS","fragments":["008f448f0146f52c"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/68/AlertStatusRequest/ones","characteristic":"CURRENT_STATUS","fragments":["007944790030bf"],"jar":{"ok":true,"toString":"AlertStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/68/AlertStatusRequest/rand1","characteristic":"CURRENT_STATUS","fragments":["009e449e001536"],"jar":{"ok":true,"toString":"AlertStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/68/AlertStatusRequest/rand2","characteristic":"CURRENT_STATUS","fragments":["00b344b300af46"],"jar":{"ok":true,"toString":"AlertStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/68/AlertStatusRequest/small1","characteristic":"CURRENT_STATUS","fragments":["00cd44cd00f96d"],"jar":{"ok":true,"toString":"AlertStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/68/AlertStatusRequest/small2","characteristic":"CURRENT_STATUS","fragments":["008a448a00a2f9"],"jar":{"ok":true,"toString":"AlertStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/68/AlertStatusRequest/sparse","characteristic":"CURRENT_STATUS","fragments":["000e440e00fe2e"],"jar":{"ok":true,"toString":"AlertStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/68/AlertStatusRequest/zeros","characteristic":"CURRENT_STATUS","fragments":["00ec44ec002e58"],"jar":{"ok":true,"toString":"AlertStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/68/AlertStatusRequest/zeros-nochar","characteristic":"","fragments":["002e442e001828"],"jar":{"ok":true,"toString":"AlertStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/68/AlertStatusRequest/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["002e442e001828"],"jar":{"ok":true,"toString":"AlertStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/68/AlertStatusRequest/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["002e442e001828"],"jar":{"ok":true,"toString":"AlertStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/68/AlertStatusRequest/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["002e442e001828"],"jar":{"ok":true,"toString":"AlertStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/68/AlertStatusRequest/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["002e442e001828"],"jar":{"ok":true,"toString":"AlertStatusRequest[cargo={}]"}}}
+{"encode":{"key":"AlertStatusRequest/no-such-arity","txId":178,"message":"AlertStatusRequest","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"AlertStatusRequest/noargs","txId":139,"message":"AlertStatusRequest","params":"{}","jar":{"ok":true,"messageName":"AlertStatusRequest","txId":"-117","packets":["008b448b0093ca"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}

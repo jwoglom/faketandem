@@ -1,0 +1,15 @@
+{"parse":{"key":"CURRENT_STATUS/34/CurrentEGVGuiDataRequest/long","characteristic":"CURRENT_STATUS","fragments":["0024222401ce530f"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/34/CurrentEGVGuiDataRequest/ones","characteristic":"CURRENT_STATUS","fragments":["00a422a40080f5"],"jar":{"ok":true,"toString":"CurrentEGVGuiDataRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/34/CurrentEGVGuiDataRequest/rand1","characteristic":"CURRENT_STATUS","fragments":["0020222000dc22"],"jar":{"ok":true,"toString":"CurrentEGVGuiDataRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/34/CurrentEGVGuiDataRequest/rand2","characteristic":"CURRENT_STATUS","fragments":["00de22de001212"],"jar":{"ok":true,"toString":"CurrentEGVGuiDataRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/34/CurrentEGVGuiDataRequest/small1","characteristic":"CURRENT_STATUS","fragments":["00312231009e12"],"jar":{"ok":true,"toString":"CurrentEGVGuiDataRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/34/CurrentEGVGuiDataRequest/small2","characteristic":"CURRENT_STATUS","fragments":["00c222c2000c54"],"jar":{"ok":true,"toString":"CurrentEGVGuiDataRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/34/CurrentEGVGuiDataRequest/sparse","characteristic":"CURRENT_STATUS","fragments":["00a922a900dc83"],"jar":{"ok":true,"toString":"CurrentEGVGuiDataRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/34/CurrentEGVGuiDataRequest/zeros","characteristic":"CURRENT_STATUS","fragments":["00022202005842"],"jar":{"ok":true,"toString":"CurrentEGVGuiDataRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/34/CurrentEGVGuiDataRequest/zeros-nochar","characteristic":"","fragments":["008c228c00cf7a"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/34/CurrentEGVGuiDataRequest/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["008c228c00cf7a"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/34/CurrentEGVGuiDataRequest/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["008c228c00cf7a"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/34/CurrentEGVGuiDataRequest/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["008c228c00cf7a"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/34/CurrentEGVGuiDataRequest/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["008c228c00cf7a"],"jar":{"ok":false}}}
+{"encode":{"key":"CurrentEGVGuiDataRequest/no-such-arity","txId":149,"message":"CurrentEGVGuiDataRequest","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"CurrentEGVGuiDataRequest/noargs","txId":220,"message":"CurrentEGVGuiDataRequest","params":"{}","jar":{"ok":true,"messageName":"CurrentEGVGuiDataRequest","txId":"-36","packets":["00dc22dc007074"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}

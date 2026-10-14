@@ -14,7 +14,17 @@ import (
 
 // These hold the bridge, which is what handlers see, to the jar's: the
 // ParsedMessage a request becomes and the EncodedMessage a response becomes,
-// over every parity case. pkg/pumpx2/messages checks the port beneath it.
+// over every recorded parity vector. pkg/pumpx2/messages checks the message
+// types beneath it.
+
+func vectors(t *testing.T) *parity.Vectors {
+	t.Helper()
+	v, err := parity.AllVectors()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return v
+}
 
 func charType(t *testing.T, name string) bluetooth.CharacteristicType {
 	t.Helper()
@@ -60,7 +70,7 @@ func jarBridge(t *testing.T, codec string) *Bridge {
 func TestNativeBridgeParseMatchesJarBridge(t *testing.T) {
 	jar := jarBridge(t, CodecPumpX2)
 	native := NewNativeBridge()
-	for _, c := range parity.ParseCases() {
+	for _, c := range vectors(t).Parse {
 		ch := charType(t, c.Characteristic)
 		want, jerr := jar.ParseMessage(ch, c.Fragments)
 		got, nerr := native.ParseMessage(ch, c.Fragments)
@@ -84,7 +94,7 @@ func TestNativeBridgeParseMatchesJarBridge(t *testing.T) {
 func TestNativeBridgeEncodeMatchesJarBridge(t *testing.T) {
 	jar := jarBridge(t, CodecPumpX2)
 	native := NewNativeBridge()
-	for _, c := range parity.EncodeCases() {
+	for _, c := range vectors(t).Encode {
 		params := encodeParams(t, c.Params)
 		want, jerr := jar.EncodeMessage(c.TxID, c.Message, params)
 		got, nerr := native.EncodeMessage(c.TxID, c.Message, params)
@@ -100,29 +110,26 @@ func TestNativeBridgeEncodeMatchesJarBridge(t *testing.T) {
 
 func TestCompareBridgeFindsNoMismatches(t *testing.T) {
 	bridge := jarBridge(t, CodecCompare)
-	for _, c := range parity.ParseCases() {
+	v := vectors(t)
+	for _, c := range v.Parse {
 		_, _ = bridge.ParseMessage(charType(t, c.Characteristic), c.Fragments) // Safe to ignore: only the comparison is under test.
 	}
-	for _, c := range parity.EncodeCases() {
+	for _, c := range v.Encode {
 		_, _ = bridge.EncodeMessage(c.TxID, c.Message, encodeParams(t, c.Params)) // Safe to ignore: only the comparison is under test.
 	}
 	if n := bridge.Mismatches(); n != 0 {
-		t.Fatalf("compare mode logged %d mismatches between the Go port and cliparser", n)
+		t.Fatalf("compare mode logged %d mismatches between the Go codec and cliparser", n)
 	}
 }
 
 // TestNativeBridgeMatchesRecordedJar runs without a JVM: the bridge's parse of
-// each case against what the jar printed for it, read the way the jar path
-// reads it.
+// each recorded vector against what the jar printed for it, read the way the
+// jar path reads it.
 func TestNativeBridgeMatchesRecordedJar(t *testing.T) {
-	golden, err := parity.ReadParseGolden()
-	if err != nil {
-		t.Fatal(err)
-	}
 	native := NewNativeBridge()
-	for _, c := range parity.ParseCases() {
+	for _, c := range vectors(t).Parse {
 		got, err := native.ParseMessage(charType(t, c.Characteristic), c.Fragments)
-		want := golden[c.Key]
+		want := c.Jar
 		if err != nil {
 			if want.OK {
 				t.Errorf("%s: native failed (%v) where cliparser printed %s", c.Key, err, want.ToString)

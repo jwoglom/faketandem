@@ -1,7 +1,7 @@
-// Package parity generates the inputs the pumpX2 parity tests run through
-// both the cliparser jar and the Go port, and holds the jar's recorded
-// answers (testdata) so the port is checked against the jar on every test
-// run, with or without a JVM.
+// Package parity holds the Go message types to the pumpX2 cliparser jar: it
+// generates the parse and encode cases, drives the jar to record its answers
+// (each class's beside its type, in testdata/<Class>.jsonl), and checks the
+// Go types against those answers, with or without a JVM.
 package parity
 
 import (
@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/jwoglom/faketandem/pkg/pumpx2/messages"
+	// Every message type, for the cases' answers from the Go implementation.
+	_ "github.com/jwoglom/faketandem/pkg/pumpx2/messages/all"
 )
 
 // ParseCase is one `cliparser parse` invocation: the fragments of one
@@ -32,21 +34,23 @@ type EncodeCase struct {
 }
 
 // HistoryLogStreamResponse prints every history log record it carries, and
-// the Go port does not include pumpX2's 185 history log classes; it is a pump
-// to app stream that no client ever writes, so its parse is left out.
+// faketandem does not implement pumpX2's 185 history log classes; it is a
+// pump to app stream that no client ever writes, so its parse is left out.
 const unportedParse = "response.historyLog.HistoryLogStreamResponse"
 
-// ParseCases returns the parse inputs: several cargos per OPCODES entry,
-// signed and unsigned where the message is signed, a wrong size, and the
-// same message under no characteristic and another one.
-func ParseCases() []ParseCase {
+// GenerateParseCases returns the parse inputs: several cargos per OPCODES
+// entry, signed and unsigned where the message is signed, a wrong size, and
+// the same message under no characteristic and another one, then framing
+// faults. Each is keyed characteristic/opcode/class/variant.
+func GenerateParseCases(cat *JarCatalog) []ParseCase {
 	rng := rand.New(rand.NewSource(20260101))
 	var out []ParseCase
-	for _, e := range messages.OpcodeTable() {
-		if e.Class.Name == unportedParse {
+	for _, e := range cat.Opcodes {
+		class := cat.mustClass(e.Class)
+		if class.Name == unportedParse {
 			continue
 		}
-		size := e.Class.Props.Size
+		size := class.Props.Size
 		cargos := map[string][]byte{
 			"zeros":  make([]byte, size),
 			"ones":   fill(size, 0xFF),
@@ -61,19 +65,19 @@ func ParseCases() []ParseCase {
 			cargos["empty"] = []byte{}
 			cargos["short"] = randBytes(rng, size-1, 4)
 		}
-		if e.Class.Props.Signed {
+		if class.Props.Signed {
 			for _, name := range []string{"zeros", "rand1", "small1"} {
 				cargos[name+"+signed"] = append(append([]byte{}, cargos[name]...), randBytes(rng, 24, 256)...)
 			}
 		}
 		chunk := 18
-		if e.Characteristic == "CONTROL" && e.Class.IsRequest() {
+		if e.Characteristic == "CONTROL" && class.IsRequest() {
 			chunk = 40
 		}
 		names := sortedKeys(cargos)
 		for _, name := range names {
 			txID := byte(rng.Intn(256))
-			key := fmt.Sprintf("%s/%d/%s/%s", e.Characteristic, e.Opcode, e.Class.SimpleName, name)
+			key := fmt.Sprintf("%s/%d/%s/%s", e.Characteristic, e.Opcode, class.SimpleName, name)
 			out = append(out, ParseCase{
 				Key:            key,
 				Characteristic: e.Characteristic,
@@ -85,44 +89,55 @@ func ParseCases() []ParseCase {
 		zeros := cargos["zeros"]
 		txID := byte(rng.Intn(256))
 		if chunk != 18 {
-			out = append(out, ParseCase{Key: fmt.Sprintf("%s/%d/%s/zeros-chunk18", e.Characteristic, e.Opcode, e.Class.SimpleName),
+			out = append(out, ParseCase{Key: fmt.Sprintf("%s/%d/%s/zeros-chunk18", e.Characteristic, e.Opcode, class.SimpleName),
 				Characteristic: e.Characteristic, Fragments: Frame(int8(e.Opcode), txID, zeros, 18)})
 		}
-		out = append(out, ParseCase{Key: fmt.Sprintf("%s/%d/%s/zeros-nochar", e.Characteristic, e.Opcode, e.Class.SimpleName),
+		out = append(out, ParseCase{Key: fmt.Sprintf("%s/%d/%s/zeros-nochar", e.Characteristic, e.Opcode, class.SimpleName),
 			Characteristic: "", Fragments: Frame(int8(e.Opcode), txID, zeros, chunk)})
-		for _, other := range messages.CharacteristicNames() {
+		for _, ch := range cat.Characteristics {
+			other := ch.Name
 			if other == e.Characteristic {
 				continue
 			}
-			out = append(out, ParseCase{Key: fmt.Sprintf("%s/%d/%s/zeros-on-%s", e.Characteristic, e.Opcode, e.Class.SimpleName, other),
+			out = append(out, ParseCase{Key: fmt.Sprintf("%s/%d/%s/zeros-on-%s", e.Characteristic, e.Opcode, class.SimpleName, other),
 				Characteristic: other, Fragments: Frame(int8(e.Opcode), txID, zeros, chunk)})
 		}
 	}
-	return append(out, framingFaultCases()...)
+	return append(out, framingFaultCases(cat)...)
+}
+
+func (c *JarCatalog) mustClass(name string) *JarClass {
+	for _, jc := range c.Classes {
+		if jc.Name == name {
+			return jc
+		}
+	}
+	panic("catalog.json names unknown class " + name)
 }
 
 // framingFaultCases are a bad CRC, a message txId that differs from the
 // fragment's, a missing fragment, an opcode nothing has, and a runt.
-func framingFaultCases() []ParseCase {
+func framingFaultCases(cat *JarCatalog) []ParseCase {
 	var out []ParseCase
-	for _, e := range messages.OpcodeTable() {
-		if e.Class.Name == unportedParse || e.Class.Props.Size == 0 {
+	for _, e := range cat.Opcodes {
+		class := cat.mustClass(e.Class)
+		if class.Name == unportedParse || class.Props.Size == 0 {
 			continue
 		}
-		frags := Frame(int8(e.Opcode), 9, make([]byte, e.Class.Props.Size), 18)
+		frags := Frame(int8(e.Opcode), 9, make([]byte, class.Props.Size), 18)
 		bad := append([]string{}, frags...)
 		last := bad[len(bad)-1]
 		bad[len(bad)-1] = last[:len(last)-2] + flipHex(last[len(last)-2:])
-		out = append(out, ParseCase{Key: fmt.Sprintf("%s/%d/%s/badcrc", e.Characteristic, e.Opcode, e.Class.SimpleName),
+		out = append(out, ParseCase{Key: fmt.Sprintf("%s/%d/%s/badcrc", e.Characteristic, e.Opcode, class.SimpleName),
 			Characteristic: e.Characteristic, Fragments: bad})
 		mismatched := append([]string{}, frags...)
 		first, _ := hex.DecodeString(mismatched[0])
 		first[3] = 10
 		mismatched[0] = hex.EncodeToString(first)
-		out = append(out, ParseCase{Key: fmt.Sprintf("%s/%d/%s/txid-mismatch", e.Characteristic, e.Opcode, e.Class.SimpleName),
+		out = append(out, ParseCase{Key: fmt.Sprintf("%s/%d/%s/txid-mismatch", e.Characteristic, e.Opcode, class.SimpleName),
 			Characteristic: e.Characteristic, Fragments: mismatched})
 		if len(frags) > 1 {
-			out = append(out, ParseCase{Key: fmt.Sprintf("%s/%d/%s/missing-fragment", e.Characteristic, e.Opcode, e.Class.SimpleName),
+			out = append(out, ParseCase{Key: fmt.Sprintf("%s/%d/%s/missing-fragment", e.Characteristic, e.Opcode, class.SimpleName),
 				Characteristic: e.Characteristic, Fragments: frags[:len(frags)-1]})
 		}
 	}
@@ -213,10 +228,11 @@ func sortedKeys(m map[string][]byte) []string {
 	return out
 }
 
-// EncodeCases returns the encode inputs: for every class, its no-arg form and
-// several argument sets for each of its constructors, named by the
-// constructor's parameters, plus name and count mismatches.
-func EncodeCases() []EncodeCase {
+// GenerateEncodeCases returns the encode inputs: for every class, its no-arg
+// form and several argument sets for each of its constructors, named by the
+// constructor's parameters, plus name and count mismatches. Each is keyed
+// class/constructor/variant.
+func GenerateEncodeCases(cat *JarCatalog) []EncodeCase {
 	rng := rand.New(rand.NewSource(20260102))
 	var out []EncodeCase
 	add := func(key, message string, params map[string]interface{}) {
@@ -230,18 +246,25 @@ func EncodeCases() []EncodeCase {
 		}
 		out = append(out, EncodeCase{Key: key, TxID: rng.Intn(300), Message: message, Params: text})
 	}
-	for _, c := range messages.Classes() {
+	classes := append([]*JarClass(nil), cat.Classes...)
+	sort.Slice(classes, func(i, j int) bool { return classes[i].Name < classes[j].Name })
+	for _, c := range classes {
 		add(c.SimpleName+"/noargs", c.SimpleName, nil)
 		for ci, ctor := range c.Constructors {
 			if len(ctor.Params) == 0 {
 				continue
 			}
+			types := make([]string, len(ctor.Params))
+			for i, p := range ctor.Params {
+				types[i] = p.Type
+			}
+			signature := strings.Join(types, ",")
 			for _, flavor := range []string{"zero", "typical", "rand1", "rand2", "rand3", "max", "neg", "odd"} {
 				params := map[string]interface{}{}
 				for _, p := range ctor.Params {
 					params[p.Name] = paramValue(rng, flavor, p.Type, c.Props.Size)
 				}
-				add(fmt.Sprintf("%s/ctor%d(%s)/%s", c.SimpleName, ci, ctor.Signature(), flavor), c.SimpleName, params)
+				add(fmt.Sprintf("%s/ctor%d(%s)/%s", c.SimpleName, ci, signature, flavor), c.SimpleName, params)
 			}
 			// The same values under names the constructor does not have,
 			// which cliparser assigns by sorted key order instead.
@@ -249,7 +272,7 @@ func EncodeCases() []EncodeCase {
 			for i, p := range ctor.Params {
 				params[fmt.Sprintf("p%02d", i)] = paramValue(rng, "typical", p.Type, c.Props.Size)
 			}
-			add(fmt.Sprintf("%s/ctor%d(%s)/positional-names", c.SimpleName, ci, ctor.Signature()), c.SimpleName, params)
+			add(fmt.Sprintf("%s/ctor%d(%s)/positional-names", c.SimpleName, ci, signature), c.SimpleName, params)
 		}
 		params := map[string]interface{}{}
 		for i := 0; i < 13; i++ {
@@ -257,8 +280,8 @@ func EncodeCases() []EncodeCase {
 		}
 		add(c.SimpleName+"/no-such-arity", c.SimpleName, params)
 	}
-	for _, name := range messages.EnumNames() {
-		add("enum/"+name, name, nil)
+	for _, e := range cat.Messages {
+		add("enum/"+e.Name, e.Name, nil)
 	}
 	add("unknown-name", "NoSuchMessage", nil)
 	return out
@@ -368,29 +391,29 @@ func randString(rng *rand.Rand) string {
 	return string(b)
 }
 
-// NativeParse runs one parse case through the Go port.
+// NativeParse runs one parse case through the Go message types.
 func NativeParse(c ParseCase) ParseResult {
 	m, err := messages.ParseFragments(c.Characteristic, c.Fragments, messages.Env{})
 	if err != nil {
-		return ParseResult{Key: c.Key}
+		return ParseResult{}
 	}
 	// Read the way the jar's output is read, so a string field holding a tab
 	// truncates both sides alike.
-	dump, ok := MessageDump(m.ToString())
-	return ParseResult{Key: c.Key, OK: ok, ToString: dump}
+	dump, ok := MessageDump(messages.ToString(m))
+	return ParseResult{OK: ok, ToString: dump}
 }
 
-// NativeEncode runs one encode case through the Go port.
+// NativeEncode runs one encode case through the Go message types.
 func NativeEncode(c EncodeCase) EncodeResult {
 	e, err := messages.EncodeJSON(fmt.Sprintf("%d", c.TxID), c.Message, c.Params, messages.Env{})
 	if err != nil {
-		return EncodeResult{Key: c.Key}
+		return EncodeResult{}
 	}
-	return EncodeResult{Key: c.Key, OK: true, MessageName: e.MessageName, TxID: e.TxID, Packets: e.Packets,
+	return EncodeResult{OK: true, MessageName: e.MessageName, TxID: e.TxID, Packets: e.Packets,
 		Characteristic: e.CharacteristicUUID}
 }
 
-// NativeParseError describes why the Go port failed a parse case, for test
+// NativeParseError describes why the Go message types failed a parse case, for test
 // output.
 func NativeParseError(c ParseCase) string {
 	if _, err := messages.ParseFragments(c.Characteristic, c.Fragments, messages.Env{}); err != nil {
@@ -399,7 +422,7 @@ func NativeParseError(c ParseCase) string {
 	return "ok"
 }
 
-// NativeEncodeError describes why the Go port failed an encode case.
+// NativeEncodeError describes why the Go message types failed an encode case.
 func NativeEncodeError(c EncodeCase) string {
 	if _, err := messages.EncodeJSON(fmt.Sprintf("%d", c.TxID), c.Message, c.Params, messages.Env{}); err != nil {
 		return err.Error()

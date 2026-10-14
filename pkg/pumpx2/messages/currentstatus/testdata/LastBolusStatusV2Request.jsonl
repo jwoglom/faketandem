@@ -1,0 +1,15 @@
+{"parse":{"key":"CURRENT_STATUS/-92/LastBolusStatusV2Request/long","characteristic":"CURRENT_STATUS","fragments":["00b4a4b401a3c030"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-92/LastBolusStatusV2Request/ones","characteristic":"CURRENT_STATUS","fragments":["009aa49a00e05a"],"jar":{"ok":true,"toString":"LastBolusStatusV2Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-92/LastBolusStatusV2Request/rand1","characteristic":"CURRENT_STATUS","fragments":["006ca46c0087e3"],"jar":{"ok":true,"toString":"LastBolusStatusV2Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-92/LastBolusStatusV2Request/rand2","characteristic":"CURRENT_STATUS","fragments":["00d0a4d000e7b8"],"jar":{"ok":true,"toString":"LastBolusStatusV2Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-92/LastBolusStatusV2Request/small1","characteristic":"CURRENT_STATUS","fragments":["0024a42400e267"],"jar":{"ok":true,"toString":"LastBolusStatusV2Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-92/LastBolusStatusV2Request/small2","characteristic":"CURRENT_STATUS","fragments":["0028a428008f22"],"jar":{"ok":true,"toString":"LastBolusStatusV2Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-92/LastBolusStatusV2Request/sparse","characteristic":"CURRENT_STATUS","fragments":["00e8a4e800db34"],"jar":{"ok":true,"toString":"LastBolusStatusV2Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-92/LastBolusStatusV2Request/zeros","characteristic":"CURRENT_STATUS","fragments":["006ca46c0087e3"],"jar":{"ok":true,"toString":"LastBolusStatusV2Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-92/LastBolusStatusV2Request/zeros-nochar","characteristic":"","fragments":["00b5a4b500384c"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-92/LastBolusStatusV2Request/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["00b5a4b500384c"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-92/LastBolusStatusV2Request/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["00b5a4b500384c"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-92/LastBolusStatusV2Request/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["00b5a4b500384c"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-92/LastBolusStatusV2Request/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["00b5a4b500384c"],"jar":{"ok":false}}}
+{"encode":{"key":"LastBolusStatusV2Request/no-such-arity","txId":75,"message":"LastBolusStatusV2Request","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"LastBolusStatusV2Request/noargs","txId":259,"message":"LastBolusStatusV2Request","params":"{}","jar":{"ok":true,"messageName":"LastBolusStatusV2Request","txId":"3","packets":["0003a4030093f8"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}

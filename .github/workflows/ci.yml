@@ -107,9 +107,9 @@ jobs:
       working-directory: faketandem
       run: go mod download
 
-    # The Go port of pumpX2 against pumpX2 itself: every parity case live
+    # The Go message types against pumpX2 itself: the recorded answers live
     # against the jar, the handler and harness tests through it, and the JPAKE
-    # cross-checks. Fails when pumpX2's dev branch drifts from the port.
+    # cross-checks. Fails when pumpX2's dev branch drifts from the Go code.
     - name: Run tests against pumpX2
       working-directory: faketandem
       env:

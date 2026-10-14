@@ -1,0 +1,15 @@
+{"parse":{"key":"CURRENT_STATUS/80/CGMStatusRequest/long","characteristic":"CURRENT_STATUS","fragments":["0093509301eac7bf"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/80/CGMStatusRequest/ones","characteristic":"CURRENT_STATUS","fragments":["00555055001863"],"jar":{"ok":true,"toString":"CGMStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/80/CGMStatusRequest/rand1","characteristic":"CURRENT_STATUS","fragments":["008a508a000166"],"jar":{"ok":true,"toString":"CGMStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/80/CGMStatusRequest/rand2","characteristic":"CURRENT_STATUS","fragments":["00c550c500f37b"],"jar":{"ok":true,"toString":"CGMStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/80/CGMStatusRequest/small1","characteristic":"CURRENT_STATUS","fragments":["00c850c800af0d"],"jar":{"ok":true,"toString":"CGMStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/80/CGMStatusRequest/small2","characteristic":"CURRENT_STATUS","fragments":["00625062001aff"],"jar":{"ok":true,"toString":"CGMStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/80/CGMStatusRequest/sparse","characteristic":"CURRENT_STATUS","fragments":["00ae50ae0023ac"],"jar":{"ok":true,"toString":"CGMStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/80/CGMStatusRequest/zeros","characteristic":"CURRENT_STATUS","fragments":["00fb50fb00695d"],"jar":{"ok":true,"toString":"CGMStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/80/CGMStatusRequest/zeros-nochar","characteristic":"","fragments":["00bd50bd0003fa"],"jar":{"ok":true,"toString":"CGMStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/80/CGMStatusRequest/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["00bd50bd0003fa"],"jar":{"ok":true,"toString":"CGMStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/80/CGMStatusRequest/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["00bd50bd0003fa"],"jar":{"ok":true,"toString":"CGMStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/80/CGMStatusRequest/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["00bd50bd0003fa"],"jar":{"ok":true,"toString":"CGMStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/80/CGMStatusRequest/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["00bd50bd0003fa"],"jar":{"ok":true,"toString":"CGMStatusRequest[cargo={}]"}}}
+{"encode":{"key":"CGMStatusRequest/no-such-arity","txId":33,"message":"CGMStatusRequest","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"CGMStatusRequest/noargs","txId":217,"message":"CGMStatusRequest","params":"{}","jar":{"ok":true,"messageName":"CGMStatusRequest","txId":"-39","packets":["00d950d900ed3d"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}

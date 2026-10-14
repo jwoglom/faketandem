@@ -4,6 +4,8 @@ import (
 	"crypto/hmac"
 	"crypto/sha1" //nolint:gosec // HMAC-SHA1 is what the Tandem wire protocol specifies
 	"strconv"
+
+	"github.com/jwoglom/faketandem/pkg/pumpx2/messages/helpers"
 )
 
 // Packetize chunk sizes: pumpX2's Packetize.DEFAULT_MAX_CHUNK_SIZE and
@@ -21,16 +23,23 @@ func hmacSha1(data, key []byte) []byte {
 
 // determineMaxChunkSize is Packetize.determineMaxChunkSize.
 func determineMaxChunkSize(c *Class) int {
-	if c.Props.Characteristic == "CONTROL" && c.Props.Type == "REQUEST" {
+	if c.Props.Characteristic == Control && c.Props.Type == Request {
 		return controlMaxChunkSize
 	}
 	return defaultMaxChunkSize
 }
 
+// Packets frames m for the wire as transaction txID: the BLE writes or
+// notifications that carry it, signed with env's key if m is signed.
+func Packets(m Message, txID byte, env Env) ([][]byte, error) {
+	return tronPackets(m, txID, env)
+}
+
 // tronPackets is new TronMessageWrapper(message, txId).packets(), with the
 // signing inputs cliparser takes from its environment.
-func tronPackets(m *Message, txID byte, env Env) ([][]byte, error) {
-	chunk := determineMaxChunkSize(m.Class)
+func tronPackets(m Message, txID byte, env Env) ([][]byte, error) {
+	c := ClassOf(m)
+	chunk := determineMaxChunkSize(c)
 	if env.MaxChunkSize != "" {
 		v, err := strconv.ParseInt(env.MaxChunkSize, 10, 32)
 		if err != nil {
@@ -39,35 +48,35 @@ func tronPackets(m *Message, txID byte, env Env) ([][]byte, error) {
 		chunk = int(v)
 	}
 	var key []byte
-	if m.Class.Props.Signed {
+	if c.Props.Signed {
 		key = env.authKey()
 	}
 	tsr, err := env.timeSinceReset()
 	if err != nil {
 		return nil, err
 	}
-	return packetize(m, key, txID, chunk, tsr)
+	return packetize(c, m.Cargo(), key, txID, chunk, tsr)
 }
 
 // packetize is Packetize.packetize.
-func packetize(m *Message, key []byte, txID byte, maxChunkSize int, timeSinceReset int64) ([][]byte, error) {
-	if m.Cargo == nil {
-		return nil, exception("java.lang.NullPointerException", "packetize requires cargo, messageName=%s", m.Class.Name)
+func packetize(c *Class, cargo, key []byte, txID byte, maxChunkSize int, timeSinceReset int64) ([][]byte, error) {
+	if cargo == nil {
+		return nil, exception("java.lang.NullPointerException", "packetize requires cargo, messageName=%s", c.Name)
 	}
-	length := 3 + len(m.Cargo)
-	if m.Class.Props.Signed {
+	length := 3 + len(cargo)
+	if c.Props.Signed {
 		length += 24
 	}
 	packet := make([]byte, length)
-	packet[0] = byte(int8(m.Class.Props.OpCode))
+	packet[0] = byte(int8(c.Props.OpCode))
 	packet[1] = txID
 	packet[2] = byte(length - 3)
-	copy(packet[3:], m.Cargo)
+	copy(packet[3:], cargo)
 
-	if m.Class.Props.Signed {
+	if c.Props.Signed {
 		i := length - 20
 		messageData := append([]byte{}, packet[:i]...)
-		copy(messageData[length-24:], toUint32(timeSinceReset))
+		copy(messageData[length-24:], helpers.ToUint32(timeSinceReset))
 		if len(key) == 0 {
 			return nil, illegalArgument("Empty key")
 		}
@@ -76,7 +85,7 @@ func packetize(m *Message, key []byte, txID byte, maxChunkSize int, timeSinceRes
 		copy(packet[i:], mac)
 	}
 
-	packetWithCRC := append(packet, crc16(packet)...)
+	packetWithCRC := append(packet, helpers.CRC16(packet)...)
 
 	if maxChunkSize <= 0 {
 		return nil, illegalArgument("partitionSize must be positive, got %d", maxChunkSize)

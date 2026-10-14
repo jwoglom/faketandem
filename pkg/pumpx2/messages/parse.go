@@ -5,6 +5,8 @@ import (
 	"encoding/hex"
 	"regexp"
 	"strings"
+
+	"github.com/jwoglom/faketandem/pkg/pumpx2/messages/helpers"
 )
 
 var rawHexSeparator = regexp.MustCompile(`[,\s]+`)
@@ -39,38 +41,38 @@ func decodeHex(s string) ([]byte, error) {
 // named.
 var lengthHeuristics = []struct {
 	opcode, length int
-	characteristic string
+	characteristic Characteristic
 }{
-	{32, 14, "CURRENT_STATUS"}, {33, 22, "CURRENT_STATUS"}, {35, 30, "CURRENT_STATUS"}, {37, 22, "CURRENT_STATUS"},
-	{37, 148, "CONTROL"}, {-92, 78, "CONTROL"}, {-91, 70, "CONTROL"}, {-90, 66, "CONTROL"}, {-89, 68, "CONTROL"},
-	{32, 384, "AUTHORIZATION"}, {33, 384, "AUTHORIZATION"}, {34, 384, "AUTHORIZATION"}, {35, 384, "AUTHORIZATION"},
-	{36, 384, "AUTHORIZATION"}, {37, 354, "AUTHORIZATION"},
+	{32, 14, CurrentStatus}, {33, 22, CurrentStatus}, {35, 30, CurrentStatus}, {37, 22, CurrentStatus},
+	{37, 148, Control}, {-92, 78, Control}, {-91, 70, Control}, {-90, 66, Control}, {-89, 68, Control},
+	{32, 384, Authorization}, {33, 384, Authorization}, {34, 384, Authorization}, {35, 384, Authorization},
+	{36, 384, Authorization}, {37, 354, Authorization},
 }
 
 // resolveCharacteristic is the characteristic choice in Main.parse.
-func resolveCharacteristic(opcode int, btChar, rawHex string) (string, error) {
-	possible := possibleCharacteristics(opcode)
+func resolveCharacteristic(t *opcodeTables, opcode int, btChar, rawHex string) (Characteristic, error) {
+	possible := possibleCharacteristics(t, opcode)
 	if len(possible) > 1 {
 		if btChar != "" {
-			if _, ok := characteristics[btChar]; !ok {
+			if _, ok := CharacteristicUUID(btChar); !ok {
 				return "", exception("java.lang.IllegalArgumentException", "No enum constant Characteristic.%s", btChar)
 			}
-			possible = map[string]bool{btChar: true}
+			possible = map[Characteristic]bool{Characteristic(btChar): true}
 		} else {
 			for _, h := range lengthHeuristics {
 				if h.opcode == opcode && h.length == len(rawHex) {
-					possible = map[string]bool{h.characteristic: true}
+					possible = map[Characteristic]bool{h.characteristic: true}
 					break
 				}
 			}
 		}
 		switch {
-		case possible["CONTROL"]:
-			possible = map[string]bool{"CONTROL": true}
-		case possible["AUTHORIZATION"]:
-			possible = map[string]bool{"AUTHORIZATION": true}
-		case possible["CURRENT_STATUS"]:
-			possible = map[string]bool{"CURRENT_STATUS": true}
+		case possible[Control]:
+			possible = map[Characteristic]bool{Control: true}
+		case possible[Authorization]:
+			possible = map[Characteristic]bool{Authorization: true}
+		case possible[CurrentStatus]:
+			possible = map[Characteristic]bool{CurrentStatus: true}
 		default:
 			return "", exception("faketandem.NoMessage", "no single characteristic for opcode %d among %v", opcode, possible)
 		}
@@ -78,7 +80,7 @@ func resolveCharacteristic(opcode int, btChar, rawHex string) (string, error) {
 	if len(possible) == 0 {
 		return "", exception("faketandem.NoMessage", "Unknown opcode %d", opcode)
 	}
-	var chosen string
+	var chosen Characteristic
 	for c := range possible {
 		chosen = c
 	}
@@ -90,7 +92,11 @@ func resolveCharacteristic(opcode int, btChar, rawHex string) (string, error) {
 // (a pumpX2 Characteristic name, or "" for none) they arrived on. It returns
 // the message cliparser would print, or an error wherever cliparser would print
 // something other than a message (an exception, or no message at all).
-func ParseFragments(btChar string, rawPacketsHex []string, env Env) (*Message, error) {
+func ParseFragments(btChar string, rawPacketsHex []string, env Env) (Message, error) {
+	t, err := messageTables()
+	if err != nil {
+		return nil, err
+	}
 	rawHex := strings.Join(rawPacketsHex, " ")
 	packets := splitRawHexPackets([]string{rawHex})
 	if len(packets) == 0 {
@@ -106,7 +112,7 @@ func ParseFragments(btChar string, rawPacketsHex []string, env Env) (*Message, e
 	txID := first[1]
 	opcode := int(int8(first[2]))
 
-	characteristic, err := resolveCharacteristic(opcode, btChar, rawHex)
+	characteristic, err := resolveCharacteristic(t, opcode, btChar, rawHex)
 	if err != nil {
 		return nil, err
 	}
@@ -114,21 +120,21 @@ func ParseFragments(btChar string, rawPacketsHex []string, env Env) (*Message, e
 	if !ok {
 		return nil, exception("java.lang.NullPointerException", "no class for opcode %d on %s", opcode, characteristic)
 	}
-	expected, err := newInstance(expectedClass)
+	expected, err := expectedClass.New()
 	if err != nil {
 		return nil, err
 	}
-	expected.fillWithEmptyCargo()
+	expected.SetCargo([]byte{})
 	return testRequest(expected, txID, characteristic, packets, env)
 }
 
 // testRequest is Main.testRequest: the fragments fed through BTResponseParser
 // against a PacketArrayList built for the expected message.
-func testRequest(expected *Message, txID byte, characteristic string, packets []string, env Env) (*Message, error) {
+func testRequest(expected Message, txID byte, characteristic Characteristic, packets []string, env Env) (Message, error) {
 	if _, err := tronPackets(expected, txID, env); err != nil {
 		return nil, err
 	}
-	pal, err := buildPacketArrayList(expected, txID)
+	pal, err := buildPacketArrayList(ClassOf(expected), txID)
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +142,7 @@ func testRequest(expected *Message, txID byte, characteristic string, packets []
 		return nil, exception("org.apache.commons.lang3.NotImplementedException", "Qualifying event characteristic")
 	}
 
-	var result *Message
+	var result Message
 	for _, p := range packets {
 		data, err := decodeHex(p)
 		if err != nil {
@@ -171,18 +177,18 @@ type packetArrayList struct {
 }
 
 var shortCargoTolerant = map[string]bool{
-	"response.authentication.Jpake1aResponse": true,
-	"response.authentication.Jpake1bResponse": true,
-	"response.authentication.Jpake2Response":  true,
+	"Jpake1aResponse": true,
+	"Jpake1bResponse": true,
+	"Jpake2Response":  true,
 }
 
 // buildPacketArrayList is TronMessageWrapper.buildPacketArrayList.
-func buildPacketArrayList(m *Message, txID byte) (*packetArrayList, error) {
-	props := m.Class.Props
+func buildPacketArrayList(c *Class, txID byte) (*packetArrayList, error) {
+	props := c.Props
 	var opcode, size int
-	if props.Type == "REQUEST" {
+	if props.Type == Request {
 		if props.Response == "" {
-			return nil, exception("java.lang.NullPointerException", "%s has no response class", m.Class.Name)
+			return nil, exception("java.lang.NullPointerException", "%s has no response class", c.Name)
 		}
 		opcode = props.OpCode
 		size = props.Size
@@ -391,13 +397,13 @@ func (p *packetArrayList) validate(key []byte) (bool, error) {
 	}
 	body := p.fullCargo[:len(p.fullCargo)-2]
 	header := []byte{byte(p.expectedOpCode), byte(p.expectedTxID), byte(p.expectedCargoSize)}
-	p.messageData = combine(header, body)
+	p.messageData = helpers.Combine(header, body)
 	expectedCrc := []byte{0, 0}
 	if len(p.fullCargo) >= 2 {
 		expectedCrc = p.fullCargo[len(p.fullCargo)-2:]
 	}
 
-	if !bytes.Equal(crc16(p.messageData), expectedCrc) {
+	if !bytes.Equal(helpers.CRC16(p.messageData), expectedCrc) {
 		if shouldIgnoreInvalidHmac(key) {
 			return false, nil
 		}
@@ -418,7 +424,7 @@ func (p *packetArrayList) validate(key []byte) (bool, error) {
 
 // btResponseParse is BTResponseParser.parse for one fragment: the message
 // once the last fragment is in, else nil.
-func btResponseParse(p *packetArrayList, data []byte, characteristic string, env Env) (*Message, error) {
+func btResponseParse(p *packetArrayList, data []byte, characteristic Characteristic, env Env) (Message, error) {
 	if err := p.validatePacket(data); err != nil {
 		return nil, err
 	}
@@ -434,13 +440,28 @@ func btResponseParse(p *packetArrayList, data []byte, characteristic string, env
 	if !found {
 		return nil, nil
 	}
-	m, err := runParse(c, cargo)
+	m, err := Parse(c, cargo)
 	if err != nil {
 		// Messages.parse logs the exception and returns null.
-		if je, ok := err.(*JavaException); ok && je.Class == "faketandem.NotPorted" {
-			return nil, err
-		}
 		return nil, nil
+	}
+	return m, nil
+}
+
+// Parse is Messages.parse once the packets are joined: cargo (with its
+// signed trailer, when the message has one) parsed into a new instance of c.
+func Parse(c *Class, cargo []byte) (m Message, err error) {
+	m, err = c.New()
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = recovered(r)
+		}
+	}()
+	if err := m.Parse(cargo); err != nil {
+		return nil, err
 	}
 	return m, nil
 }

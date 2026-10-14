@@ -1,0 +1,15 @@
+{"parse":{"key":"CURRENT_STATUS/72/ReminderStatusRequest/long","characteristic":"CURRENT_STATUS","fragments":["009b489b01a52931"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/72/ReminderStatusRequest/ones","characteristic":"CURRENT_STATUS","fragments":["00f148f1006058"],"jar":{"ok":true,"toString":"ReminderStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/72/ReminderStatusRequest/rand1","characteristic":"CURRENT_STATUS","fragments":["00ab48ab0014b9"],"jar":{"ok":true,"toString":"ReminderStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/72/ReminderStatusRequest/rand2","characteristic":"CURRENT_STATUS","fragments":["008948890090d9"],"jar":{"ok":true,"toString":"ReminderStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/72/ReminderStatusRequest/small1","characteristic":"CURRENT_STATUS","fragments":["00cf48cf00fa7e"],"jar":{"ok":true,"toString":"ReminderStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/72/ReminderStatusRequest/small2","characteristic":"CURRENT_STATUS","fragments":["00ce48ce00cb4d"],"jar":{"ok":true,"toString":"ReminderStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/72/ReminderStatusRequest/sparse","characteristic":"CURRENT_STATUS","fragments":["002c482c001b3b"],"jar":{"ok":true,"toString":"ReminderStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/72/ReminderStatusRequest/zeros","characteristic":"CURRENT_STATUS","fragments":["00b948b90005dc"],"jar":{"ok":true,"toString":"ReminderStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/72/ReminderStatusRequest/zeros-nochar","characteristic":"","fragments":["00ef48ef001c78"],"jar":{"ok":true,"toString":"ReminderStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/72/ReminderStatusRequest/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["00ef48ef001c78"],"jar":{"ok":true,"toString":"ReminderStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/72/ReminderStatusRequest/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["00ef48ef001c78"],"jar":{"ok":true,"toString":"ReminderStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/72/ReminderStatusRequest/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["00ef48ef001c78"],"jar":{"ok":true,"toString":"ReminderStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/72/ReminderStatusRequest/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["00ef48ef001c78"],"jar":{"ok":true,"toString":"ReminderStatusRequest[cargo={}]"}}}
+{"encode":{"key":"ReminderStatusRequest/no-such-arity","txId":237,"message":"ReminderStatusRequest","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"ReminderStatusRequest/noargs","txId":187,"message":"ReminderStatusRequest","params":"{}","jar":{"ok":true,"messageName":"ReminderStatusRequest","txId":"-69","packets":["00bb48bb0067ba"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}

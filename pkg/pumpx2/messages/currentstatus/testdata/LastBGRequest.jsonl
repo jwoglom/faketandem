@@ -1,0 +1,15 @@
+{"parse":{"key":"CURRENT_STATUS/50/LastBGRequest/long","characteristic":"CURRENT_STATUS","fragments":["00d232d2015ddcf6"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/50/LastBGRequest/ones","characteristic":"CURRENT_STATUS","fragments":["001832180083ed"],"jar":{"ok":true,"toString":"LastBGRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/50/LastBGRequest/rand1","characteristic":"CURRENT_STATUS","fragments":["004b324b006fb6"],"jar":{"ok":true,"toString":"LastBGRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/50/LastBGRequest/rand2","characteristic":"CURRENT_STATUS","fragments":["002a322a00748e"],"jar":{"ok":true,"toString":"LastBGRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/50/LastBGRequest/small1","characteristic":"CURRENT_STATUS","fragments":["0014321400eea8"],"jar":{"ok":true,"toString":"LastBGRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/50/LastBGRequest/small2","characteristic":"CURRENT_STATUS","fragments":["008832880068f5"],"jar":{"ok":true,"toString":"LastBGRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/50/LastBGRequest/sparse","characteristic":"CURRENT_STATUS","fragments":["006a326a00b883"],"jar":{"ok":true,"toString":"LastBGRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/50/LastBGRequest/zeros","characteristic":"CURRENT_STATUS","fragments":["0006320600ffcd"],"jar":{"ok":true,"toString":"LastBGRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/50/LastBGRequest/zeros-nochar","characteristic":"","fragments":["00ac32ac004a3f"],"jar":{"ok":true,"toString":"LastBGRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/50/LastBGRequest/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["00ac32ac004a3f"],"jar":{"ok":true,"toString":"LastBGRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/50/LastBGRequest/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["00ac32ac004a3f"],"jar":{"ok":true,"toString":"LastBGRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/50/LastBGRequest/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["00ac32ac004a3f"],"jar":{"ok":true,"toString":"LastBGRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/50/LastBGRequest/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["00ac32ac004a3f"],"jar":{"ok":true,"toString":"LastBGRequest[cargo={}]"}}}
+{"encode":{"key":"LastBGRequest/no-such-arity","txId":22,"message":"LastBGRequest","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"LastBGRequest/noargs","txId":222,"message":"LastBGRequest","params":"{}","jar":{"ok":true,"messageName":"LastBGRequest","txId":"-34","packets":["00de32de007151"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}

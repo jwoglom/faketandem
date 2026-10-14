@@ -1,0 +1,15 @@
+{"parse":{"key":"CURRENT_STATUS/78/PumpFeaturesV1Request/long","characteristic":"CURRENT_STATUS","fragments":["00cf4ecf01318357"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/78/PumpFeaturesV1Request/ones","characteristic":"CURRENT_STATUS","fragments":["006e4e6e0015e2"],"jar":{"ok":true,"toString":"PumpFeaturesV1Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/78/PumpFeaturesV1Request/rand1","characteristic":"CURRENT_STATUS","fragments":["00ca4eca00af33"],"jar":{"ok":true,"toString":"PumpFeaturesV1Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/78/PumpFeaturesV1Request/rand2","characteristic":"CURRENT_STATUS","fragments":["00e64ee6002470"],"jar":{"ok":true,"toString":"PumpFeaturesV1Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/78/PumpFeaturesV1Request/small1","characteristic":"CURRENT_STATUS","fragments":["00554e55007a3b"],"jar":{"ok":true,"toString":"PumpFeaturesV1Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/78/PumpFeaturesV1Request/small2","characteristic":"CURRENT_STATUS","fragments":["00904e9000dbd2"],"jar":{"ok":true,"toString":"PumpFeaturesV1Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/78/PumpFeaturesV1Request/sparse","characteristic":"CURRENT_STATUS","fragments":["00e24ee200e0bc"],"jar":{"ok":true,"toString":"PumpFeaturesV1Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/78/PumpFeaturesV1Request/zeros","characteristic":"CURRENT_STATUS","fragments":["008b4e8b00520d"],"jar":{"ok":true,"toString":"PumpFeaturesV1Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/78/PumpFeaturesV1Request/zeros-nochar","characteristic":"","fragments":["00554e55007a3b"],"jar":{"ok":true,"toString":"PumpFeaturesV1Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/78/PumpFeaturesV1Request/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["00554e55007a3b"],"jar":{"ok":true,"toString":"PumpFeaturesV1Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/78/PumpFeaturesV1Request/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["00554e55007a3b"],"jar":{"ok":true,"toString":"PumpFeaturesV1Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/78/PumpFeaturesV1Request/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["00554e55007a3b"],"jar":{"ok":true,"toString":"PumpFeaturesV1Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/78/PumpFeaturesV1Request/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["00554e55007a3b"],"jar":{"ok":true,"toString":"PumpFeaturesV1Request[cargo={}]"}}}
+{"encode":{"key":"PumpFeaturesV1Request/no-such-arity","txId":134,"message":"PumpFeaturesV1Request","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"PumpFeaturesV1Request/noargs","txId":206,"message":"PumpFeaturesV1Request","params":"{}","jar":{"ok":true,"messageName":"PumpFeaturesV1Request","txId":"-50","packets":["00ce4ece006bff"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}

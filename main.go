@@ -32,7 +32,7 @@ func main() {
 	// if both verbose and quiet are chosen, e.g., -v -q, the verbose dominates
 	var traceLevel = flag.Bool("v", false, "verbose off by default, TraceLevel")
 	var infoLevel = flag.Bool("q", false, "quiet off by default, InfoLevel")
-	var messageCodec = flag.String("message-codec", config.MessageCodecNative, "how pump messages are parsed and encoded: 'native' (the Go port of pumpX2's message library, no JVM), 'pumpx2' (pumpX2's cliparser) or 'compare' (answer with the Go port, also run cliparser on every message and log any difference)")
+	var messageCodec = flag.String("message-codec", config.MessageCodecNative, "how pump messages are parsed and encoded: 'native' (Go implementations of pumpX2's messages, no JVM), 'pumpx2' (pumpX2's cliparser) or 'compare' (answer in Go, also run cliparser on every message and log any difference)")
 	var pumpX2Path = flag.String("pumpx2-path", "", "path to a pumpX2 checkout (or PUMPX2_PATH); used only by -message-codec pumpx2/compare and -jpake-mode pumpx2, and not needed with -pumpx2-jar-path")
 	var pumpX2Mode = flag.String("pumpx2-mode", "gradle", "how to run cliparser from -pumpx2-path: 'gradle' or 'jar'")
 	var pumpX2JarPath = flag.String("pumpx2-jar-path", "", "path to a prebuilt cliparser jar for -message-codec pumpx2/compare and -jpake-mode pumpx2; skips gradle entirely and implies -pumpx2-mode=jar")

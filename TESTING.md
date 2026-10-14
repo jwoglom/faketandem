@@ -14,12 +14,12 @@ Tests are organized into two categories:
 
 ### Integration Tests (`*_integration_test.go`, `*_jar_test.go`)
 - Test complete workflows
-- Need no pumpX2: messages run through the Go port in `pkg/pumpx2/messages`
-  and pairing through `pkg/jpake`. The `*_jar_test.go` handler and harness
-  tests run through the Go port, and through the cliparser jar as well when
-  `FAKETANDEM_TEST_CLIPARSER_JAR` is set.
+- Need no pumpX2: messages run through the Go message types in
+  `pkg/pumpx2/messages` and pairing through `pkg/jpake`. The `*_jar_test.go`
+  handler and harness tests run through the Go codec, and through the cliparser
+  jar as well when `FAKETANDEM_TEST_CLIPARSER_JAR` is set.
 - A few test pumpX2's own code paths (the `pumpx2` JPAKE mode, the jar
-  runners) or check the Go port against the jar, and are skipped without it.
+  runners) or check the Go code against the live jar, and are skipped without it.
 
 ## Running Tests
 
@@ -35,17 +35,17 @@ go test ./...
 go test -short ./...
 ```
 
-### Check the Go port against pumpX2
+### Check the Go message types against pumpX2
 
 ```bash
-# Every parse/encode parity case, the bridge comparison, compare mode, and the
-# JPAKE cross-checks, live against a cliparser jar:
+# The recorded answers against the jar, the bridge comparison, compare mode,
+# and the JPAKE cross-checks, live against a cliparser jar:
 FAKETANDEM_TEST_CLIPARSER_JAR=/path/to/cliparser.jar go test ./...
 ```
 
-Without the variable the parity cases still run, against the jar's answers
-recorded in `pkg/pumpx2/messages/parity/testdata`. See the README's
-"pumpX2 is optional" section for regenerating them.
+Without the variable every message type is still checked against the jar's
+answers recorded beside it (`pkg/pumpx2/messages/<package>/testdata`). See
+`pkg/pumpx2/messages/README.md` for regenerating them.
 
 ### Run Specific Test Package
 

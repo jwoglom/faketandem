@@ -1,0 +1,15 @@
+{"parse":{"key":"CURRENT_STATUS/118/MalfunctionStatusRequest/long","characteristic":"CURRENT_STATUS","fragments":["00cd76cd01407ffe"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/118/MalfunctionStatusRequest/ones","characteristic":"CURRENT_STATUS","fragments":["0018761800ee2c"],"jar":{"ok":true,"toString":"MalfunctionStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/118/MalfunctionStatusRequest/rand1","characteristic":"CURRENT_STATUS","fragments":["006b766b00e471"],"jar":{"ok":true,"toString":"MalfunctionStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/118/MalfunctionStatusRequest/rand2","characteristic":"CURRENT_STATUS","fragments":["000b760b00ce7a"],"jar":{"ok":true,"toString":"MalfunctionStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/118/MalfunctionStatusRequest/small1","characteristic":"CURRENT_STATUS","fragments":["00f576f500004a"],"jar":{"ok":true,"toString":"MalfunctionStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/118/MalfunctionStatusRequest/small2","characteristic":"CURRENT_STATUS","fragments":["00b076b00039b8"],"jar":{"ok":true,"toString":"MalfunctionStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/118/MalfunctionStatusRequest/sparse","characteristic":"CURRENT_STATUS","fragments":["008b768b005661"],"jar":{"ok":true,"toString":"MalfunctionStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/118/MalfunctionStatusRequest/zeros","characteristic":"CURRENT_STATUS","fragments":["00897689003407"],"jar":{"ok":true,"toString":"MalfunctionStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/118/MalfunctionStatusRequest/zeros-nochar","characteristic":"","fragments":["00b876b8009031"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/118/MalfunctionStatusRequest/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["00b876b8009031"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/118/MalfunctionStatusRequest/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["00b876b8009031"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/118/MalfunctionStatusRequest/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["00b876b8009031"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/118/MalfunctionStatusRequest/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["00b876b8009031"],"jar":{"ok":false}}}
+{"encode":{"key":"MalfunctionStatusRequest/no-such-arity","txId":91,"message":"MalfunctionStatusRequest","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"MalfunctionStatusRequest/noargs","txId":21,"message":"MalfunctionStatusRequest","params":"{}","jar":{"ok":true,"messageName":"MalfunctionStatusRequest","txId":"21","packets":["0015761500b25a"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}

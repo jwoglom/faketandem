@@ -9,6 +9,8 @@ import (
 
 	"github.com/jwoglom/faketandem/pkg/bluetooth"
 	"github.com/jwoglom/faketandem/pkg/pumpx2/messages"
+	// Every pumpX2 message type, for the Go codec to parse and build.
+	_ "github.com/jwoglom/faketandem/pkg/pumpx2/messages/all"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -16,17 +18,18 @@ import (
 // Codec names: which implementation of the pumpX2 message library parses
 // requests and encodes responses.
 const (
-	// CodecNative is the Go port in pkg/pumpx2/messages. It needs no JVM.
+	// CodecNative is the Go implementation in pkg/pumpx2/messages. It needs
+	// no JVM.
 	CodecNative = "native"
 	// CodecPumpX2 is pumpX2's own cliparser, run as a jar or through gradle.
 	CodecPumpX2 = "pumpx2"
-	// CodecCompare answers with the Go port but also runs every message
+	// CodecCompare answers with the Go implementation but also runs every message
 	// through cliparser and logs any difference, for checking the port against
 	// live traffic.
 	CodecCompare = "compare"
 )
 
-// Bridge parses and encodes pump messages. The zero value uses the Go port;
+// Bridge parses and encodes pump messages. The zero value uses the Go codec;
 // NewBridge attaches pumpX2's cliparser.
 type Bridge struct {
 	runner         Runner
@@ -40,13 +43,13 @@ type Bridge struct {
 	mismatches int
 }
 
-// NewNativeBridge creates a bridge backed by the Go port alone.
+// NewNativeBridge creates a bridge backed by the Go implementation alone.
 func NewNativeBridge() *Bridge {
 	return &Bridge{codec: CodecNative}
 }
 
 // NewBridge creates a bridge backed by pumpX2's cliparser (CodecPumpX2), or by
-// the Go port checked against it (CodecCompare). If jarPath is non-empty it
+// the Go implementation checked against it (CodecCompare). If jarPath is non-empty it
 // is used directly as the cliparser JAR, skipping gradle entirely regardless
 // of mode.
 func NewBridge(pumpX2Path, mode, gradleCmd, javaCmd, jarPath string) (*Bridge, error) {
@@ -92,7 +95,7 @@ func (b *Bridge) Codec() string {
 	return b.codec
 }
 
-// Mismatches counts the messages on which the Go port and cliparser
+// Mismatches counts the messages on which the Go implementation and cliparser
 // disagreed, in CodecCompare.
 func (b *Bridge) Mismatches() int {
 	b.mismatchMu.Lock()
@@ -149,13 +152,13 @@ func (b *Bridge) ParseMessage(charType bluetooth.CharacteristicType, rawPacketsH
 	}
 }
 
-// parseNative is cliparser's parse done by the Go port. Its result is read
+// parseNative is cliparser's parse done in Go. Its result is read
 // through the same parseCliparserOutput as the jar's printed output, so a
 // handler sees the same fields from either.
 //
 // Where cliparser prints no message (an exception, a bad CRC, an unknown
 // opcode) the jar path reads the exception's text as a message name; the
-// port leaves the name empty instead. Either way no handler matches it.
+// Go codec leaves the name empty instead. Either way no handler matches it.
 func parseNative(charType bluetooth.CharacteristicType, rawPacketsHex []string) (*ParsedMessage, error) {
 	opcode, txID, ok := opcodeAndTxIDFromFirstFragment(rawPacketsHex)
 	if !ok {
@@ -173,7 +176,7 @@ func parseNative(charType bluetooth.CharacteristicType, rawPacketsHex []string) 
 		log.Debugf("No message in fragments on %s: %v", charType, err)
 		return msg, nil
 	}
-	msg.MessageType, msg.Cargo = parseCliparserOutput(m.ToString())
+	msg.MessageType, msg.Cargo = parseCliparserOutput(messages.ToString(m))
 	msg.IsValid = msg.MessageType != ""
 	return msg, nil
 }
@@ -217,7 +220,7 @@ func (b *Bridge) EncodeMessage(txID int, messageName string, params map[string]i
 	}
 }
 
-// encodeNative is cliparser's encode done by the Go port, giving the bridge
+// encodeNative is cliparser's encode done in Go, giving the bridge
 // the same EncodedMessage the jar's output does: the characteristic as its
 // UUID, and no opcode, which cliparser does not print.
 func encodeNative(txID int, messageName string, params map[string]interface{}) (*EncodedMessage, error) {
@@ -310,7 +313,7 @@ func (b *Bridge) mismatch(format string, args ...interface{}) {
 	log.Errorf("pumpX2 parity mismatch: "+format, args...)
 }
 
-// compareParsed holds the port's parse to cliparser's. A message cliparser
+// compareParsed holds the Go parse to cliparser's. A message cliparser
 // printed no dump for counts as failed on both sides when the port found none
 // either.
 func (b *Bridge) compareParsed(raw []string, native *ParsedMessage, nerr error, jar *ParsedMessage, jerr error) {
@@ -321,7 +324,7 @@ func (b *Bridge) compareParsed(raw []string, native *ParsedMessage, nerr error, 
 		return
 	}
 	// Where cliparser printed an exception the jar path reads its text as the
-	// name and the port leaves it empty.
+	// name and the Go codec leaves it empty.
 	if !native.IsValid && !messages.IsMessageName(jar.MessageType) {
 		return
 	}
@@ -330,7 +333,7 @@ func (b *Bridge) compareParsed(raw []string, native *ParsedMessage, nerr error, 
 	}
 }
 
-// compareEncoded holds the port's encode to cliparser's.
+// compareEncoded holds the Go encode to cliparser's.
 func (b *Bridge) compareEncoded(name string, params map[string]interface{}, native *EncodedMessage, nerr error, jar *EncodedMessage, jerr error) {
 	switch {
 	case (nerr == nil) != (jerr == nil):

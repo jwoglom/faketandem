@@ -1,0 +1,15 @@
+{"parse":{"key":"CURRENT_STATUS/120/HighestAamRequest/long","characteristic":"CURRENT_STATUS","fragments":["007678760138b4ad"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/120/HighestAamRequest/ones","characteristic":"CURRENT_STATUS","fragments":["006a786a00d459"],"jar":{"ok":true,"toString":"HighestAamRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/120/HighestAamRequest/rand1","characteristic":"CURRENT_STATUS","fragments":["00567856002c19"],"jar":{"ok":true,"toString":"HighestAamRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/120/HighestAamRequest/rand2","characteristic":"CURRENT_STATUS","fragments":["00bb78bb00c27f"],"jar":{"ok":true,"toString":"HighestAamRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/120/HighestAamRequest/small1","characteristic":"CURRENT_STATUS","fragments":["002f782f00edab"],"jar":{"ok":true,"toString":"HighestAamRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/120/HighestAamRequest/small2","characteristic":"CURRENT_STATUS","fragments":["00877887003a3f"],"jar":{"ok":true,"toString":"HighestAamRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/120/HighestAamRequest/sparse","characteristic":"CURRENT_STATUS","fragments":["005b785b00706f"],"jar":{"ok":true,"toString":"HighestAamRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/120/HighestAamRequest/zeros","characteristic":"CURRENT_STATUS","fragments":["004f784f00c7a0"],"jar":{"ok":true,"toString":"HighestAamRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/120/HighestAamRequest/zeros-nochar","characteristic":"","fragments":["0052785200e8d5"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/120/HighestAamRequest/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["0052785200e8d5"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/120/HighestAamRequest/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["0052785200e8d5"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/120/HighestAamRequest/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["0052785200e8d5"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/120/HighestAamRequest/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["0052785200e8d5"],"jar":{"ok":false}}}
+{"encode":{"key":"HighestAamRequest/no-such-arity","txId":25,"message":"HighestAamRequest","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"HighestAamRequest/noargs","txId":297,"message":"HighestAamRequest","params":"{}","jar":{"ok":true,"messageName":"HighestAamRequest","txId":"41","packets":["00297829004b01"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}

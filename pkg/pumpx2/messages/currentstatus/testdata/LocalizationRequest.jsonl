@@ -1,0 +1,16 @@
+{"parse":{"key":"CONTROL/-90/StopTempRateRequest/zeros-on-CURRENT_STATUS","characteristic":"CURRENT_STATUS","fragments":["0022a6220024a3"],"jar":{"ok":true,"toString":"LocalizationRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-90/LocalizationRequest/long","characteristic":"CURRENT_STATUS","fragments":["0064a66401099cac"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-90/LocalizationRequest/ones","characteristic":"CURRENT_STATUS","fragments":["0082a682005abe"],"jar":{"ok":true,"toString":"LocalizationRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-90/LocalizationRequest/rand1","characteristic":"CURRENT_STATUS","fragments":["009aa69a008034"],"jar":{"ok":true,"toString":"LocalizationRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-90/LocalizationRequest/rand2","characteristic":"CURRENT_STATUS","fragments":["0057a657008854"],"jar":{"ok":true,"toString":"LocalizationRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-90/LocalizationRequest/small1","characteristic":"CURRENT_STATUS","fragments":["0082a682005abe"],"jar":{"ok":true,"toString":"LocalizationRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-90/LocalizationRequest/small2","characteristic":"CURRENT_STATUS","fragments":["0021a6210077f6"],"jar":{"ok":true,"toString":"LocalizationRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-90/LocalizationRequest/sparse","characteristic":"CURRENT_STATUS","fragments":["00b4a6b4006911"],"jar":{"ok":true,"toString":"LocalizationRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-90/LocalizationRequest/zeros","characteristic":"CURRENT_STATUS","fragments":["0036a63600936c"],"jar":{"ok":true,"toString":"LocalizationRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-90/LocalizationRequest/zeros-nochar","characteristic":"","fragments":["00faa6fa00aa3f"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-90/LocalizationRequest/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["00faa6fa00aa3f"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-90/LocalizationRequest/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["00faa6fa00aa3f"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-90/LocalizationRequest/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["00faa6fa00aa3f"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-90/LocalizationRequest/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["00faa6fa00aa3f"],"jar":{"ok":false}}}
+{"encode":{"key":"LocalizationRequest/no-such-arity","txId":89,"message":"LocalizationRequest","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"LocalizationRequest/noargs","txId":111,"message":"LocalizationRequest","params":"{}","jar":{"ok":true,"messageName":"LocalizationRequest","txId":"111","packets":["006fa66f00b4d8"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}

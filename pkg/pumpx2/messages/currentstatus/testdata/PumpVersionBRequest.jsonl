@@ -1,0 +1,16 @@
+{"parse":{"key":"CONTROL/-124/UserInteractionRequest/zeros-on-CURRENT_STATUS","characteristic":"CURRENT_STATUS","fragments":["009c849c008076"],"jar":{"ok":true,"toString":"PumpVersionBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-124/PumpVersionBRequest/long","characteristic":"CURRENT_STATUS","fragments":["006484640185be26"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-124/PumpVersionBRequest/ones","characteristic":"CURRENT_STATUS","fragments":["00b984b900938f"],"jar":{"ok":true,"toString":"PumpVersionBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-124/PumpVersionBRequest/rand1","characteristic":"CURRENT_STATUS","fragments":["00c284c200305b"],"jar":{"ok":true,"toString":"PumpVersionBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-124/PumpVersionBRequest/rand2","characteristic":"CURRENT_STATUS","fragments":["002484240024e1"],"jar":{"ok":true,"toString":"PumpVersionBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-124/PumpVersionBRequest/small1","characteristic":"CURRENT_STATUS","fragments":["009a849a0026dc"],"jar":{"ok":true,"toString":"PumpVersionBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-124/PumpVersionBRequest/small2","characteristic":"CURRENT_STATUS","fragments":["00f784f70050a1"],"jar":{"ok":true,"toString":"PumpVersionBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-124/PumpVersionBRequest/sparse","characteristic":"CURRENT_STATUS","fragments":["008784870009a9"],"jar":{"ok":true,"toString":"PumpVersionBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-124/PumpVersionBRequest/zeros","characteristic":"CURRENT_STATUS","fragments":["00da84da00ead1"],"jar":{"ok":true,"toString":"PumpVersionBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-124/PumpVersionBRequest/zeros-nochar","characteristic":"","fragments":["0053845300ea70"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-124/PumpVersionBRequest/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["0053845300ea70"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-124/PumpVersionBRequest/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["0053845300ea70"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-124/PumpVersionBRequest/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["0053845300ea70"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-124/PumpVersionBRequest/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["0053845300ea70"],"jar":{"ok":false}}}
+{"encode":{"key":"PumpVersionBRequest/no-such-arity","txId":196,"message":"PumpVersionBRequest","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"PumpVersionBRequest/noargs","txId":37,"message":"PumpVersionBRequest","params":"{}","jar":{"ok":true,"messageName":"PumpVersionBRequest","txId":"37","packets":["002584250015d2"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}
