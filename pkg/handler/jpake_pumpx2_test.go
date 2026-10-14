@@ -179,6 +179,12 @@ func TestPumpX2JPAKEAuthenticator_FullFlowViaJar(t *testing.T) {
 
 	auth := NewPumpX2JPAKEAuthenticator(pairingCode, bridge, "", "jar", "", "java", jarPath)
 	defer func() { _ = auth.Close() }()
+	if err := bridge.WarmUp(); err != nil {
+		t.Fatalf("cliparser warmup failed: %v", err)
+	}
+	if err := auth.Prepare(); err != nil {
+		t.Fatalf("JPAKE preparation failed: %v", err)
+	}
 
 	clientCmd := exec.Command("java", "-jar", jarPath, "jpake", pairingCode)
 	clientStdin, err := clientCmd.StdinPipe()

@@ -18,6 +18,26 @@ import (
 // touches: it only ever asks whether a central is connected.
 type fakeTransport struct{ connected bool }
 
+func TestPairingProgressIsBroadcastAndRetained(t *testing.T) {
+	server := New(&fakeTransport{})
+	srv := httptest.NewServer(wsMux(server))
+	defer srv.Close()
+	conn := dialWS(t, srv)
+	server.SendPairingProgress("App disconnected before authentication completed.", true)
+	first := readEvent(t, conn)
+	if first.Type != "pairing_error" || first.Message == "" {
+		t.Fatalf("missing pairing failure: %+v", first)
+	}
+	server.SendLatestPairingProgress()
+	if retained := readEvent(t, conn); retained != first {
+		t.Fatalf("refresh lost failure: got %+v, want %+v", retained, first)
+	}
+	server.SendPairingProgress("Pairing completed successfully.", false)
+	if success := readEvent(t, conn); success.Type != "pairing_progress" {
+		t.Fatalf("failure did not clear on success: %+v", success)
+	}
+}
+
 func (f *fakeTransport) SetWriteHandler(bluetooth.WriteHandler)                     {}
 func (f *fakeTransport) SetReadHandler(bluetooth.ReadHandler)                       {}
 func (f *fakeTransport) SetConnectionHandler(bluetooth.ConnectionHandler)           {}

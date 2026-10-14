@@ -235,3 +235,49 @@ func TestJPAKEHandlerDropsSessionOnRoundFailure(t *testing.T) {
 		t.Error("the failed authenticator was left in the session map; the next pairing attempt would inherit it")
 	}
 }
+
+func TestPreparedJPAKEIsUsedOnlyOnce(t *testing.T) {
+	script := writeFakeJPAKEServer(t, "echo 'JPAKE_1A: "+jpake1aEnvelope+"'\nread _client1a\necho 'JPAKE_1B: "+jpake1bEnvelope+"'\nread _client1b\n")
+	manager := NewJPAKESessionManager("pumpx2", "", "jar", "", script, "unused.jar", state.NewPumpState())
+	defer manager.Close()
+	if err := manager.Prepare(nil); err != nil {
+		t.Fatal(err)
+	}
+	prepared := manager.prepared
+	if err := manager.Prepare(nil); err != nil || manager.prepared != prepared {
+		t.Fatal("preparing twice replaced unused ephemeral keys")
+	}
+	auth, err := manager.GetOrCreate("default", "123456", nil, 1)
+	if err != nil || auth != prepared || manager.prepared != nil {
+		t.Fatal("round 1 did not consume the prepared authenticator")
+	}
+	manager.RemoveAll()
+	next, err := manager.GetOrCreate("default", "123456", nil, 1)
+	if err != nil || next == prepared {
+		t.Fatal("next handshake reused consumed ephemeral keys")
+	}
+}
+
+func TestPreparedJPAKEDoesNotOverrideQuickPairOrChangedPIN(t *testing.T) {
+	script := writeFakeJPAKEServer(t, "echo 'JPAKE_1A: "+jpake1aEnvelope+"'\nread _client1a\n")
+	pumpState := state.NewPumpState()
+	pumpState.SetLongTermKey([]byte("cached-key"))
+	manager := NewJPAKESessionManager("pumpx2", "", "jar", "", script, "unused.jar", pumpState)
+	defer manager.Close()
+	if err := manager.Prepare(nil); err != nil {
+		t.Fatal(err)
+	}
+	prepared := manager.prepared
+	auth, err := manager.GetOrCreate("quick", "123456", nil, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := auth.(*QuickReconnectJPAKEAuthenticator); !ok || manager.prepared != prepared {
+		t.Fatal("prepared full pairing displaced the quick reconnect")
+	}
+	pumpState.SetPairingCode("654321")
+	auth, err = manager.GetOrCreate("full", "654321", nil, 1)
+	if err != nil || auth == prepared || manager.prepared != nil {
+		t.Fatal("changed PIN reused the old password's prepared authenticator")
+	}
+}

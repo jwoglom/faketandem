@@ -529,6 +529,13 @@ func (ps *PumpState) SetLongTermKey(key []byte) {
 	ps.LongTermKey = key
 }
 
+// Authenticated returns whether authentication completed on this connection.
+func (ps *PumpState) Authenticated() bool {
+	ps.mutex.RLock()
+	defer ps.mutex.RUnlock()
+	return ps.IsAuthenticated
+}
+
 // GetAuthKey returns the authentication key
 func (ps *PumpState) GetAuthKey() []byte {
 	ps.mutex.RLock()

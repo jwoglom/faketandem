@@ -69,6 +69,28 @@ func NewPumpX2JPAKEAuthenticator(pairingCode string, bridge *pumpx2.Bridge, pump
 	}
 }
 
+// Prepare starts Java and generates the initial ephemeral values before the
+// phone sends round 1a. The prepared authenticator is used for one handshake.
+func (j *PumpX2JPAKEAuthenticator) Prepare() error {
+	j.mutex.Lock()
+	defer j.mutex.Unlock()
+	if j.failed != nil {
+		return j.failed
+	}
+	if j.server != nil {
+		return nil
+	}
+	if err := j.startJPAKEServerProcess(); err != nil {
+		j.abortLocked(err)
+		return err
+	}
+	if err := j.readServerRound1aResponse(); err != nil {
+		j.abortLocked(err)
+		return err
+	}
+	return nil
+}
+
 // responseParamNames maps each real JPAKE response message name to its
 // constructor's parameter names, in order. jpake-server's own JSON output
 // (e.g. the line after "JPAKE_1A: ") already ran these through cliparser's

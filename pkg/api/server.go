@@ -51,6 +51,7 @@ type Server struct {
 
 	// Callback for when a command is received from the websocket
 	commandHandler CommandHandler
+	pairingProgress BleEvent
 }
 
 // CommandHandler is called when a command is received via websocket
@@ -242,6 +243,30 @@ func (s *Server) SendPairingState(pairingCode string, authenticated bool, longTe
 		Authenticated: &authValue,
 		LongTermKey:   hex.EncodeToString(longTermKey),
 	})
+}
+
+// SendLatestPairingProgress replays the retained status when the UI refreshes.
+func (s *Server) SendLatestPairingProgress() {
+	s.mtx.Lock()
+	progress := s.pairingProgress
+	s.mtx.Unlock()
+	if progress.Type != "" {
+		s.SendEvent(progress)
+	}
+}
+
+// SendPairingProgress retains the latest attempt's status for refresh/reconnect
+// and broadcasts progress independently of the final authenticated boolean.
+func (s *Server) SendPairingProgress(message string, failed bool) {
+	eventType := "pairing_progress"
+	if failed {
+		eventType = "pairing_error"
+	}
+	event := BleEvent{Type: eventType, Message: message}
+	s.mtx.Lock()
+	s.pairingProgress = event
+	s.mtx.Unlock()
+	s.SendEvent(event)
 }
 
 // SendPumpState sends the latest pump connection status to websocket clients

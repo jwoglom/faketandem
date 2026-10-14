@@ -60,6 +60,21 @@ func (b *Bridge) SetPairingCode(code string) {
 	log.Debugf("Updated pairing code: %s", code)
 }
 
+// WarmUp loads cliparser before a central starts its timed authentication
+// exchange. Encoding a request has no pump-side effects.
+func (b *Bridge) WarmUp() error {
+	_, err := b.EncodeMessage(0, "ApiVersionRequest", nil)
+	return err
+}
+
+// Close releases the persistent cliparser subprocess, when using jar mode.
+func (b *Bridge) Close() error {
+	if closer, ok := b.runner.(interface{ Close() error }); ok {
+		return closer.Close()
+	}
+	return nil
+}
+
 // SetTimeSinceReset sets the pump time since reset
 func (b *Bridge) SetTimeSinceReset(seconds uint32) {
 	b.timeSinceReset = seconds

@@ -91,6 +91,17 @@ func (r *Router) GetTransport() bluetooth.Transport {
 	return r.ble
 }
 
+// PreparePairing moves Java startup and round-1 key generation out of the
+// phone's timed BLE exchange.
+func (r *Router) PreparePairing() error {
+	return r.jpakeManager.Prepare(r.bridge)
+}
+
+// ClosePairing releases the active and precomputed authentication processes.
+func (r *Router) ClosePairing() {
+	r.jpakeManager.Close()
+}
+
 // registerHandlers registers all message handlers
 func (r *Router) registerHandlers() {
 	// Core handlers
@@ -338,7 +349,7 @@ func (r *Router) RouteMessage(charType bluetooth.CharacteristicType, msg *pumpx2
 	}
 
 	// Check authentication requirement
-	if handler.RequiresAuth() && !r.pumpState.IsAuthenticated {
+	if handler.RequiresAuth() && !r.pumpState.Authenticated() {
 		log.Warnf("Message %s requires authentication but pump is not authenticated", msg.MessageType)
 		// TODO: Send authentication required response
 		return fmt.Errorf("authentication required for %s", msg.MessageType)

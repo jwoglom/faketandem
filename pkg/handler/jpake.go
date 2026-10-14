@@ -36,6 +36,7 @@ var ErrJPAKEQuickPairRejected = errors.New("quick-pair reconnect rejected: no ca
 // JPAKESessionManager manages JPAKE authentication sessions
 type JPAKESessionManager struct {
 	authenticators map[string]JPAKEAuthenticatorInterface
+	prepared       *PumpX2JPAKEAuthenticator
 	mutex          sync.RWMutex
 
 	// Configuration for creating authenticators
@@ -54,6 +55,46 @@ type JPAKESessionManager struct {
 	// a quick-pair reconnect even when a long-term key is cached -- the pump
 	// side of "the pump forgot us and the app has to pair again".
 	faultRegistry *faults.Registry
+}
+
+// Prepare precomputes a single unused pumpX2 handshake. It is separate from
+// active sessions so a quick reconnect still selects the cached long-term key.
+func (m *JPAKESessionManager) Prepare(bridge *pumpx2.Bridge) error {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	if m.jpakeMode != "pumpx2" {
+		return nil
+	}
+	code := m.pumpState.GetPairingCode()
+	if m.prepared != nil {
+		if m.prepared.pairingCode == code {
+			return nil
+		}
+		closeAuthenticator("prepared", m.prepared)
+		m.prepared = nil
+	}
+	auth := NewPumpX2JPAKEAuthenticator(code, bridge, m.pumpX2Path, m.pumpX2Mode, m.gradleCmd, m.javaCmd, m.pumpX2JarPath)
+	if err := auth.Prepare(); err != nil {
+		return err
+	}
+	if m.pumpState.GetPairingCode() != code {
+		closeAuthenticator("prepared", auth)
+		return nil
+	}
+	m.prepared = auth
+	log.Info("JPAKE server ready for a new pairing attempt")
+	return nil
+}
+
+// Close releases both active sessions and the unused prepared handshake.
+func (m *JPAKESessionManager) Close() {
+	m.RemoveAll()
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	if m.prepared != nil {
+		closeAuthenticator("prepared", m.prepared)
+		m.prepared = nil
+	}
 }
 
 // SetFaultRegistry attaches the fault injector consulted for quick-pair.
@@ -124,7 +165,16 @@ func (m *JPAKESessionManager) GetOrCreate(sessionID string, pairingCode string, 
 
 	if m.jpakeMode == "pumpx2" {
 		log.Infof("Creating pumpX2-based JPAKE authenticator for session: %s", sessionID)
-		auth = NewPumpX2JPAKEAuthenticator(pairingCode, bridge, m.pumpX2Path, m.pumpX2Mode, m.gradleCmd, m.javaCmd, m.pumpX2JarPath)
+		if m.prepared != nil && m.prepared.pairingCode == pairingCode {
+			auth = m.prepared
+			m.prepared = nil
+		} else {
+			if m.prepared != nil {
+				closeAuthenticator("prepared", m.prepared)
+				m.prepared = nil
+			}
+			auth = NewPumpX2JPAKEAuthenticator(pairingCode, bridge, m.pumpX2Path, m.pumpX2Mode, m.gradleCmd, m.javaCmd, m.pumpX2JarPath)
+		}
 	} else {
 		log.Infof("Creating Go-based JPAKE authenticator for session: %s", sessionID)
 		auth = NewJPAKEAuthenticator(pairingCode, bridge)

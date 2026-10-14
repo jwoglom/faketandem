@@ -23,6 +23,11 @@ const (
 type Ble struct {
 	device  *gatt.Device
 	central *gatt.Central
+	centralMtx sync.RWMutex
+	// lifecycleMtx prevents a new peer from using the previous peer's state
+	// while its message worker is finishing and disconnect cleanup runs.
+	lifecycleMtx sync.Mutex
+	writeQueue *writeQueue
 
 	// Notifiers for each characteristic
 	notifiers    map[CharacteristicType]gatt.Notifier
@@ -84,6 +89,8 @@ func New(adapterID string) (*Ble, error) {
 
 	d.Handle(
 		gatt.CentralConnected(func(c gatt.Central) {
+			b.lifecycleMtx.Lock()
+			defer b.lifecycleMtx.Unlock()
 			fmt.Println("pkg bluetooth; ** New connection from:", c.ID())
 
 			// Reject connection if not discoverable
@@ -99,15 +106,34 @@ func New(adapterID string) (*Ble, error) {
 				return
 			}
 
+			b.centralMtx.Lock()
 			b.central = &c
+			b.writeQueue = newWriteQueue(func(charType CharacteristicType, data []byte) {
+				if b.writeHandler != nil {
+					b.writeHandler(charType, data)
+				}
+			})
+			b.centralMtx.Unlock()
 			b.reenableCharacteristicHandlers()
 			if b.connectionHandler != nil {
 				b.connectionHandler(true)
 			}
 		}),
 		gatt.CentralDisconnected(func(c gatt.Central) {
+			b.lifecycleMtx.Lock()
+			defer b.lifecycleMtx.Unlock()
 			log.Debugf("pkg bluetooth; ** disconnect: %s", c.ID())
+			b.centralMtx.Lock()
 			b.central = nil
+			queue := b.writeQueue
+			b.writeQueue = nil
+			b.centralMtx.Unlock()
+			b.notifiersMtx.Lock()
+			b.notifiers = make(map[CharacteristicType]gatt.Notifier)
+			b.notifiersMtx.Unlock()
+			if queue != nil {
+				queue.stop()
+			}
 			if b.connectionHandler != nil {
 				b.connectionHandler(false)
 			}
@@ -368,11 +394,11 @@ func (b *Ble) bindWriteNotifyHandlers(char *gatt.Characteristic, charType Charac
 	char.HandleWriteFunc(func(r gatt.Request, data []byte) (status byte) {
 		log.Debugf("pkg bluetooth; received write on %s: %s", charType, hex.EncodeToString(data))
 
-		dataCopy := make([]byte, len(data))
-		copy(dataCopy, data)
-
-		if b.writeHandler != nil {
-			b.writeHandler(charType, dataCopy)
+		b.centralMtx.RLock()
+		queue := b.writeQueue
+		b.centralMtx.RUnlock()
+		if queue == nil || !queue.enqueue(charType, data) {
+			return 0x11 // ATT insufficient resources; never silently lose a fragment
 		}
 		return 0
 	})
@@ -504,13 +530,18 @@ func (b *Ble) Notify(charType CharacteristicType, data []byte) error {
 
 // IsConnected returns true if a central device is connected
 func (b *Ble) IsConnected() bool {
+	b.centralMtx.RLock()
+	defer b.centralMtx.RUnlock()
 	return b.central != nil
 }
 
 // ShutdownConnection closes the connection with the central device
 func (b *Ble) ShutdownConnection() {
-	if b.central != nil {
-		if err := (*b.central).Close(); err != nil {
+	b.centralMtx.RLock()
+	central := b.central
+	b.centralMtx.RUnlock()
+	if central != nil {
+		if err := (*central).Close(); err != nil {
 			log.Debugf("Error closing central connection: %v", err)
 		}
 	}
@@ -527,7 +558,7 @@ func (b *Ble) SetPairingState(state PairingState) error {
 	}
 
 	// If setting to not discoverable, disconnect any existing connection
-	if state == PairingStateNotDiscoverable && b.central != nil {
+	if state == PairingStateNotDiscoverable && b.IsConnected() {
 		log.Info("pkg bluetooth; disconnecting existing connection due to non-discoverable mode")
 		b.ShutdownConnection()
 	}

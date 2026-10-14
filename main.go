@@ -94,6 +94,11 @@ func main() {
 		log.Fatalf("Failed to initialize pumpX2 bridge: %s", err)
 	}
 	log.Info("pumpX2 bridge initialized successfully")
+	defer func() { _ = bridge.Close() }() // Cleanup after the emulator stops.
+	log.Info("Warming cliparser before accepting pairing requests...")
+	if err := bridge.WarmUp(); err != nil {
+		log.Fatalf("Failed to warm cliparser: %s", err)
+	}
 
 	// Initialize protocol components
 	reassembler := protocol.NewReassembler(30 * time.Second)
@@ -145,6 +150,14 @@ func main() {
 	// Create message router
 	router := handler.NewRouter(bridge, pumpState, ble, txManager, cfg.JPAKEMode, cfg.PumpX2Path, cfg.PumpX2Mode, cfg.GradleCmd, cfg.JavaCmd, cfg.PumpX2JarPath)
 	log.Info("Message router initialized")
+	defer router.ClosePairing()
+	if err := router.PreparePairing(); err != nil {
+		log.Fatalf("Failed to prepare JPAKE pairing: %s", err)
+	}
+	pumpState.OnPairingCodeChange(func(string) {
+		router.ResetJPAKESession()
+		go preparePairing(router)
+	})
 
 	// Integration-harness plumbing: the pump-side message record and the fault
 	// injector. Both are inert until a harness uses them -- an empty registry
@@ -178,68 +191,9 @@ func main() {
 	})
 	server.SetExtraRoutes(h.RegisterRoutes, h.Endpoints())
 
-	configureConnectionHandlers(ble, server, router, pumpState, requestLog)
+	configureConnectionHandlers(ble, server, router, pumpState, requestLog, reassembler)
 
-	// Set up write handler to log incoming data and notify websocket clients
-	ble.SetWriteHandler(func(charType bluetooth.CharacteristicType, data []byte) {
-		protocol.LogPacket("RX", charType, data)
-		server.SendWriteEvent(charType, data)
-
-		// A central acknowledges every QualifyingEvents notification by writing
-		// four zero bytes back to that characteristic. It is not a pump message:
-		// feeding it to the reassembler and then to cliparser produces garbage
-		// (QualifyingEvents has no pumpX2 characteristic enum, so the opcode is
-		// guessed) and burns two JVM spawns per qualifying event. Consume it here.
-		if isQualifyingEventAck(charType, data) {
-			log.Debugf("Consumed QualifyingEvents acknowledgement write: %s", hex.EncodeToString(data))
-			return
-		}
-
-		// Reassemble multi-packet messages
-		message, rawPacketsHex, isComplete, err := reassembler.AddPacket(charType, data)
-		if err != nil {
-			log.Errorf("Failed to add packet to reassembler: %v", err)
-			return
-		}
-
-		if !isComplete {
-			log.Trace("Waiting for more packets...")
-			return
-		}
-
-		// We have a complete message, parse it
-		log.Infof("Received complete message on %s: %s", charType, hex.EncodeToString(message))
-
-		// Parse the message using pumpX2 bridge
-		parsed, err := bridge.ParseMessage(charType, rawPacketsHex)
-		if err != nil {
-			log.Errorf("Failed to parse message: %v", err)
-			return
-		}
-
-		log.Infof("Parsed message: type=%s, txID=%d, opcode=%d",
-			parsed.MessageType, parsed.TxID, parsed.Opcode)
-
-		// Route to handler
-		if err := router.RouteMessage(charType, parsed); err != nil {
-			log.Errorf("Failed to route message: %v", err)
-			if errors.Is(err, handler.ErrJPAKEQuickPairRejected) {
-				log.Warn("Dropping connection to force client back to full pairing (no cached long-term JPAKE key available for this quick-pair reconnect)")
-				ble.ShutdownConnection()
-			}
-			if errors.Is(err, handler.ErrJPAKEServerFailed) {
-				// The pumpX2 jpake-server subprocess driving this handshake
-				// gave up, so no response to this round is ever coming. Cut
-				// the link instead of leaving the client to sit out its own
-				// 30-90 second pairing timeout: it reconnects and pairs
-				// again, which starts a brand new jpake-server.
-				log.Warn("Dropping connection: the pumpX2 jpake-server subprocess for this pairing failed, so this handshake cannot complete. The client should pair again; the retry gets a fresh jpake-server.")
-				router.ResetJPAKESession()
-				ble.ShutdownConnection()
-			}
-			return
-		}
-	})
+	configureWriteHandler(ble, server, bridge, router, pumpState, reassembler)
 
 	// Set up read handler
 	ble.SetReadHandler(func(charType bluetooth.CharacteristicType) []byte {
@@ -249,7 +203,7 @@ func main() {
 	})
 
 	// Set up custom command handler for websocket commands
-	configureWebsocketCommands(server, ble, pumpState)
+	configureWebsocketCommands(server, ble, pumpState, router)
 
 	log.Info("Transport initialized, waiting for connections...")
 	log.Infof("Starting API server on %s", *apiAddr)
@@ -320,7 +274,92 @@ func isQualifyingEventAck(charType bluetooth.CharacteristicType, data []byte) bo
 	return true
 }
 
-func configureConnectionHandlers(ble bluetooth.Transport, server *api.Server, router *handler.Router, pumpState *state.PumpState, requestLog *reqlog.Log) {
+func configureWriteHandler(ble bluetooth.Transport, server *api.Server, bridge *pumpx2.Bridge, router *handler.Router, pumpState *state.PumpState, reassembler *protocol.Reassembler) {
+	// Set up write handler to log incoming data and notify websocket clients
+	ble.SetWriteHandler(func(charType bluetooth.CharacteristicType, data []byte) {
+		protocol.LogPacket("RX", charType, data)
+		server.SendWriteEvent(charType, data)
+
+		// A central acknowledges every QualifyingEvents notification by writing
+		// four zero bytes back to that characteristic. It is not a pump message:
+		// feeding it to the reassembler and then to cliparser produces garbage
+		// (QualifyingEvents has no pumpX2 characteristic enum, so the opcode is
+		// guessed) and burns two JVM spawns per qualifying event. Consume it here.
+		if isQualifyingEventAck(charType, data) {
+			log.Debugf("Consumed QualifyingEvents acknowledgement write: %s", hex.EncodeToString(data))
+			return
+		}
+
+		// Reassemble multi-packet messages
+		message, rawPacketsHex, isComplete, err := reassembler.AddPacket(charType, data)
+		if err != nil {
+			log.Errorf("Failed to add packet to reassembler: %v", err)
+			return
+		}
+
+		if !isComplete {
+			log.Trace("Waiting for more packets...")
+			return
+		}
+
+		// We have a complete message, parse it
+		log.Infof("Received complete message on %s: %s", charType, hex.EncodeToString(message))
+		pairingRequest := charType == bluetooth.CharAuthorization
+		if pairingRequest {
+			server.SendPairingProgress("Pairing request received; processing authentication...", false)
+		}
+
+		// Parse the message using pumpX2 bridge
+		parsed, err := bridge.ParseMessage(charType, rawPacketsHex)
+		if err != nil {
+			log.Errorf("Failed to parse message: %v", err)
+			if pairingRequest {
+				server.SendPairingProgress(fmt.Sprintf("Could not parse pairing request: %v", err), true)
+			}
+			return
+		}
+		if !ble.IsConnected() {
+			return // The central left while parsing; do not start a stale handshake.
+		}
+
+		log.Infof("Parsed message: type=%s, txID=%d, opcode=%d",
+			parsed.MessageType, parsed.TxID, parsed.Opcode)
+
+		// Route to handler
+		if err := router.RouteMessage(charType, parsed); err != nil {
+			log.Errorf("Failed to route message: %v", err)
+			if pairingRequest {
+				server.SendPairingProgress(fmt.Sprintf("Pairing failed at %s: %v", parsed.MessageType, err), true)
+			}
+			if errors.Is(err, handler.ErrJPAKEQuickPairRejected) {
+				log.Warn("Dropping connection to force client back to full pairing (no cached long-term JPAKE key available for this quick-pair reconnect)")
+				ble.ShutdownConnection()
+			}
+			if errors.Is(err, handler.ErrJPAKEServerFailed) {
+				// The pumpX2 jpake-server subprocess driving this handshake
+				// gave up, so no response to this round is ever coming. Cut
+				// the link instead of leaving the client to sit out its own
+				// 30-90 second pairing timeout: it reconnects and pairs
+				// again, which starts a brand new jpake-server.
+				log.Warn("Dropping connection: the pumpX2 jpake-server subprocess for this pairing failed, so this handshake cannot complete. The client should pair again; the retry gets a fresh jpake-server.")
+				router.ResetJPAKESession()
+				ble.ShutdownConnection()
+			}
+			return
+		}
+		if pairingRequest {
+			message := fmt.Sprintf("%s completed; waiting for the app's next pairing request.", parsed.MessageType)
+			if pumpState.Authenticated() {
+				message = "Pairing completed successfully."
+			}
+			server.SendPairingProgress(message, false)
+			server.SendPairingState(pumpState.GetPairingCode(), pumpState.Authenticated(), pumpState.GetLongTermKey())
+		}
+	})
+
+}
+
+func configureConnectionHandlers(ble bluetooth.Transport, server *api.Server, router *handler.Router, pumpState *state.PumpState, requestLog *reqlog.Log, reassembler *protocol.Reassembler) {
 	ble.SetConnectionHandler(func(connected bool) {
 		server.SendPumpState()
 		if requestLog != nil {
@@ -328,12 +367,15 @@ func configureConnectionHandlers(ble bluetooth.Transport, server *api.Server, ro
 		}
 		if connected {
 			log.Info("BLE central connected; updated websocket clients.")
+			server.SendPairingProgress("App connected; waiting for an authentication request.", false)
 			return
 		}
 		log.Info("BLE central disconnected; updated websocket clients.")
 		// Clear any in-progress JPAKE authenticator so a stale/broken one
 		// (e.g. a pumpX2 subprocess that died mid-handshake) is never reused
 		// by the next connection attempt.
+		wasAuthenticated := pumpState.Authenticated()
+		reassembler.Reset()
 		router.ResetJPAKESession()
 		// A real pump derives a fresh session key per connection, so a central
 		// that reconnects must authenticate again before any auth-gated message
@@ -346,29 +388,50 @@ func configureConnectionHandlers(ble bluetooth.Transport, server *api.Server, ro
 		// quick-reconnect flow -- rounds 3/4 against the cached secret -- still
 		// works on the next connection.
 		pumpState.ResetAuthentication()
+		server.SendPairingState(pumpState.GetPairingCode(), false, pumpState.GetLongTermKey())
+		if wasAuthenticated {
+			server.SendPairingProgress("App disconnected. Authentication is required on reconnect.", false)
+		} else {
+			server.SendPairingProgress("App disconnected before authentication completed. Retry pairing with the configured PIN.", true)
+		}
+		go preparePairing(router)
 	})
 }
 
-func configureWebsocketCommands(server *api.Server, ble bluetooth.Transport, pumpState *state.PumpState) {
+func preparePairing(router *handler.Router) {
+	if err := router.PreparePairing(); err != nil {
+		log.Errorf("Failed to prepare the next JPAKE pairing attempt: %v", err)
+	}
+}
+
+func configureWebsocketCommands(server *api.Server, ble bluetooth.Transport, pumpState *state.PumpState, router *handler.Router) {
 	server.SetCommandHandler(func(command string, params map[string]interface{}) {
 		log.Infof("Received command from websocket: %s, params: %v", command, params)
 		switch command {
 		case "getPairingState":
-			server.SendPairingState(pumpState.GetPairingCode(), pumpState.IsAuthenticated, pumpState.GetLongTermKey())
+			server.SendPairingState(pumpState.GetPairingCode(), pumpState.Authenticated(), pumpState.GetLongTermKey())
+			server.SendLatestPairingProgress()
 		case "setPairingCode":
 			pairingCode, _ := params["pairingCode"].(string)
-			if pairingCode == "" {
-				log.Warn("Pairing code missing from setPairingCode command")
+			if !validPairingCode(pairingCode) {
+				server.SendPairingProgress("Pairing code must be exactly 6 digits.", true)
 				return
 			}
 			// The bridge is updated by the observer main() registered on
 			// PumpState, so every route that sets the code gets it.
-			pumpState.SetPairingCode(pairingCode)
-			pumpState.ResetAuthentication()
-			server.SendPairingState(pumpState.GetPairingCode(), pumpState.IsAuthenticated, pumpState.GetLongTermKey())
+			if pairingCode != pumpState.GetPairingCode() {
+				ble.ShutdownConnection()
+				pumpState.SetPairingCode(pairingCode)
+				pumpState.ResetAuthentication()
+			}
+			server.SendPairingProgress("Pairing code saved. Use the same PIN in the Tandem app; authentication completes when the app pairs.", false)
+			server.SendPairingState(pumpState.GetPairingCode(), pumpState.Authenticated(), pumpState.GetLongTermKey())
 		case "resetPairing":
+			ble.ShutdownConnection()
+			router.ResetJPAKESession()
 			pumpState.ResetAuthentication()
-			server.SendPairingState(pumpState.GetPairingCode(), pumpState.IsAuthenticated, pumpState.GetLongTermKey())
+			server.SendPairingProgress("Authentication reset. Start a new pairing attempt in the app.", false)
+			server.SendPairingState(pumpState.GetPairingCode(), pumpState.Authenticated(), pumpState.GetLongTermKey())
 		case "setLongTermKey":
 			longTermKeyHex, _ := params["longTermKey"].(string)
 			longTermKey, err := hex.DecodeString(longTermKeyHex)
@@ -377,10 +440,10 @@ func configureWebsocketCommands(server *api.Server, ble bluetooth.Transport, pum
 				return
 			}
 			pumpState.SetLongTermKey(longTermKey)
-			server.SendPairingState(pumpState.GetPairingCode(), pumpState.IsAuthenticated, pumpState.GetLongTermKey())
+			server.SendPairingState(pumpState.GetPairingCode(), pumpState.Authenticated(), pumpState.GetLongTermKey())
 		case "resetLongTermKey":
 			pumpState.SetLongTermKey(nil)
-			server.SendPairingState(pumpState.GetPairingCode(), pumpState.IsAuthenticated, pumpState.GetLongTermKey())
+			server.SendPairingState(pumpState.GetPairingCode(), pumpState.Authenticated(), pumpState.GetLongTermKey())
 		case "disconnectPump":
 			ble.ShutdownConnection()
 			server.SendPumpState()
@@ -388,6 +451,18 @@ func configureWebsocketCommands(server *api.Server, ble bluetooth.Transport, pum
 			log.Warnf("Unhandled websocket command: %s", command)
 		}
 	})
+}
+
+func validPairingCode(code string) bool {
+	if len(code) != 6 {
+		return false
+	}
+	for _, digit := range code {
+		if digit < '0' || digit > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // applyPumpTimeZone puts the pump's clock in the zone named by -pump-timezone,
