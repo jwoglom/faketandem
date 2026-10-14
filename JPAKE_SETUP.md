@@ -2,6 +2,11 @@
 
 This document describes the changes required to pumpX2 for proper server-side JPAKE authentication.
 
+> This is only for `-jpake-mode pumpx2`. The default, `-jpake-mode go`, runs a Go
+> port of the same EC-JPAKE (`pkg/jpake`, driven by `handler.JPAKEAuthenticator`)
+> and needs no pumpX2; tests pair it with pumpX2's own client and pair a Go
+> client with `jpake-server` to keep the two interchangeable.
+
 ## Overview
 
 The faketandem pump simulator now uses pumpX2's actual cryptographic implementation for J-PAKE authentication instead of stub code. This requires adding a new `jpake-server` command to pumpX2's cliparser.

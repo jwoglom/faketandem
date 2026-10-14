@@ -1,0 +1,15 @@
+{"parse":{"key":"CURRENT_STATUS/-120/BleSoftwareInfoRequest/long","characteristic":"CURRENT_STATUS","fragments":["0016881601eb8c52"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-120/BleSoftwareInfoRequest/ones","characteristic":"CURRENT_STATUS","fragments":["004d884d00f725"],"jar":{"ok":true,"toString":"BleSoftwareInfoRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-120/BleSoftwareInfoRequest/rand1","characteristic":"CURRENT_STATUS","fragments":["009f889f00b256"],"jar":{"ok":true,"toString":"BleSoftwareInfoRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-120/BleSoftwareInfoRequest/rand2","characteristic":"CURRENT_STATUS","fragments":["0000880000675e"],"jar":{"ok":true,"toString":"BleSoftwareInfoRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-120/BleSoftwareInfoRequest/small1","characteristic":"CURRENT_STATUS","fragments":["00638863001e00"],"jar":{"ok":true,"toString":"BleSoftwareInfoRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-120/BleSoftwareInfoRequest/small2","characteristic":"CURRENT_STATUS","fragments":["0030883000f25b"],"jar":{"ok":true,"toString":"BleSoftwareInfoRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-120/BleSoftwareInfoRequest/sparse","characteristic":"CURRENT_STATUS","fragments":["002988290019e2"],"jar":{"ok":true,"toString":"BleSoftwareInfoRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-120/BleSoftwareInfoRequest/zeros","characteristic":"CURRENT_STATUS","fragments":["0079887900a6ec"],"jar":{"ok":true,"toString":"BleSoftwareInfoRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-120/BleSoftwareInfoRequest/zeros-nochar","characteristic":"","fragments":["002788270016c1"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-120/BleSoftwareInfoRequest/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["002788270016c1"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-120/BleSoftwareInfoRequest/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["002788270016c1"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-120/BleSoftwareInfoRequest/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["002788270016c1"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-120/BleSoftwareInfoRequest/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["002788270016c1"],"jar":{"ok":false}}}
+{"encode":{"key":"BleSoftwareInfoRequest/no-such-arity","txId":196,"message":"BleSoftwareInfoRequest","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"BleSoftwareInfoRequest/noargs","txId":224,"message":"BleSoftwareInfoRequest","params":"{}","jar":{"ok":true,"messageName":"BleSoftwareInfoRequest","txId":"-32","packets":["00e088e000d54e"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}

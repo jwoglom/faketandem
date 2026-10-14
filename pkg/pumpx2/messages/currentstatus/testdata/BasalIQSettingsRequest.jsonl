@@ -1,0 +1,15 @@
+{"parse":{"key":"CURRENT_STATUS/98/BasalIQSettingsRequest/long","characteristic":"CURRENT_STATUS","fragments":["008d628d0178df85"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/98/BasalIQSettingsRequest/ones","characteristic":"CURRENT_STATUS","fragments":["0020622000713f"],"jar":{"ok":true,"toString":"BasalIQSettingsRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/98/BasalIQSettingsRequest/rand1","characteristic":"CURRENT_STATUS","fragments":["00ca62ca0008c0"],"jar":{"ok":true,"toString":"BasalIQSettingsRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/98/BasalIQSettingsRequest/rand2","characteristic":"CURRENT_STATUS","fragments":["001562150011c5"],"jar":{"ok":true,"toString":"BasalIQSettingsRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/98/BasalIQSettingsRequest/small1","characteristic":"CURRENT_STATUS","fragments":["0063626300ee67"],"jar":{"ok":true,"toString":"BasalIQSettingsRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/98/BasalIQSettingsRequest/small2","characteristic":"CURRENT_STATUS","fragments":["00e562e500d0d6"],"jar":{"ok":true,"toString":"BasalIQSettingsRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/98/BasalIQSettingsRequest/sparse","characteristic":"CURRENT_STATUS","fragments":["0084628400cbee"],"jar":{"ok":true,"toString":"BasalIQSettingsRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/98/BasalIQSettingsRequest/zeros","characteristic":"CURRENT_STATUS","fragments":["0024622400b5f3"],"jar":{"ok":true,"toString":"BasalIQSettingsRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/98/BasalIQSettingsRequest/zeros-nochar","characteristic":"","fragments":["0045624500aecb"],"jar":{"ok":true,"toString":"BasalIQSettingsRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/98/BasalIQSettingsRequest/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["0045624500aecb"],"jar":{"ok":true,"toString":"BasalIQSettingsRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/98/BasalIQSettingsRequest/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["0045624500aecb"],"jar":{"ok":true,"toString":"BasalIQSettingsRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/98/BasalIQSettingsRequest/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["0045624500aecb"],"jar":{"ok":true,"toString":"BasalIQSettingsRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/98/BasalIQSettingsRequest/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["0045624500aecb"],"jar":{"ok":true,"toString":"BasalIQSettingsRequest[cargo={}]"}}}
+{"encode":{"key":"BasalIQSettingsRequest/no-such-arity","txId":282,"message":"BasalIQSettingsRequest","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"BasalIQSettingsRequest/noargs","txId":211,"message":"BasalIQSettingsRequest","params":"{}","jar":{"ok":true,"messageName":"BasalIQSettingsRequest","txId":"-45","packets":["00d362d300e379"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}

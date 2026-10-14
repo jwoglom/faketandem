@@ -12,7 +12,7 @@ import (
 // These tests read the status a driver would decode: the request goes through the handler, and
 // its response is parsed back through the real cliparser.
 //
-// Skipped unless FAKETANDEM_TEST_CLIPARSER_JAR is set.
+// Runs through the Go codec, or through cliparser when FAKETANDEM_TEST_CLIPARSER_JAR is set.
 
 func cartridgeModeStatus(t *testing.T, bridge *pumpx2.Bridge, ps *state.PumpState, request string) int {
 	t.Helper()

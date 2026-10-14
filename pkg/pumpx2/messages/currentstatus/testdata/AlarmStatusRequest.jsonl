@@ -1,0 +1,15 @@
+{"parse":{"key":"CURRENT_STATUS/70/AlarmStatusRequest/long","characteristic":"CURRENT_STATUS","fragments":["008b468b01aaff21"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/70/AlarmStatusRequest/ones","characteristic":"CURRENT_STATUS","fragments":["00c346c3009620"],"jar":{"ok":true,"toString":"AlarmStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/70/AlarmStatusRequest/rand1","characteristic":"CURRENT_STATUS","fragments":["00824682006b1e"],"jar":{"ok":true,"toString":"AlarmStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/70/AlarmStatusRequest/rand2","characteristic":"CURRENT_STATUS","fragments":["00ee46ee002c50"],"jar":{"ok":true,"toString":"AlarmStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/70/AlarmStatusRequest/small1","characteristic":"CURRENT_STATUS","fragments":["0047464700caf7"],"jar":{"ok":true,"toString":"AlarmStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/70/AlarmStatusRequest/small2","characteristic":"CURRENT_STATUS","fragments":["00e546e500d68c"],"jar":{"ok":true,"toString":"AlarmStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/70/AlarmStatusRequest/sparse","characteristic":"CURRENT_STATUS","fragments":["0036463600a2cc"],"jar":{"ok":true,"toString":"AlarmStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/70/AlarmStatusRequest/zeros","characteristic":"CURRENT_STATUS","fragments":["00e446e400e7bf"],"jar":{"ok":true,"toString":"AlarmStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/70/AlarmStatusRequest/zeros-nochar","characteristic":"","fragments":["00524652004c0b"],"jar":{"ok":true,"toString":"AlarmStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/70/AlarmStatusRequest/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["00524652004c0b"],"jar":{"ok":true,"toString":"AlarmStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/70/AlarmStatusRequest/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["00524652004c0b"],"jar":{"ok":true,"toString":"AlarmStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/70/AlarmStatusRequest/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["00524652004c0b"],"jar":{"ok":true,"toString":"AlarmStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/70/AlarmStatusRequest/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["00524652004c0b"],"jar":{"ok":true,"toString":"AlarmStatusRequest[cargo={}]"}}}
+{"encode":{"key":"AlarmStatusRequest/no-such-arity","txId":159,"message":"AlarmStatusRequest","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"AlarmStatusRequest/noargs","txId":64,"message":"AlarmStatusRequest","params":"{}","jar":{"ok":true,"messageName":"AlarmStatusRequest","txId":"64","packets":["00404640005d6e"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}

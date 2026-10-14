@@ -1,0 +1,15 @@
+{"parse":{"key":"CURRENT_STATUS/108/ControlIQIOBRequest/long","characteristic":"CURRENT_STATUS","fragments":["00f86cf80174f1d5"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/108/ControlIQIOBRequest/ones","characteristic":"CURRENT_STATUS","fragments":["00b06cb0009b3c"],"jar":{"ok":true,"toString":"ControlIQIOBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/108/ControlIQIOBRequest/rand1","characteristic":"CURRENT_STATUS","fragments":["00906c90007d3a"],"jar":{"ok":true,"toString":"ControlIQIOBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/108/ControlIQIOBRequest/rand2","characteristic":"CURRENT_STATUS","fragments":["00936c93002e6f"],"jar":{"ok":true,"toString":"ControlIQIOBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/108/ControlIQIOBRequest/small1","characteristic":"CURRENT_STATUS","fragments":["00bb6cbb0061e0"],"jar":{"ok":true,"toString":"ControlIQIOBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/108/ControlIQIOBRequest/small2","characteristic":"CURRENT_STATUS","fragments":["007a6c7a0004c5"],"jar":{"ok":true,"toString":"ControlIQIOBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/108/ControlIQIOBRequest/sparse","characteristic":"CURRENT_STATUS","fragments":["00a76ca7007fa6"],"jar":{"ok":true,"toString":"ControlIQIOBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/108/ControlIQIOBRequest/zeros","characteristic":"CURRENT_STATUS","fragments":["00be6cbe00941f"],"jar":{"ok":true,"toString":"ControlIQIOBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/108/ControlIQIOBRequest/zeros-nochar","characteristic":"","fragments":["00116c1100d412"],"jar":{"ok":true,"toString":"ControlIQIOBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/108/ControlIQIOBRequest/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["00116c1100d412"],"jar":{"ok":true,"toString":"ControlIQIOBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/108/ControlIQIOBRequest/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["00116c1100d412"],"jar":{"ok":true,"toString":"ControlIQIOBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/108/ControlIQIOBRequest/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["00116c1100d412"],"jar":{"ok":true,"toString":"ControlIQIOBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/108/ControlIQIOBRequest/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["00116c1100d412"],"jar":{"ok":true,"toString":"ControlIQIOBRequest[cargo={}]"}}}
+{"encode":{"key":"ControlIQIOBRequest/no-such-arity","txId":78,"message":"ControlIQIOBRequest","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"ControlIQIOBRequest/noargs","txId":294,"message":"ControlIQIOBRequest","params":"{}","jar":{"ok":true,"messageName":"ControlIQIOBRequest","txId":"38","packets":["00266c2600d68e"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}

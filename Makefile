@@ -10,9 +10,10 @@ build:
 # Downloads a prebuilt cliparser jar from jitpack.io instead of building pumpX2
 # from source -- no local Gradle/JDK toolchain needed (avoids the Gradle
 # JDK-vs-JRE toolchain bugs seen on Raspbian, gradle/gradle#30499 et al).
+# Optional: only -message-codec pumpx2/compare and -jpake-mode pumpx2 use it.
 jar:
 	mkdir -p third_party
 	curl -fL -o $(PUMPX2_CLIPARSER_JAR) $(PUMPX2_CLIPARSER_URL)
 
 .DEFAULT_GOAL := all
-all: jar build
+all: build

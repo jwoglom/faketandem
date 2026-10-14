@@ -377,11 +377,13 @@ The pre-push hook will catch any missed issues!
 ### Project overview
 faketandem is a Tandem insulin pump BLE emulator written in Go. It has a single binary entry point at the repo root (`main.go`), an HTTP/WebSocket API on `:8080`, and a static web UI in `ui/`.
 
-### External dependency: pumpX2
-The application requires the external [pumpX2](https://github.com/jwoglom/pumpX2) Java repository for protocol message parsing. The update script clones it to `/workspace/pumpX2` (branch `dev`). Pass it via `PUMPX2_PATH=/workspace/pumpX2` or `-pumpx2-path /workspace/pumpX2`.
+### pumpX2 is optional
+Messages are parsed and encoded by `pkg/pumpx2/messages`, a Go implementation of the [pumpX2](https://github.com/jwoglom/pumpX2) message library: a Go type per pumpX2 message class, in a package per characteristic. Pairing runs `pkg/jpake`, a Go port of pumpX2's EC-JPAKE. Neither the app nor its tests need pumpX2 or a JVM. pumpX2 is used only by `-message-codec pumpx2`/`compare` and `-jpake-mode pumpx2`, and by the tests that check the Go code against it (`FAKETANDEM_TEST_CLIPARSER_JAR`, below). The update script may still clone pumpX2 to `/workspace/pumpX2` (branch `dev`) for those.
+
+The message types must stay byte-for-byte equal to the jar; `pkg/pumpx2/messages/README.md` has the conventions they follow. Don't edit `parity/testdata/catalog.json` or the recorded `testdata/*.jsonl` answers by hand: regenerate the catalog with `tools/pumpx2catalog/regen.sh <jar>`, re-record with `go test ./pkg/pumpx2/messages/parity -update-golden` (with `FAKETANDEM_TEST_CLIPARSER_JAR` set), and give any class the catalog tests name a Go type. A difference is fixed in the Go code, never by editing the recorded answers.
 
 ### BLE hardware limitation
-The binary calls `log.Fatalf` when BLE adapter initialization fails (`bluetooth_linux.go`). In the Cloud Agent VM there is no Bluetooth adapter, so the app exits after initializing all non-hardware components (config, pumpX2 bridge, pump state, protocol). This is expected — the app is designed for Raspberry Pi 3+. All unit tests and linting still work fully without BLE hardware.
+The binary calls `log.Fatalf` when BLE adapter initialization fails (`bluetooth_linux.go`). In the Cloud Agent VM there is no Bluetooth adapter, so the app exits after initializing all non-hardware components (config, message codec, pump state, protocol). Use `-transport virtual` to run it anyway. This is expected — the app is designed for Raspberry Pi 3+. All unit tests and linting still work fully without BLE hardware.
 
 ### Key commands
 | Task | Command |
@@ -389,17 +391,15 @@ The binary calls `log.Fatalf` when BLE adapter initialization fails (`bluetooth_
 | Build | `go build -o faketandem .` |
 | Lint | `golangci-lint run --timeout=5m` |
 | Lint fix | `golangci-lint run --fix --timeout=5m` |
-| All tests (unit + integration) | `PUMPX2_PATH=/workspace/pumpX2 go test -v -race -timeout 5m ./...` |
-| Run app | `PUMPX2_PATH=/workspace/pumpX2 ./faketandem -q` |
+| All tests (unit + integration) | `go test -v -race -timeout 5m ./...` |
+| All tests, also checked against pumpX2 | `FAKETANDEM_TEST_CLIPARSER_JAR=<cliparser.jar> go test -timeout 20m ./...` |
+| Run app | `./faketandem -transport virtual -q` |
 
 ### Go dependencies
 All Go dependencies are vendored in `vendor/`. No `go mod download` is needed.
 
-### Important: always set PUMPX2_PATH
-Always run tests with `PUMPX2_PATH=/workspace/pumpX2` to avoid skipping integration tests. Without this env var, `TestPumpX2JPAKEAuthenticator_FullFlow` is silently skipped.
-
-### Cliparser JAR-mode integration tests: FAKETANDEM_TEST_CLIPARSER_JAR
-A separate set of integration tests exercise cliparser via a prebuilt JAR instead of a full gradle checkout: `pkg/pumpx2/jar_integration_test.go` and `pkg/handler/jpake_pumpx2_test.go`. These are gated on `FAKETANDEM_TEST_CLIPARSER_JAR` (a path to a built `pumpx2-cliparser-all.jar`), not `PUMPX2_PATH`, and are silently skipped without it.
+### Tests against pumpX2: FAKETANDEM_TEST_CLIPARSER_JAR
+With `FAKETANDEM_TEST_CLIPARSER_JAR` set to a built cliparser jar, the recorded answers in `pkg/pumpx2/messages` are checked against it and the bridge tests in `pkg/pumpx2` run live (without it every message type is still checked against the recorded answers), the `*_jar_test.go` handler and harness tests run through it as well as the Go codec, and the tests of pumpX2's own JPAKE run. `PUMPX2_PATH` is only needed for the gradle-mode `TestPumpX2JPAKEAuthenticator_FullFlow`.
 
 ### Pre-push hook
 `scripts/pre-push.sh` runs `golangci-lint --fix` then verifies no issues remain. It exits gracefully if `golangci-lint` is not installed. When pushing with `--no-verify`, the hook is skipped.

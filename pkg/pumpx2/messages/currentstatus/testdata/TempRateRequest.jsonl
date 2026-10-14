@@ -1,0 +1,15 @@
+{"parse":{"key":"CURRENT_STATUS/42/TempRateRequest/long","characteristic":"CURRENT_STATUS","fragments":["00d72ad701457110"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/42/TempRateRequest/ones","characteristic":"CURRENT_STATUS","fragments":["00842a8400c75a"],"jar":{"ok":true,"toString":"TempRateRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/42/TempRateRequest/rand1","characteristic":"CURRENT_STATUS","fragments":["00c52ac5003a64"],"jar":{"ok":true,"toString":"TempRateRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/42/TempRateRequest/rand2","characteristic":"CURRENT_STATUS","fragments":["00212a21004cb8"],"jar":{"ok":true,"toString":"TempRateRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/42/TempRateRequest/small1","characteristic":"CURRENT_STATUS","fragments":["003c2a3c0063cd"],"jar":{"ok":true,"toString":"TempRateRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/42/TempRateRequest/small2","characteristic":"CURRENT_STATUS","fragments":["00b92ab9000e29"],"jar":{"ok":true,"toString":"TempRateRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/42/TempRateRequest/sparse","characteristic":"CURRENT_STATUS","fragments":["00d22ad200defe"],"jar":{"ok":true,"toString":"TempRateRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/42/TempRateRequest/zeros","characteristic":"CURRENT_STATUS","fragments":["00292a2900e531"],"jar":{"ok":true,"toString":"TempRateRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/42/TempRateRequest/zeros-nochar","characteristic":"","fragments":["00712a7100f3b6"],"jar":{"ok":true,"toString":"TempRateRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/42/TempRateRequest/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["00712a7100f3b6"],"jar":{"ok":true,"toString":"TempRateRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/42/TempRateRequest/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["00712a7100f3b6"],"jar":{"ok":true,"toString":"TempRateRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/42/TempRateRequest/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["00712a7100f3b6"],"jar":{"ok":true,"toString":"TempRateRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/42/TempRateRequest/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["00712a7100f3b6"],"jar":{"ok":true,"toString":"TempRateRequest[cargo={}]"}}}
+{"encode":{"key":"TempRateRequest/no-such-arity","txId":8,"message":"TempRateRequest","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"TempRateRequest/noargs","txId":181,"message":"TempRateRequest","params":"{}","jar":{"ok":true,"messageName":"TempRateRequest","txId":"-75","packets":["00b52ab500636c"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}

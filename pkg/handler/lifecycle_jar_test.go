@@ -19,7 +19,7 @@ import (
 // that calls applyStateChange directly cannot catch a handler that stops
 // producing them.
 //
-// Skipped unless FAKETANDEM_TEST_CLIPARSER_JAR is set.
+// Runs through the Go codec, or through cliparser when FAKETANDEM_TEST_CLIPARSER_JAR is set.
 func TestDriverTempRateCommandsCloseTheirRecords(t *testing.T) {
 	bridge := testBridge(t)
 

@@ -14,34 +14,6 @@ func TestJPAKEAuthenticatorInterface(t *testing.T) {
 	t.Log("Both implementations satisfy JPAKEAuthenticatorInterface")
 }
 
-// TestJPAKEAuthenticator_Initialization tests proper initialization
-func TestJPAKEAuthenticator_Initialization(t *testing.T) {
-	pairingCode := "123456"
-	bridge := &pumpx2.Bridge{}
-
-	auth := NewJPAKEAuthenticator(pairingCode, bridge)
-
-	if auth == nil {
-		t.Fatal("NewJPAKEAuthenticator returned nil")
-	}
-
-	if auth.pairingCode != pairingCode {
-		t.Errorf("Expected pairing code %s, got %s", pairingCode, auth.pairingCode)
-	}
-
-	if auth.bridge != bridge {
-		t.Error("Bridge not set correctly")
-	}
-
-	if auth.round != 0 {
-		t.Errorf("Expected initial round 0, got %d", auth.round)
-	}
-
-	if auth.IsComplete() {
-		t.Error("Newly created authenticator should not be complete")
-	}
-}
-
 // TestPumpX2JPAKEAuthenticator_Initialization tests pumpX2 authenticator initialization
 func TestPumpX2JPAKEAuthenticator_Initialization(t *testing.T) {
 	pairingCode := "654321"
@@ -80,26 +52,6 @@ func TestPumpX2JPAKEAuthenticator_Initialization(t *testing.T) {
 	if auth.round != 0 {
 		t.Errorf("Expected initial round 0, got %d", auth.round)
 	}
-}
-
-// TestJPAKEAuthenticator_RoundProgression tests round state progression
-func TestJPAKEAuthenticator_RoundProgression(t *testing.T) {
-	auth := NewJPAKEAuthenticator("123456", &pumpx2.Bridge{})
-
-	// Initially round 0
-	if auth.round != 0 {
-		t.Errorf("Expected initial round 0, got %d", auth.round)
-	}
-
-	// Process round 1
-	mockData := map[string]interface{}{"test": "data"}
-	_, err := auth.ProcessRound(1, mockData)
-	if err != nil {
-		t.Logf("Round 1 error (expected in unit test): %v", err)
-	}
-
-	// Note: Round progression depends on implementation details
-	// This test mainly verifies the structure is correct
 }
 
 // TestJPAKESessionManager_CreateWithMode tests session manager mode selection
@@ -264,67 +216,13 @@ func TestJPAKESessionManager_RemoveSession(t *testing.T) {
 	}
 }
 
-// TestJPAKEAuthenticator_IsComplete tests completion state
-func TestJPAKEAuthenticator_IsComplete(t *testing.T) {
-	auth := NewJPAKEAuthenticator("123456", &pumpx2.Bridge{})
-
-	// Initially not complete
-	if auth.IsComplete() {
-		t.Error("New authenticator should not be complete")
-	}
-
-	// After setting round to 4, should be complete
-	auth.round = 4
-	if !auth.IsComplete() {
-		t.Error("Authenticator at round 4 should be complete")
-	}
-
-	// Round 3 should not be complete
-	auth.round = 3
-	if auth.IsComplete() {
-		t.Error("Authenticator at round 3 should not be complete")
-	}
-}
-
-// TestJPAKEAuthenticator_GetSharedSecretBeforeComplete tests error condition
-func TestJPAKEAuthenticator_GetSharedSecretBeforeComplete(t *testing.T) {
-	auth := NewJPAKEAuthenticator("123456", &pumpx2.Bridge{})
-
-	tests := []struct {
-		name      string
-		round     int
-		wantError bool
-	}{
-		{"Round 0", 0, true},
-		{"Round 1", 1, true},
-		{"Round 2", 2, true},
-		{"Round 3", 3, true},
-		{"Round 4 (complete)", 4, false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			auth.round = tt.round
-
-			_, err := auth.GetSharedSecret()
-			if tt.wantError && err == nil {
-				t.Error("Expected error getting shared secret before completion")
-			}
-			if !tt.wantError && err != nil {
-				t.Errorf("Unexpected error at round %d: %v", tt.round, err)
-			}
-		})
-	}
-}
-
 // BenchmarkJPAKEAuthenticator_Creation benchmarks authenticator creation
 func BenchmarkJPAKEAuthenticator_Creation(b *testing.B) {
-	bridge := &pumpx2.Bridge{}
 	pairingCode := "123456"
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = NewJPAKEAuthenticator(pairingCode, bridge)
+		_ = NewJPAKEAuthenticator(pairingCode)
 	}
 }
 

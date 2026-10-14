@@ -1,0 +1,15 @@
+{"parse":{"key":"CURRENT_STATUS/54/TimeSinceResetRequest/long","characteristic":"CURRENT_STATUS","fragments":["002a362a01610181"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/54/TimeSinceResetRequest/ones","characteristic":"CURRENT_STATUS","fragments":["00a436a400236a"],"jar":{"ok":true,"toString":"TimeSinceResetRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/54/TimeSinceResetRequest/rand1","characteristic":"CURRENT_STATUS","fragments":["00bc36bc00f9e0"],"jar":{"ok":true,"toString":"TimeSinceResetRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/54/TimeSinceResetRequest/rand2","characteristic":"CURRENT_STATUS","fragments":["00b936b9000c1f"],"jar":{"ok":true,"toString":"TimeSinceResetRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/54/TimeSinceResetRequest/small1","characteristic":"CURRENT_STATUS","fragments":["006b366b00496c"],"jar":{"ok":true,"toString":"TimeSinceResetRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/54/TimeSinceResetRequest/small2","characteristic":"CURRENT_STATUS","fragments":["00bd36bd00c8d3"],"jar":{"ok":true,"toString":"TimeSinceResetRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/54/TimeSinceResetRequest/sparse","characteristic":"CURRENT_STATUS","fragments":["00aa36aa002c49"],"jar":{"ok":true,"toString":"TimeSinceResetRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/54/TimeSinceResetRequest/zeros","characteristic":"CURRENT_STATUS","fragments":["00b836b8003d2c"],"jar":{"ok":true,"toString":"TimeSinceResetRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/54/TimeSinceResetRequest/zeros-nochar","characteristic":"","fragments":["0056365600801f"],"jar":{"ok":true,"toString":"TimeSinceResetRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/54/TimeSinceResetRequest/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["0056365600801f"],"jar":{"ok":true,"toString":"TimeSinceResetRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/54/TimeSinceResetRequest/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["0056365600801f"],"jar":{"ok":true,"toString":"TimeSinceResetRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/54/TimeSinceResetRequest/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["0056365600801f"],"jar":{"ok":true,"toString":"TimeSinceResetRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/54/TimeSinceResetRequest/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["0056365600801f"],"jar":{"ok":true,"toString":"TimeSinceResetRequest[cargo={}]"}}}
+{"encode":{"key":"TimeSinceResetRequest/no-such-arity","txId":108,"message":"TimeSinceResetRequest","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"TimeSinceResetRequest/noargs","txId":258,"message":"TimeSinceResetRequest","params":"{}","jar":{"ok":true,"messageName":"TimeSinceResetRequest","txId":"2","packets":["0002360200fbdd"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}

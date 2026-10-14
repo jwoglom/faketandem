@@ -1,0 +1,15 @@
+{"parse":{"key":"CURRENT_STATUS/88/RemindersRequest/long","characteristic":"CURRENT_STATUS","fragments":["00ef58ef0158f410"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/88/RemindersRequest/ones","characteristic":"CURRENT_STATUS","fragments":["0022582200775b"],"jar":{"ok":true,"toString":"RemindersRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/88/RemindersRequest/rand1","characteristic":"CURRENT_STATUS","fragments":["00ca58ca006cc2"],"jar":{"ok":true,"toString":"RemindersRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/88/RemindersRequest/rand2","characteristic":"CURRENT_STATUS","fragments":["006e586e00d613"],"jar":{"ok":true,"toString":"RemindersRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/88/RemindersRequest/small1","characteristic":"CURRENT_STATUS","fragments":["00675867004ea9"],"jar":{"ok":true,"toString":"RemindersRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/88/RemindersRequest/small2","characteristic":"CURRENT_STATUS","fragments":["00925892007a45"],"jar":{"ok":true,"toString":"RemindersRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/88/RemindersRequest/sparse","characteristic":"CURRENT_STATUS","fragments":["0086588600cd8a"],"jar":{"ok":true,"toString":"RemindersRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/88/RemindersRequest/zeros","characteristic":"CURRENT_STATUS","fragments":["00be58be00f106"],"jar":{"ok":true,"toString":"RemindersRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/88/RemindersRequest/zeros-nochar","characteristic":"","fragments":["004e584e003015"],"jar":{"ok":true,"toString":"RemindersRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/88/RemindersRequest/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["004e584e003015"],"jar":{"ok":true,"toString":"RemindersRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/88/RemindersRequest/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["004e584e003015"],"jar":{"ok":true,"toString":"RemindersRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/88/RemindersRequest/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["004e584e003015"],"jar":{"ok":true,"toString":"RemindersRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/88/RemindersRequest/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["004e584e003015"],"jar":{"ok":true,"toString":"RemindersRequest[cargo={}]"}}}
+{"encode":{"key":"RemindersRequest/no-such-arity","txId":183,"message":"RemindersRequest","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"RemindersRequest/noargs","txId":198,"message":"RemindersRequest","params":"{}","jar":{"ok":true,"messageName":"RemindersRequest","txId":"-58","packets":["00c658c6000187"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}

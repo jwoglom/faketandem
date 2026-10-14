@@ -24,15 +24,18 @@ import (
 // value. InitiateBolusRequest and SetTempRateRequest were both broken this way,
 // each making its entire therapy path (bolus, temp basal) unusable.
 //
-// Skipped unless FAKETANDEM_TEST_CLIPARSER_JAR points at a built
-// pumpx2-cliparser jar, since CI has none.
+// Runs through the Go codec, or through cliparser when
+// FAKETANDEM_TEST_CLIPARSER_JAR points at a built pumpx2-cliparser jar.
 
+// testBridge is the Go codec, or pumpX2's cliparser when
+// FAKETANDEM_TEST_CLIPARSER_JAR names a jar, so these tests hold the handlers
+// to both.
 func testBridge(t *testing.T) *pumpx2.Bridge {
 	t.Helper()
 
 	jarPath := os.Getenv("FAKETANDEM_TEST_CLIPARSER_JAR")
 	if jarPath == "" {
-		t.Skip("FAKETANDEM_TEST_CLIPARSER_JAR not set, skipping real jar integration test")
+		return pumpx2.NewNativeBridge()
 	}
 
 	bridge, err := pumpx2.NewBridge("", "jar", "", "java", jarPath)

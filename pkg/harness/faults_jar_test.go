@@ -14,7 +14,7 @@ import (
 // an ErrorResponse as pumpX2 defines one rather than merely a well-framed
 // message with opcode 77 in it.
 //
-// Skipped unless FAKETANDEM_TEST_CLIPARSER_JAR is set.
+// Runs through the Go codec, or through cliparser when FAKETANDEM_TEST_CLIPARSER_JAR is set.
 func TestErrorResponseFaultParsesAsErrorResponse(t *testing.T) {
 	bridge := testBridge(t)
 	rig := newFaultRig(t)

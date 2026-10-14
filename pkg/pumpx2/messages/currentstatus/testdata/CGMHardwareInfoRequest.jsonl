@@ -1,0 +1,15 @@
+{"parse":{"key":"CURRENT_STATUS/96/CGMHardwareInfoRequest/long","characteristic":"CURRENT_STATUS","fragments":["00eb60eb015b7d55"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/96/CGMHardwareInfoRequest/ones","characteristic":"CURRENT_STATUS","fragments":["0044604400ff96"],"jar":{"ok":true,"toString":"CGMHardwareInfoRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/96/CGMHardwareInfoRequest/rand1","characteristic":"CURRENT_STATUS","fragments":["00de60de00df61"],"jar":{"ok":true,"toString":"CGMHardwareInfoRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/96/CGMHardwareInfoRequest/rand2","characteristic":"CURRENT_STATUS","fragments":["007660760008f5"],"jar":{"ok":true,"toString":"CGMHardwareInfoRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/96/CGMHardwareInfoRequest/small1","characteristic":"CURRENT_STATUS","fragments":["00716071009f6c"],"jar":{"ok":true,"toString":"CGMHardwareInfoRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/96/CGMHardwareInfoRequest/small2","characteristic":"CURRENT_STATUS","fragments":["007a607a0065b0"],"jar":{"ok":true,"toString":"CGMHardwareInfoRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/96/CGMHardwareInfoRequest/sparse","characteristic":"CURRENT_STATUS","fragments":["00a060a000894a"],"jar":{"ok":true,"toString":"CGMHardwareInfoRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/96/CGMHardwareInfoRequest/zeros","characteristic":"CURRENT_STATUS","fragments":["0037603700f5cb"],"jar":{"ok":true,"toString":"CGMHardwareInfoRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/96/CGMHardwareInfoRequest/zeros-nochar","characteristic":"","fragments":["00406040003b5a"],"jar":{"ok":true,"toString":"CGMHardwareInfoRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/96/CGMHardwareInfoRequest/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["00406040003b5a"],"jar":{"ok":true,"toString":"CGMHardwareInfoRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/96/CGMHardwareInfoRequest/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["00406040003b5a"],"jar":{"ok":true,"toString":"CGMHardwareInfoRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/96/CGMHardwareInfoRequest/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["00406040003b5a"],"jar":{"ok":true,"toString":"CGMHardwareInfoRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/96/CGMHardwareInfoRequest/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["00406040003b5a"],"jar":{"ok":true,"toString":"CGMHardwareInfoRequest[cargo={}]"}}}
+{"encode":{"key":"CGMHardwareInfoRequest/no-such-arity","txId":248,"message":"CGMHardwareInfoRequest","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"CGMHardwareInfoRequest/noargs","txId":171,"message":"CGMHardwareInfoRequest","params":"{}","jar":{"ok":true,"messageName":"CGMHardwareInfoRequest","txId":"-85","packets":["00ab60ab007396"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}

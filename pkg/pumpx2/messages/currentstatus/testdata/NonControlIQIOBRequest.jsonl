@@ -1,0 +1,15 @@
+{"parse":{"key":"CURRENT_STATUS/38/NonControlIQIOBRequest/long","characteristic":"CURRENT_STATUS","fragments":["0036263601aa83c4"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/38/NonControlIQIOBRequest/ones","characteristic":"CURRENT_STATUS","fragments":["005d265d001980"],"jar":{"ok":true,"toString":"NonControlIQIOBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/38/NonControlIQIOBRequest/rand1","characteristic":"CURRENT_STATUS","fragments":["00c826c8000767"],"jar":{"ok":true,"toString":"NonControlIQIOBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/38/NonControlIQIOBRequest/rand2","characteristic":"CURRENT_STATUS","fragments":["0074267400673c"],"jar":{"ok":true,"toString":"NonControlIQIOBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/38/NonControlIQIOBRequest/small1","characteristic":"CURRENT_STATUS","fragments":["000a260a003117"],"jar":{"ok":true,"toString":"NonControlIQIOBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/38/NonControlIQIOBRequest/small2","characteristic":"CURRENT_STATUS","fragments":["001f261f00b7eb"],"jar":{"ok":true,"toString":"NonControlIQIOBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/38/NonControlIQIOBRequest/sparse","characteristic":"CURRENT_STATUS","fragments":["00202620001cfe"],"jar":{"ok":true,"toString":"NonControlIQIOBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/38/NonControlIQIOBRequest/zeros","characteristic":"CURRENT_STATUS","fragments":["002c262c0071bb"],"jar":{"ok":true,"toString":"NonControlIQIOBRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/38/NonControlIQIOBRequest/zeros-nochar","characteristic":"","fragments":["00cb26cb005432"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/38/NonControlIQIOBRequest/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["00cb26cb005432"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/38/NonControlIQIOBRequest/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["00cb26cb005432"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/38/NonControlIQIOBRequest/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["00cb26cb005432"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/38/NonControlIQIOBRequest/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["00cb26cb005432"],"jar":{"ok":false}}}
+{"encode":{"key":"NonControlIQIOBRequest/no-such-arity","txId":279,"message":"NonControlIQIOBRequest","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"NonControlIQIOBRequest/noargs","txId":26,"message":"NonControlIQIOBRequest","params":"{}","jar":{"ok":true,"messageName":"NonControlIQIOBRequest","txId":"26","packets":["001a261a004214"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}

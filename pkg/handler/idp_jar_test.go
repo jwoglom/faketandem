@@ -14,7 +14,7 @@ import (
 // The IDP requests are handed over as raw cargo, which is what cliparser's parse carries under
 // "cargo"; the answers are parsed back through the real cliparser, as a driver would decode them.
 //
-// Skipped unless FAKETANDEM_TEST_CLIPARSER_JAR is set.
+// Runs through the Go codec, or through cliparser when FAKETANDEM_TEST_CLIPARSER_JAR is set.
 
 func idpAnswer(t *testing.T, bridge *pumpx2.Bridge, ps *state.PumpState, request string, cargo []byte) map[string]interface{} {
 	t.Helper()

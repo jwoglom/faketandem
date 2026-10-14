@@ -1,0 +1,15 @@
+{"parse":{"key":"CURRENT_STATUS/40/CurrentBasalStatusRequest/long","characteristic":"CURRENT_STATUS","fragments":["00e928e9010a969a"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/40/CurrentBasalStatusRequest/ones","characteristic":"CURRENT_STATUS","fragments":["005d285d00189b"],"jar":{"ok":true,"toString":"CurrentBasalStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/40/CurrentBasalStatusRequest/rand1","characteristic":"CURRENT_STATUS","fragments":["000f280f00c5f3"],"jar":{"ok":true,"toString":"CurrentBasalStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/40/CurrentBasalStatusRequest/rand2","characteristic":"CURRENT_STATUS","fragments":["000f280f00c5f3"],"jar":{"ok":true,"toString":"CurrentBasalStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/40/CurrentBasalStatusRequest/small1","characteristic":"CURRENT_STATUS","fragments":["00ab28ab007f22"],"jar":{"ok":true,"toString":"CurrentBasalStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/40/CurrentBasalStatusRequest/small2","characteristic":"CURRENT_STATUS","fragments":["0059285900dc57"],"jar":{"ok":true,"toString":"CurrentBasalStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/40/CurrentBasalStatusRequest/sparse","characteristic":"CURRENT_STATUS","fragments":["003e283e0061c5"],"jar":{"ok":true,"toString":"CurrentBasalStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/40/CurrentBasalStatusRequest/zeros","characteristic":"CURRENT_STATUS","fragments":["00152815007d1f"],"jar":{"ok":true,"toString":"CurrentBasalStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/40/CurrentBasalStatusRequest/zeros-nochar","characteristic":"","fragments":["004f284f0009fe"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/40/CurrentBasalStatusRequest/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["004f284f0009fe"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/40/CurrentBasalStatusRequest/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["004f284f0009fe"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/40/CurrentBasalStatusRequest/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["004f284f0009fe"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/40/CurrentBasalStatusRequest/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["004f284f0009fe"],"jar":{"ok":false}}}
+{"encode":{"key":"CurrentBasalStatusRequest/no-such-arity","txId":183,"message":"CurrentBasalStatusRequest","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"CurrentBasalStatusRequest/noargs","txId":295,"message":"CurrentBasalStatusRequest","params":"{}","jar":{"ok":true,"messageName":"CurrentBasalStatusRequest","txId":"39","packets":["00272827008a7c"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}

@@ -33,6 +33,12 @@ type JPAKEAuthenticatorInterface interface {
 // failing) to spawn pumpX2 for round 3 directly.
 var ErrJPAKEQuickPairRejected = errors.New("quick-pair reconnect rejected: no cached long-term JPAKE key, client must fully re-pair")
 
+// ErrJPAKEHandshakeFailed marks a pairing that cannot complete: a client
+// proof or key confirmation that did not verify, a round out of order, or a
+// pumpX2 jpake-server that gave up (ErrJPAKEServerFailed wraps it). No later
+// round can rescue it, so the link is dropped and the client pairs again.
+var ErrJPAKEHandshakeFailed = errors.New("JPAKE handshake failed")
+
 // JPAKESessionManager manages JPAKE authentication sessions
 type JPAKESessionManager struct {
 	authenticators map[string]JPAKEAuthenticatorInterface
@@ -176,8 +182,8 @@ func (m *JPAKESessionManager) GetOrCreate(sessionID string, pairingCode string, 
 			auth = NewPumpX2JPAKEAuthenticator(pairingCode, bridge, m.pumpX2Path, m.pumpX2Mode, m.gradleCmd, m.javaCmd, m.pumpX2JarPath)
 		}
 	} else {
-		log.Infof("Creating Go-based JPAKE authenticator for session: %s", sessionID)
-		auth = NewJPAKEAuthenticator(pairingCode, bridge)
+		log.Infof("Creating native EC-JPAKE authenticator for session: %s", sessionID)
+		auth = NewJPAKEAuthenticator(pairingCode)
 	}
 
 	m.authenticators[sessionID] = auth
@@ -307,6 +313,8 @@ func (h *JPAKEHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state
 		if errors.Is(err, ErrJPAKEServerFailed) {
 			log.Warnf("JPAKE round %d failed because pumpX2's jpake-server gave up (%v); dropping this handshake so the client re-pairs against a fresh jpake-server",
 				h.round, err)
+		} else if errors.Is(err, ErrJPAKEHandshakeFailed) {
+			log.Warnf("JPAKE round %d failed (%v); dropping this handshake so the client re-pairs", h.round, err)
 		} else {
 			log.Warnf("JPAKE round %d failed (%v); dropping this handshake", h.round, err)
 		}

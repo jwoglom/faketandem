@@ -25,7 +25,7 @@ import (
 // all; left alone it signs with the ASCII of its own
 // "IGNORE_HMAC_SIGNATURE_EXCEPTION" placeholder, which no driver will accept.
 //
-// Skipped unless FAKETANDEM_TEST_CLIPARSER_JAR is set.
+// Runs through the Go codec, or through cliparser when FAKETANDEM_TEST_CLIPARSER_JAR is set.
 
 // A binary key, deliberately: it is not valid ASCII and contains a NUL, so it
 // could never have been passed to cliparser through the environment. Any test

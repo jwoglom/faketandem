@@ -32,10 +32,11 @@ func main() {
 	// if both verbose and quiet are chosen, e.g., -v -q, the verbose dominates
 	var traceLevel = flag.Bool("v", false, "verbose off by default, TraceLevel")
 	var infoLevel = flag.Bool("q", false, "quiet off by default, InfoLevel")
-	var pumpX2Path = flag.String("pumpx2-path", "", "path to pumpX2 repository (required unless -pumpx2-jar-path is set)")
-	var pumpX2Mode = flag.String("pumpx2-mode", "gradle", "mode to run cliparser: 'gradle' or 'jar'")
-	var pumpX2JarPath = flag.String("pumpx2-jar-path", "", "path to a prebuilt cliparser jar; skips gradle entirely and implies -pumpx2-mode=jar")
-	var jpakeMode = flag.String("jpake-mode", "pumpx2", "JPAKE mode: 'pumpx2' (real EC-JPAKE via pumpX2's jpake-server, required for real hardware/apps) or 'go' (simplified, cryptographically incompatible with real devices)")
+	var messageCodec = flag.String("message-codec", config.MessageCodecNative, "how pump messages are parsed and encoded: 'native' (Go implementations of pumpX2's messages, no JVM), 'pumpx2' (pumpX2's cliparser) or 'compare' (answer in Go, also run cliparser on every message and log any difference)")
+	var pumpX2Path = flag.String("pumpx2-path", "", "path to a pumpX2 checkout (or PUMPX2_PATH); used only by -message-codec pumpx2/compare and -jpake-mode pumpx2, and not needed with -pumpx2-jar-path")
+	var pumpX2Mode = flag.String("pumpx2-mode", "gradle", "how to run cliparser from -pumpx2-path: 'gradle' or 'jar'")
+	var pumpX2JarPath = flag.String("pumpx2-jar-path", "", "path to a prebuilt cliparser jar for -message-codec pumpx2/compare and -jpake-mode pumpx2; skips gradle entirely and implies -pumpx2-mode=jar")
+	var jpakeMode = flag.String("jpake-mode", config.JPAKEModeGo, "JPAKE pairing: 'go' (native EC-JPAKE, a port of pumpX2's) or 'pumpx2' (pumpX2's jpake-server subprocess)")
 	var jpakeLongTermKey = flag.String("jpake-long-term-key", "", "hex-encoded JPAKE long-term key to pre-seed, letting a previously-paired client quick-pair (reconnect via Jpake3SessionKeyRequest directly) without a fresh full pairing; also displayed/settable in the web UI once derived from a completed pairing")
 	var gradleCmd = flag.String("gradle-cmd", "./gradlew", "gradle command to use")
 	var javaCmd = flag.String("java-cmd", "java", "java command to use")
@@ -69,15 +70,22 @@ func main() {
 	})
 
 	// Initialize configuration
-	cfg, err := config.New(*pumpX2Path, *pumpX2Mode, *jpakeMode, *gradleCmd, *javaCmd, logLevel, *pumpX2JarPath, *jpakeLongTermKey)
+	cfg, err := config.New(config.Options{
+		MessageCodec:        *messageCodec,
+		PumpX2Path:          *pumpX2Path,
+		PumpX2Mode:          *pumpX2Mode,
+		PumpX2JarPath:       *pumpX2JarPath,
+		JPAKEMode:           *jpakeMode,
+		GradleCmd:           *gradleCmd,
+		JavaCmd:             *javaCmd,
+		LogLevel:            logLevel,
+		JPAKELongTermKeyHex: *jpakeLongTermKey,
+	})
 	if err != nil {
 		log.Fatalf("Configuration error: %s", err)
 	}
 
 	log.Info("Starting Tandem Pump Emulator")
-	log.Infof("pumpX2 repository: %s", cfg.PumpX2Path)
-	log.Infof("pumpX2 mode: %s", cfg.PumpX2Mode)
-	log.Infof("JPAKE mode: %s", cfg.JPAKEMode)
 	log.Info("Service UUID: ", bluetooth.PumpServiceUUID)
 	log.Info("Characteristics:")
 	log.Info("  CurrentStatus:     ", bluetooth.CurrentStatusCharUUID)
@@ -87,17 +95,13 @@ func main() {
 	log.Info("  Control:           ", bluetooth.ControlCharUUID)
 	log.Info("  ControlStream:     ", bluetooth.ControlStreamCharUUID)
 
-	// Initialize pumpX2 bridge
-	log.Info("Initializing pumpX2 bridge...")
-	bridge, err := pumpx2.NewBridge(cfg.PumpX2Path, cfg.PumpX2Mode, cfg.GradleCmd, cfg.JavaCmd, cfg.PumpX2JarPath)
-	if err != nil {
-		log.Fatalf("Failed to initialize pumpX2 bridge: %s", err)
-	}
-	log.Info("pumpX2 bridge initialized successfully")
+	bridge := newMessageBridge(cfg, *pumpX2Path != "" || *pumpX2JarPath != "")
 	defer func() { _ = bridge.Close() }() // Cleanup after the emulator stops.
-	log.Info("Warming cliparser before accepting pairing requests...")
-	if err := bridge.WarmUp(); err != nil {
-		log.Fatalf("Failed to warm cliparser: %s", err)
+	if bridge.Codec() != pumpx2.CodecNative {
+		log.Info("Warming cliparser before accepting pairing requests...")
+		if err := bridge.WarmUp(); err != nil {
+			log.Fatalf("Failed to warm cliparser: %s", err)
+		}
 	}
 
 	// Initialize protocol components
@@ -117,12 +121,10 @@ func main() {
 
 	applyPumpTimeZone(pumpState, *pumpTimeZone)
 
-	// Keep the pumpX2 bridge's copy of the pairing code in step with pump
-	// state, whichever API changes it: the websocket setPairingCode command,
-	// the harness's PUT/PATCH /api/state, or anything else that reaches
-	// PumpState.SetPairingCode. The bridge hands the code to the cliparser
-	// subprocess as the JPAKE password, so a stale copy means pairing fails
-	// against the code the emulator claims to be using.
+	// Keep the bridge's copy of the pairing code in step with pump state,
+	// whichever API changes it: the websocket setPairingCode command, the
+	// harness's PUT/PATCH /api/state, or anything else that reaches
+	// PumpState.SetPairingCode.
 	bridge.SetPairingCode(pumpState.GetPairingCode())
 	pumpState.OnPairingCodeChange(bridge.SetPairingCode)
 
@@ -217,6 +219,24 @@ func main() {
 	}
 }
 
+// newMessageBridge says which codec and JPAKE mode the emulator runs and
+// starts the codec. pumpX2Given is whether a pumpX2 location was passed,
+// which only the pumpX2 codecs and JPAKE mode use.
+func newMessageBridge(cfg *config.Config, pumpX2Given bool) *pumpx2.Bridge {
+	log.Infof("Message codec: %s", cfg.MessageCodec)
+	log.Infof("JPAKE mode: %s", cfg.JPAKEMode)
+	if cfg.UsesPumpX2() {
+		log.Infof("pumpX2: repository %q, jar %q, mode %s", cfg.PumpX2Path, cfg.PumpX2JarPath, cfg.PumpX2Mode)
+	} else if pumpX2Given {
+		log.Warn("A pumpX2 path was given but nothing uses it; pass -message-codec pumpx2 (or compare) and/or -jpake-mode pumpx2 to run pumpX2")
+	}
+	bridge, err := pumpx2.NewBridgeWithCodec(cfg.MessageCodec, cfg.PumpX2Path, cfg.PumpX2Mode, cfg.GradleCmd, cfg.JavaCmd, cfg.PumpX2JarPath)
+	if err != nil {
+		log.Fatalf("Failed to initialize the %s message codec: %s", cfg.MessageCodec, err)
+	}
+	return bridge
+}
+
 // defaultTransport picks the transport appropriate for the build platform:
 // real BLE on Linux (where the gatt peripheral implementation exists) and the
 // virtual link everywhere else.
@@ -282,9 +302,9 @@ func configureWriteHandler(ble bluetooth.Transport, server *api.Server, bridge *
 
 		// A central acknowledges every QualifyingEvents notification by writing
 		// four zero bytes back to that characteristic. It is not a pump message:
-		// feeding it to the reassembler and then to cliparser produces garbage
+		// feeding it to the reassembler and then to the parser produces garbage
 		// (QualifyingEvents has no pumpX2 characteristic enum, so the opcode is
-		// guessed) and burns two JVM spawns per qualifying event. Consume it here.
+		// guessed). Consume it here.
 		if isQualifyingEventAck(charType, data) {
 			log.Debugf("Consumed QualifyingEvents acknowledgement write: %s", hex.EncodeToString(data))
 			return
@@ -309,7 +329,7 @@ func configureWriteHandler(ble bluetooth.Transport, server *api.Server, bridge *
 			server.SendPairingProgress("Pairing request received; processing authentication...", false)
 		}
 
-		// Parse the message using pumpX2 bridge
+		// Parse the message the way pumpX2's cliparser does
 		parsed, err := bridge.ParseMessage(charType, rawPacketsHex)
 		if err != nil {
 			log.Errorf("Failed to parse message: %v", err)
@@ -335,13 +355,13 @@ func configureWriteHandler(ble bluetooth.Transport, server *api.Server, bridge *
 				log.Warn("Dropping connection to force client back to full pairing (no cached long-term JPAKE key available for this quick-pair reconnect)")
 				ble.ShutdownConnection()
 			}
-			if errors.Is(err, handler.ErrJPAKEServerFailed) {
-				// The pumpX2 jpake-server subprocess driving this handshake
-				// gave up, so no response to this round is ever coming. Cut
-				// the link instead of leaving the client to sit out its own
-				// 30-90 second pairing timeout: it reconnects and pairs
-				// again, which starts a brand new jpake-server.
-				log.Warn("Dropping connection: the pumpX2 jpake-server subprocess for this pairing failed, so this handshake cannot complete. The client should pair again; the retry gets a fresh jpake-server.")
+			if errors.Is(err, handler.ErrJPAKEHandshakeFailed) {
+				// No response to this round is ever coming: a proof or key
+				// confirmation did not verify, or pumpX2's jpake-server gave
+				// up. Cut the link instead of leaving the client to sit out
+				// its own 30-90 second pairing timeout; it reconnects and
+				// pairs again from scratch.
+				log.Warn("Dropping connection: this JPAKE pairing cannot complete. The client should pair again.")
 				router.ResetJPAKESession()
 				ble.ShutdownConnection()
 			}
@@ -372,8 +392,7 @@ func configureConnectionHandlers(ble bluetooth.Transport, server *api.Server, ro
 		}
 		log.Info("BLE central disconnected; updated websocket clients.")
 		// Clear any in-progress JPAKE authenticator so a stale/broken one
-		// (e.g. a pumpX2 subprocess that died mid-handshake) is never reused
-		// by the next connection attempt.
+		// is never reused by the next connection attempt.
 		wasAuthenticated := pumpState.Authenticated()
 		reassembler.Reset()
 		router.ResetJPAKESession()

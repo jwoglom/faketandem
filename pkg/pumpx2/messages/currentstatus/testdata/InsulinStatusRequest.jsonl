@@ -1,0 +1,15 @@
+{"parse":{"key":"CURRENT_STATUS/36/InsulinStatusRequest/long","characteristic":"CURRENT_STATUS","fragments":["006f246f0134c38b"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/36/InsulinStatusRequest/ones","characteristic":"CURRENT_STATUS","fragments":["004f244f00688b"],"jar":{"ok":true,"toString":"InsulinStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/36/InsulinStatusRequest/rand1","characteristic":"CURRENT_STATUS","fragments":["00b424b4005344"],"jar":{"ok":true,"toString":"InsulinStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/36/InsulinStatusRequest/rand2","characteristic":"CURRENT_STATUS","fragments":["00052405006f69"],"jar":{"ok":true,"toString":"InsulinStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/36/InsulinStatusRequest/small1","characteristic":"CURRENT_STATUS","fragments":["00a924a9007c31"],"jar":{"ok":true,"toString":"InsulinStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/36/InsulinStatusRequest/small2","characteristic":"CURRENT_STATUS","fragments":["00692469002827"],"jar":{"ok":true,"toString":"InsulinStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/36/InsulinStatusRequest/sparse","characteristic":"CURRENT_STATUS","fragments":["009b249b008b52"],"jar":{"ok":true,"toString":"InsulinStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/36/InsulinStatusRequest/zeros","characteristic":"CURRENT_STATUS","fragments":["00ce24ce00c1a3"],"jar":{"ok":true,"toString":"InsulinStatusRequest[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/36/InsulinStatusRequest/zeros-nochar","characteristic":"","fragments":["00e524e500dd79"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/36/InsulinStatusRequest/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["00e524e500dd79"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/36/InsulinStatusRequest/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["00e524e500dd79"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/36/InsulinStatusRequest/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["00e524e500dd79"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/36/InsulinStatusRequest/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["00e524e500dd79"],"jar":{"ok":false}}}
+{"encode":{"key":"InsulinStatusRequest/no-such-arity","txId":76,"message":"InsulinStatusRequest","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"InsulinStatusRequest/noargs","txId":12,"message":"InsulinStatusRequest","params":"{}","jar":{"ok":true,"messageName":"InsulinStatusRequest","txId":"12","packets":["000c240c00f7d3"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}

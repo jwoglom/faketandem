@@ -1,0 +1,16 @@
+{"parse":{"key":"CONTROL/-70/ActivateShelfModeRequest/zeros-on-CURRENT_STATUS","characteristic":"CURRENT_STATUS","fragments":["001bba1b002b2a"],"jar":{"ok":true,"toString":"LastBolusStatusV3Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-70/LastBolusStatusV3Request/long","characteristic":"CURRENT_STATUS","fragments":["00c1bac1017d7690"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-70/LastBolusStatusV3Request/ones","characteristic":"CURRENT_STATUS","fragments":["00aebaae00d3cb"],"jar":{"ok":true,"toString":"LastBolusStatusV3Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-70/LastBolusStatusV3Request/rand1","characteristic":"CURRENT_STATUS","fragments":["00dbbadb007f3c"],"jar":{"ok":true,"toString":"LastBolusStatusV3Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-70/LastBolusStatusV3Request/rand2","characteristic":"CURRENT_STATUS","fragments":["001dba1d008d80"],"jar":{"ok":true,"toString":"LastBolusStatusV3Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-70/LastBolusStatusV3Request/small1","characteristic":"CURRENT_STATUS","fragments":["00c5bac500031c"],"jar":{"ok":true,"toString":"LastBolusStatusV3Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-70/LastBolusStatusV3Request/small2","characteristic":"CURRENT_STATUS","fragments":["00ebbaeb00ea39"],"jar":{"ok":true,"toString":"LastBolusStatusV3Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-70/LastBolusStatusV3Request/sparse","characteristic":"CURRENT_STATUS","fragments":["00acbaac00b1ad"],"jar":{"ok":true,"toString":"LastBolusStatusV3Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-70/LastBolusStatusV3Request/zeros","characteristic":"CURRENT_STATUS","fragments":["003bba3b00cd2c"],"jar":{"ok":true,"toString":"LastBolusStatusV3Request[cargo={}]"}}}
+{"parse":{"key":"CURRENT_STATUS/-70/LastBolusStatusV3Request/zeros-nochar","characteristic":"","fragments":["002aba2a008f1c"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-70/LastBolusStatusV3Request/zeros-on-AUTHORIZATION","characteristic":"AUTHORIZATION","fragments":["002aba2a008f1c"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-70/LastBolusStatusV3Request/zeros-on-CONTROL","characteristic":"CONTROL","fragments":["002aba2a008f1c"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-70/LastBolusStatusV3Request/zeros-on-CONTROL_STREAM","characteristic":"CONTROL_STREAM","fragments":["002aba2a008f1c"],"jar":{"ok":false}}}
+{"parse":{"key":"CURRENT_STATUS/-70/LastBolusStatusV3Request/zeros-on-HISTORY_LOG","characteristic":"HISTORY_LOG","fragments":["002aba2a008f1c"],"jar":{"ok":false}}}
+{"encode":{"key":"LastBolusStatusV3Request/no-such-arity","txId":90,"message":"LastBolusStatusV3Request","params":"{\"x00\":1,\"x01\":1,\"x02\":1,\"x03\":1,\"x04\":1,\"x05\":1,\"x06\":1,\"x07\":1,\"x08\":1,\"x09\":1,\"x10\":1,\"x11\":1,\"x12\":1}","jar":{"ok":false}}}
+{"encode":{"key":"LastBolusStatusV3Request/noargs","txId":201,"message":"LastBolusStatusV3Request","params":"{}","jar":{"ok":true,"messageName":"LastBolusStatusV3Request","txId":"-55","packets":["00c9bac9006e59"],"characteristic":"7b83fff6-9f77-4e5c-8064-aae2c24838b9"}}}

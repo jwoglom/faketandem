@@ -214,7 +214,7 @@ func (r *ServeRunner) roundTripLocked(args []string, env map[string]string) (*se
 }
 
 func (r *ServeRunner) startLocked() error {
-	cmd := exec.Command(r.javaCmd, "-jar", r.jarPath, "serve")
+	cmd := exec.Command(r.javaCmd, append(append([]string{}, jvmUTF8Flags...), "-jar", r.jarPath, "serve")...)
 	cmd.Env = os.Environ()
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
