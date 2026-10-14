@@ -34,6 +34,18 @@ curl -X POST http://127.0.0.1:8080/api/bluetooth/pairingstate \
   -d '{"pairingState":"PairStep1"}'
 ```
 
+### Web UI smoke test
+
+`scripts/ui-smoke.mjs` loads the web UI in headless Chrome and exercises its
+pairing, command, settings-editor and reconnect flows, plus light, dark and
+mobile screenshots. It needs Node 22+ and Chrome (set `CHROME_BIN` if it is not
+found) but no npm packages. It changes the emulator it points at (pairing mode
+and code, a settings save), so aim it at a throwaway instance:
+
+```bash
+node scripts/ui-smoke.mjs http://127.0.0.1:8080/ui/ [screenshot-dir]
+```
+
 Flags:
 
 | Flag | Default | Purpose |

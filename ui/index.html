@@ -3,46 +3,114 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="light dark" />
   <title>Pumpx2 Emulator Control Panel</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <header class="app-header">
-    <div>
+  <header class="topbar">
+    <div class="brand">
       <h1>Pumpx2 Emulator Control Panel</h1>
-      <p class="subtitle">Monitor BLE events, send commands, and manage response settings.</p>
+      <p class="subtitle">Monitor BLE events, pair a phone app, and manage response settings.</p>
     </div>
-    <div class="status-group">
-      <div class="status-pill" id="ws-status" aria-live="polite">WebSocket: Disconnected</div>
-      <div class="status-pill" id="pump-status" aria-live="polite">Pump: Unknown</div>
-      <div class="button-row">
+    <div class="topbar-status">
+      <div class="indicators">
+        <div class="indicator" id="ws-status" data-state="bad" role="status">WebSocket: Disconnected</div>
+        <div class="indicator" id="pump-status" data-state="idle" role="status">Phone app: Unknown</div>
+      </div>
+      <div class="topbar-actions">
         <button type="button" id="connect-btn">Connect</button>
         <button type="button" id="disconnect-btn">Disconnect</button>
-        <button type="button" id="get-state-btn">Get State</button>
+        <button type="button" id="get-state-btn" title="Request the current pump, pairing and connection state">Refresh</button>
+        <label class="toggle">
+          <input type="checkbox" id="auto-reconnect" checked />
+          Auto-reconnect
+        </label>
       </div>
-      <label class="toggle">
-        <input type="checkbox" id="auto-reconnect" checked />
-        Auto-reconnect
-      </label>
       <div class="reconnect-status" id="reconnect-status" aria-live="polite"></div>
     </div>
   </header>
 
   <main class="layout">
     <section class="column">
-      <div class="card">
+      <div class="card" id="pairing-card">
         <div class="card-header">
-          <h2>Live Event Log</h2>
-          <button type="button" id="clear-log-btn">Clear</button>
+          <h2>Pairing</h2>
+          <button type="button" id="refresh-pairing-btn">Refresh</button>
         </div>
-        <div class="log" id="event-log" aria-live="polite"></div>
+
+        <div class="indicators">
+          <div class="indicator" id="pairing-state-status" data-state="idle">Mode: Unknown</div>
+          <div class="indicator" id="pairing-auth-status" data-state="idle">Pairing: Unknown</div>
+          <div class="indicator" id="pairing-connection-status" data-state="idle">App connection: Unknown</div>
+        </div>
+
+        <form class="step" id="pairing-state-form">
+          <h3><span class="step-num">1</span> Bluetooth pairing mode</h3>
+          <div class="segmented" role="radiogroup" aria-label="Bluetooth pairing mode">
+            <label>
+              <input type="radio" name="pairing-state" value="NotDiscoverable" />
+              <span><strong>NotDiscoverable</strong><small>Not discoverable, mfg data 0x10</small></span>
+            </label>
+            <label>
+              <input type="radio" name="pairing-state" value="DiscoverableOnly" />
+              <span><strong>DiscoverableOnly</strong><small>Discoverable, mfg data 0x10</small></span>
+            </label>
+            <label>
+              <input type="radio" name="pairing-state" value="PairStep1" />
+              <span><strong>PairStep1</strong><small>Discoverable, mfg data 0x11</small></span>
+            </label>
+            <label>
+              <input type="radio" name="pairing-state" value="PairStep2" />
+              <span><strong>PairStep2</strong><small>Discoverable, mfg data 0x12</small></span>
+            </label>
+          </div>
+          <p class="note">Choose PairStep2 to pair a phone with a 6-digit code. The mode applies as soon as you pick it.</p>
+        </form>
+
+        <form class="step" id="pairing-form" novalidate>
+          <h3><span class="step-num">2</span> Pairing code</h3>
+          <div class="field-row">
+            <input id="pairing-code" name="pairing-code" type="text" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" placeholder="123456" autocomplete="off" aria-label="Pairing code" aria-describedby="pairing-error" />
+            <button type="submit" id="set-pairing-btn" class="primary">Set pairing code</button>
+          </div>
+          <p class="help" id="pairing-error" role="alert"></p>
+          <p class="note">Saving the code prepares pairing. Enter the same code in the client app to finish.</p>
+          <div class="progress" id="pairing-progress" data-state="info" role="status" aria-live="polite">Waiting for the app to pair.</div>
+          <div class="button-row">
+            <button type="button" id="reset-pairing-btn" class="danger" title="Forget the current authentication on the emulator">Reset auth</button>
+            <button type="button" id="disconnect-pump-btn" class="danger" title="Drop the connected phone app">Disconnect app</button>
+          </div>
+        </form>
+
+        <details class="advanced">
+          <summary>Advanced: JPAKE long-term key</summary>
+          <form class="form" id="long-term-key-form" novalidate>
+            <label for="long-term-key">Long-term key (hex)</label>
+            <input id="long-term-key" name="long-term-key" type="text" placeholder="(none cached)" autocomplete="off" spellcheck="false" aria-describedby="long-term-key-error" />
+            <p class="help" id="long-term-key-error" role="alert"></p>
+            <div class="button-row">
+              <button type="submit" id="set-long-term-key-btn" class="primary">Set key</button>
+              <button type="button" id="reset-long-term-key-btn">Clear key</button>
+            </div>
+            <p class="note" id="long-term-key-help">Cached automatically after a full pairing completes, so a later app reconnect can "quick pair" (Jpake3SessionKeyRequest sent directly) without redoing the full JPAKE exchange. Paste a key here (or pass -jpake-long-term-key on the command line) to pre-seed it, e.g. to match a key from a previous run.</p>
+          </form>
+        </details>
       </div>
 
       <div class="card">
         <div class="card-header">
-          <h2>WebSocket Commands</h2>
+          <h2>Live event log</h2>
+          <button type="button" id="clear-log-btn">Clear</button>
         </div>
-        <form class="form" id="command-form">
+        <div class="log" id="event-log" role="log" aria-label="Live event log" tabindex="0"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <h2>WebSocket commands</h2>
+        </div>
+        <form class="form" id="command-form" novalidate>
           <label for="characteristic">Characteristic</label>
           <select id="characteristic" name="characteristic">
             <option value="CurrentStatus">CurrentStatus</option>
@@ -53,13 +121,13 @@
             <option value="ControlStream">ControlStream</option>
           </select>
 
-          <label for="hex-data">Hex Payload</label>
-          <input id="hex-data" name="hex-data" type="text" placeholder="e.g. 01af" autocomplete="off" />
+          <label for="hex-data">Hex payload</label>
+          <input id="hex-data" name="hex-data" type="text" placeholder="e.g. 01af" autocomplete="off" spellcheck="false" aria-describedby="hex-error" />
           <p class="help" id="hex-error" role="alert"></p>
 
           <div class="button-row">
-            <button type="button" id="notify-btn">Notify</button>
-            <button type="button" id="set-char-btn">Set Characteristic</button>
+            <button type="submit" id="notify-btn" class="primary">Notify</button>
+            <button type="button" id="set-char-btn">Set characteristic</button>
           </div>
         </form>
       </div>
@@ -68,90 +136,34 @@
     <section class="column">
       <div class="card">
         <div class="card-header">
-          <h2>Settings</h2>
+          <h2>Response settings</h2>
           <button type="button" id="refresh-settings-btn">Refresh</button>
         </div>
-        <div class="settings-list" id="settings-list" role="list"></div>
+        <input id="settings-filter" type="search" placeholder="Filter message types…" autocomplete="off" aria-label="Filter message types" />
+        <div class="settings-list" id="settings-list" role="list" aria-busy="true">
+          <p class="empty">Loading settings…</p>
+        </div>
       </div>
 
-      <div class="card">
+      <div class="card" id="editor-card">
         <div class="card-header">
-          <h2>Pairing State</h2>
-          <button type="button" id="refresh-pairing-state-btn">Refresh</button>
-        </div>
-        <div class="pairing-status">
-          <div class="status-pill" id="pairing-state-status" aria-live="polite">State: Unknown</div>
-        </div>
-        <form class="form" id="pairing-state-form">
-          <label>
-            <input type="radio" name="pairing-state" value="NotDiscoverable" />
-            <strong>NotDiscoverable</strong> - Not discoverable, mfg data 0x10
-          </label>
-          <label>
-            <input type="radio" name="pairing-state" value="DiscoverableOnly" />
-            <strong>DiscoverableOnly</strong> - Discoverable, mfg data 0x10
-          </label>
-          <label>
-            <input type="radio" name="pairing-state" value="PairStep1" />
-            <strong>PairStep1</strong> - Discoverable, mfg data 0x11
-          </label>
-          <label>
-            <input type="radio" name="pairing-state" value="PairStep2" />
-            <strong>PairStep2</strong> - Discoverable, mfg data 0x12
-          </label>
-          <button type="button" id="set-pairing-state-btn" class="primary">Apply State</button>
-        </form>
-      </div>
-
-      <div class="card">
-        <div class="card-header">
-          <h2>Device Pairing</h2>
-          <button type="button" id="refresh-pairing-btn">Refresh</button>
-        </div>
-        <div class="pairing-status">
-          <div class="status-pill" id="pairing-auth-status" aria-live="polite">Pairing: Unknown</div>
-          <div class="status-pill" id="pairing-connection-status" aria-live="polite">App Connection: Unknown</div>
-        </div>
-        <form class="form" id="pairing-form">
-          <label for="pairing-code">Pairing Code</label>
-          <input id="pairing-code" name="pairing-code" type="text" placeholder="123456" autocomplete="off" />
-          <p class="help" id="pairing-error" role="alert"></p>
-
-          <div class="button-row">
-            <button type="button" id="set-pairing-btn" class="primary">Set Pairing Code</button>
-            <button type="button" id="reset-pairing-btn">Reset Auth</button>
-            <button type="button" id="disconnect-pump-btn">Disconnect App</button>
+          <div class="title-stack">
+            <h2>Settings editor</h2>
+            <div class="editor-subtitle" id="editor-subtitle">
+              <span id="editor-title">No message type selected</span>
+              <span class="badge warn" id="dirty-badge" hidden>Unsaved changes</span>
+            </div>
           </div>
-          <p class="note" id="pairing-help">Use the same 6-digit code in the client app during pairing.</p>
-        </form>
-
-        <form class="form" id="long-term-key-form">
-          <label for="long-term-key">JPAKE Long-Term Key (hex)</label>
-          <input id="long-term-key" name="long-term-key" type="text" placeholder="(none cached)" autocomplete="off" spellcheck="false" />
-          <p class="help" id="long-term-key-error" role="alert"></p>
-
           <div class="button-row">
-            <button type="button" id="set-long-term-key-btn" class="primary">Set Key</button>
-            <button type="button" id="reset-long-term-key-btn">Clear Key</button>
-          </div>
-          <p class="note" id="long-term-key-help">Cached automatically after a full pairing completes, so a later app reconnect can "quick pair" (Jpake3SessionKeyRequest sent directly) without redoing the full JPAKE exchange. Paste a key here (or pass -jpake-long-term-key on the command line) to pre-seed it, e.g. to match a key from a previous run.</p>
-        </form>
-      </div>
-
-      <div class="card">
-        <div class="card-header">
-          <h2>Settings Editor</h2>
-          <div class="button-row">
-            <button type="button" id="reload-config-btn">Reload</button>
-            <button type="button" id="reset-config-btn">Reset State</button>
-            <button type="button" id="save-config-btn" class="primary">Save</button>
+            <button type="button" id="reload-config-btn" disabled>Reload</button>
+            <button type="button" id="reset-config-btn" class="danger" disabled>Reset state</button>
+            <button type="button" id="save-config-btn" class="primary" disabled>Save</button>
           </div>
         </div>
-        <div class="status-banner" id="config-status" aria-live="polite"></div>
-        <div class="form">
-          <label for="message-type">Message Type</label>
-          <input id="message-type" type="text" readonly />
 
+        <p class="empty" id="editor-empty">Select a message type from the list to view and edit how the emulator responds to it.</p>
+
+        <div class="form" id="editor-body" hidden>
           <label for="mode-select">Mode</label>
           <select id="mode-select" name="mode-select">
             <option value="constant">constant</option>
@@ -163,21 +175,21 @@
 
           <div class="editor-section" data-mode="constant">
             <label for="constant-value">Value (JSON)</label>
-            <textarea id="constant-value" rows="6" spellcheck="false"></textarea>
+            <textarea id="constant-value" rows="8" spellcheck="false"></textarea>
           </div>
 
-          <div class="editor-section" data-mode="incremental">
+          <div class="editor-section" data-mode="incremental" hidden>
             <div class="section-header">
               <h3>Values</h3>
-              <button type="button" id="add-incremental">Add Value</button>
+              <button type="button" id="add-incremental">Add value</button>
             </div>
             <div id="incremental-values" class="list-stack"></div>
           </div>
 
-          <div class="editor-section" data-mode="time_based">
+          <div class="editor-section" data-mode="time_based" hidden>
             <div class="section-header">
-              <h3>Values + Timing</h3>
-              <button type="button" id="add-time-based">Add Row</button>
+              <h3>Values + timing</h3>
+              <button type="button" id="add-time-based">Add row</button>
             </div>
             <div id="time-based-values" class="list-stack"></div>
           </div>
@@ -187,6 +199,8 @@
       </div>
     </section>
   </main>
+
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
 
   <script src="app.js"></script>
 </body>

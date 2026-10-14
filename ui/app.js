@@ -1,49 +1,67 @@
+const $ = (id) => document.getElementById(id);
+
 const elements = {
-  wsStatus: document.getElementById("ws-status"),
-  pumpStatus: document.getElementById("pump-status"),
-  reconnectStatus: document.getElementById("reconnect-status"),
-  connectBtn: document.getElementById("connect-btn"),
-  disconnectBtn: document.getElementById("disconnect-btn"),
-  getStateBtn: document.getElementById("get-state-btn"),
-  autoReconnectToggle: document.getElementById("auto-reconnect"),
-  clearLogBtn: document.getElementById("clear-log-btn"),
-  eventLog: document.getElementById("event-log"),
-  characteristicSelect: document.getElementById("characteristic"),
-  hexInput: document.getElementById("hex-data"),
-  hexError: document.getElementById("hex-error"),
-  notifyBtn: document.getElementById("notify-btn"),
-  setCharBtn: document.getElementById("set-char-btn"),
-  refreshSettingsBtn: document.getElementById("refresh-settings-btn"),
-  settingsList: document.getElementById("settings-list"),
-  refreshPairingStateBtn: document.getElementById("refresh-pairing-state-btn"),
-  pairingStateStatus: document.getElementById("pairing-state-status"),
-  pairingStateForm: document.getElementById("pairing-state-form"),
-  setPairingStateBtn: document.getElementById("set-pairing-state-btn"),
-  refreshPairingBtn: document.getElementById("refresh-pairing-btn"),
-  pairingAuthStatus: document.getElementById("pairing-auth-status"),
-  pairingConnectionStatus: document.getElementById("pairing-connection-status"),
-  pairingCodeInput: document.getElementById("pairing-code"),
-  pairingError: document.getElementById("pairing-error"),
-  setPairingBtn: document.getElementById("set-pairing-btn"),
-  resetPairingBtn: document.getElementById("reset-pairing-btn"),
-  disconnectPumpBtn: document.getElementById("disconnect-pump-btn"),
-  longTermKeyInput: document.getElementById("long-term-key"),
-  longTermKeyError: document.getElementById("long-term-key-error"),
-  setLongTermKeyBtn: document.getElementById("set-long-term-key-btn"),
-  resetLongTermKeyBtn: document.getElementById("reset-long-term-key-btn"),
-  messageTypeInput: document.getElementById("message-type"),
-  modeSelect: document.getElementById("mode-select"),
-  configMeta: document.getElementById("config-meta"),
-  constantValue: document.getElementById("constant-value"),
-  incrementalValues: document.getElementById("incremental-values"),
-  timeBasedValues: document.getElementById("time-based-values"),
-  addIncrementalBtn: document.getElementById("add-incremental"),
-  addTimeBasedBtn: document.getElementById("add-time-based"),
-  saveConfigBtn: document.getElementById("save-config-btn"),
-  resetConfigBtn: document.getElementById("reset-config-btn"),
-  reloadConfigBtn: document.getElementById("reload-config-btn"),
-  configStatus: document.getElementById("config-status"),
-  configError: document.getElementById("config-error"),
+  wsStatus: $("ws-status"),
+  pumpStatus: $("pump-status"),
+  reconnectStatus: $("reconnect-status"),
+  connectBtn: $("connect-btn"),
+  disconnectBtn: $("disconnect-btn"),
+  getStateBtn: $("get-state-btn"),
+  autoReconnectToggle: $("auto-reconnect"),
+  clearLogBtn: $("clear-log-btn"),
+  eventLog: $("event-log"),
+  commandForm: $("command-form"),
+  characteristicSelect: $("characteristic"),
+  hexInput: $("hex-data"),
+  hexError: $("hex-error"),
+  notifyBtn: $("notify-btn"),
+  setCharBtn: $("set-char-btn"),
+  refreshSettingsBtn: $("refresh-settings-btn"),
+  settingsFilter: $("settings-filter"),
+  settingsList: $("settings-list"),
+  pairingStateStatus: $("pairing-state-status"),
+  pairingStateForm: $("pairing-state-form"),
+  refreshPairingBtn: $("refresh-pairing-btn"),
+  pairingAuthStatus: $("pairing-auth-status"),
+  pairingConnectionStatus: $("pairing-connection-status"),
+  pairingForm: $("pairing-form"),
+  pairingCodeInput: $("pairing-code"),
+  pairingError: $("pairing-error"),
+  pairingProgress: $("pairing-progress"),
+  setPairingBtn: $("set-pairing-btn"),
+  resetPairingBtn: $("reset-pairing-btn"),
+  disconnectPumpBtn: $("disconnect-pump-btn"),
+  longTermKeyForm: $("long-term-key-form"),
+  longTermKeyInput: $("long-term-key"),
+  longTermKeyError: $("long-term-key-error"),
+  resetLongTermKeyBtn: $("reset-long-term-key-btn"),
+  editorTitle: $("editor-title"),
+  dirtyBadge: $("dirty-badge"),
+  editorEmpty: $("editor-empty"),
+  editorBody: $("editor-body"),
+  modeSelect: $("mode-select"),
+  configMeta: $("config-meta"),
+  constantValue: $("constant-value"),
+  incrementalValues: $("incremental-values"),
+  timeBasedValues: $("time-based-values"),
+  addIncrementalBtn: $("add-incremental"),
+  addTimeBasedBtn: $("add-time-based"),
+  saveConfigBtn: $("save-config-btn"),
+  resetConfigBtn: $("reset-config-btn"),
+  reloadConfigBtn: $("reload-config-btn"),
+  configError: $("config-error"),
+  toasts: $("toasts"),
+};
+
+const MAX_LOG_ENTRIES = 500;
+const TOAST_MS = 3200;
+const TOAST_ERROR_MS = 6000;
+
+const PAIRING_STATES = {
+  NotDiscoverable: { text: "NotDiscoverable (0x10)", indicator: "bad" },
+  DiscoverableOnly: { text: "DiscoverableOnly (0x10)", indicator: "ok" },
+  PairStep1: { text: "PairStep1 (0x11)", indicator: "ok" },
+  PairStep2: { text: "PairStep2 (0x12)", indicator: "ok" },
 };
 
 const state = {
@@ -51,115 +69,231 @@ const state = {
   autoReconnect: true,
   reconnectDelay: 1000,
   reconnectTimer: null,
+  countdownTimer: null,
   manualClose: false,
   configs: {},
   selectedMessageType: "",
+  dirty: false,
+  appConnected: null,
+  pairingSignature: "",
+  replayUntil: 0,
+  pairingStateRequestId: 0,
+  pairingCodeTouched: false,
+  hexTouched: false,
 };
 
-const statusClasses = ["connected", "disconnected", "reconnecting"];
+/* ---------- small helpers ---------- */
 
-const resetStatusClasses = (el) => {
-  statusClasses.forEach((cls) => el.classList.remove(cls));
+const setIndicator = (el, indicatorState, text) => {
+  el.dataset.state = indicatorState;
+  el.textContent = text;
 };
+
+const setFieldError = (input, errorEl, message) => {
+  errorEl.textContent = message || "";
+  if (message) {
+    input.setAttribute("aria-invalid", "true");
+  } else {
+    input.removeAttribute("aria-invalid");
+  }
+};
+
+const showToast = (message, kind = "info") => {
+  const toast = document.createElement("div");
+  toast.className = "toast";
+  toast.dataset.kind = kind;
+  toast.textContent = message;
+  elements.toasts.append(toast);
+  const lifetime = kind === "error" ? TOAST_ERROR_MS : TOAST_MS;
+  window.setTimeout(() => {
+    toast.classList.add("leaving");
+    window.setTimeout(() => toast.remove(), 220);
+  }, lifetime);
+};
+
+const clearLogPlaceholder = () => {
+  const placeholder = elements.eventLog.querySelector(".log-empty");
+  if (placeholder) {
+    placeholder.remove();
+  }
+};
+
+const showLogPlaceholder = () => {
+  elements.eventLog.innerHTML = "";
+  const placeholder = document.createElement("div");
+  placeholder.className = "log-empty";
+  placeholder.textContent = "Events will appear here as they happen.";
+  elements.eventLog.append(placeholder);
+};
+
+// logEvent adds a newest-first entry. `detail` carries long hex payloads on
+// their own line so they wrap instead of stretching the row.
+const logEvent = (message, type = "info", detail = "") => {
+  clearLogPlaceholder();
+  const entry = document.createElement("div");
+  entry.className = "log-entry";
+  entry.dataset.type = type;
+
+  const time = document.createElement("time");
+  time.className = "log-time";
+  time.textContent = new Date().toLocaleTimeString([], { hour12: false });
+
+  const tag = document.createElement("span");
+  tag.className = "log-tag";
+  tag.textContent = type === "info" ? "" : type;
+
+  const body = document.createElement("span");
+  body.className = "log-body";
+  body.textContent = message;
+  if (detail) {
+    const hex = document.createElement("span");
+    hex.className = "log-hex";
+    hex.textContent = detail;
+    body.append(hex);
+  }
+
+  entry.append(time, tag, body);
+  elements.eventLog.prepend(entry);
+  while (elements.eventLog.childElementCount > MAX_LOG_ENTRIES) {
+    elements.eventLog.lastElementChild.remove();
+  }
+};
+
+/* ---------- connection status ---------- */
 
 const updateWsStatus = (status, detail = "") => {
-  resetStatusClasses(elements.wsStatus);
-  elements.wsStatus.classList.add(status);
-  const label = status === "connected" ? "Connected" : status === "reconnecting" ? "Reconnecting" : "Disconnected";
-  elements.wsStatus.textContent = `WebSocket: ${label}`;
+  const labels = {
+    connected: ["ok", "Connected"],
+    connecting: ["warn", "Connecting"],
+    reconnecting: ["warn", "Reconnecting"],
+    disconnected: ["bad", "Disconnected"],
+  };
+  const [indicator, label] = labels[status];
+  setIndicator(elements.wsStatus, indicator, `WebSocket: ${label}`);
   elements.reconnectStatus.textContent = detail;
+  elements.connectBtn.disabled = status !== "disconnected";
+  elements.disconnectBtn.disabled = status === "disconnected";
+  elements.getStateBtn.disabled = status !== "connected";
+  elements.refreshPairingBtn.disabled = status !== "connected";
 };
 
-const updatePumpStatus = (connected) => {
-  resetStatusClasses(elements.pumpStatus);
-  resetStatusClasses(elements.pairingConnectionStatus);
+const setAppConnected = (connected) => {
+  const changed = state.appConnected !== null && state.appConnected !== connected;
+  state.appConnected = connected;
   if (connected === true) {
-    elements.pumpStatus.classList.add("connected");
-    elements.pumpStatus.textContent = "Pump: Connected";
-    elements.pairingConnectionStatus.classList.add("connected");
-    elements.pairingConnectionStatus.textContent = "App Connection: Connected";
-    return;
+    setIndicator(elements.pumpStatus, "ok", "Phone app: Connected");
+    setIndicator(elements.pairingConnectionStatus, "ok", "App connection: Connected");
+  } else if (connected === false) {
+    setIndicator(elements.pumpStatus, "bad", "Phone app: Disconnected");
+    setIndicator(elements.pairingConnectionStatus, "bad", "App connection: Disconnected");
+  } else {
+    setIndicator(elements.pumpStatus, "idle", "Phone app: Unknown");
+    setIndicator(elements.pairingConnectionStatus, "idle", "App connection: Unknown");
   }
-  if (connected === false) {
-    elements.pumpStatus.classList.add("disconnected");
-    elements.pumpStatus.textContent = "Pump: Disconnected";
-    elements.pairingConnectionStatus.classList.add("disconnected");
-    elements.pairingConnectionStatus.textContent = "App Connection: Disconnected";
-    return;
+  if (changed) {
+    logEvent(`Phone app ${connected ? "connected" : "disconnected"}.`);
   }
-  elements.pumpStatus.textContent = "Pump: Unknown";
-  elements.pairingConnectionStatus.textContent = "App Connection: Unknown";
 };
+
+/* ---------- pairing ---------- */
 
 const updatePairingStateStatus = (pairingState) => {
-  resetStatusClasses(elements.pairingStateStatus);
-  
-  // Update status display
-  const stateDescriptions = {
-    "NotDiscoverable": { text: "NotDiscoverable (0x10)", class: "disconnected" },
-    "DiscoverableOnly": { text: "DiscoverableOnly (0x10)", class: "connected" },
-    "PairStep1": { text: "PairStep1 (0x11)", class: "connected" },
-    "PairStep2": { text: "PairStep2 (0x12)", class: "connected" }
-  };
-  
-  if (pairingState && stateDescriptions[pairingState]) {
-    const desc = stateDescriptions[pairingState];
-    elements.pairingStateStatus.classList.add(desc.class);
-    elements.pairingStateStatus.textContent = `State: ${desc.text}`;
-    
-    // Update radio button selection
-    const radio = elements.pairingStateForm.querySelector(`input[value="${pairingState}"]`);
-    if (radio) radio.checked = true;
-  } else {
-    elements.pairingStateStatus.textContent = "State: Unknown";
+  const desc = PAIRING_STATES[pairingState];
+  if (!desc) {
+    setIndicator(elements.pairingStateStatus, "idle", "Mode: Unknown");
+    return;
+  }
+  setIndicator(elements.pairingStateStatus, desc.indicator, `Mode: ${desc.text}`);
+  const radio = elements.pairingStateForm.querySelector(`input[value="${pairingState}"]`);
+  if (radio) {
+    radio.checked = true;
   }
 };
 
 const updatePairingStatus = (pairingCode, authenticated, longTermKey) => {
-  resetStatusClasses(elements.pairingAuthStatus);
   if (authenticated === true) {
-    elements.pairingAuthStatus.classList.add("connected");
-    elements.pairingAuthStatus.textContent = "Pairing: Authenticated";
+    setIndicator(elements.pairingAuthStatus, "ok", "Pairing: Authenticated");
   } else if (authenticated === false) {
-    elements.pairingAuthStatus.classList.add("disconnected");
-    elements.pairingAuthStatus.textContent = "Pairing: Not Authenticated";
+    setIndicator(elements.pairingAuthStatus, "bad", "Pairing: Not authenticated");
   } else {
-    elements.pairingAuthStatus.textContent = "Pairing: Unknown";
+    setIndicator(elements.pairingAuthStatus, "idle", "Pairing: Unknown");
   }
-  if (typeof pairingCode === "string" && pairingCode.length > 0) {
+  // Never overwrite a field the user is typing in.
+  if (typeof pairingCode === "string" && pairingCode.length > 0 && document.activeElement !== elements.pairingCodeInput) {
     elements.pairingCodeInput.value = pairingCode;
   }
   if (document.activeElement !== elements.longTermKeyInput) {
     elements.longTermKeyInput.value = typeof longTermKey === "string" ? longTermKey : "";
   }
   updatePairingValidation();
+
+  // The server repeats this message on every refresh; only log real changes.
+  const signature = `${authenticated}|${pairingCode ?? ""}|${longTermKey ? "key" : "nokey"}`;
+  if (signature !== state.pairingSignature) {
+    const first = state.pairingSignature === "";
+    state.pairingSignature = signature;
+    if (!first) {
+      logEvent(`Pairing: ${authenticated ? "authenticated" : "not authenticated"}; long-term key ${longTermKey ? "cached" : "not cached"}.`);
+    }
+  }
 };
 
-const logEvent = (message, type = "info") => {
-  const entry = document.createElement("div");
-  entry.className = "log-entry";
-  const timestamp = new Date().toLocaleTimeString();
-  entry.textContent = `[${timestamp}] ${message}`;
-  entry.dataset.type = type;
-  elements.eventLog.prepend(entry);
+const setPairingProgress = (message, failed) => {
+  // getPairingState makes the server replay its latest status; don't log that
+  // replay as if it were a new event.
+  const isReplay = Date.now() < state.replayUntil && message === elements.pairingProgress.textContent;
+  elements.pairingProgress.dataset.state = failed ? "error" : "info";
+  elements.pairingProgress.textContent = message;
+  if (!isReplay) {
+    logEvent(message, failed ? "error" : "info");
+  }
 };
+
+const validatePairingCode = (value) => {
+  const normalized = value.trim();
+  if (!normalized) {
+    return { valid: false, message: "Pairing code is required." };
+  }
+  if (!/^\d{6}$/.test(normalized)) {
+    return { valid: false, message: "Pairing code must be 6 digits." };
+  }
+  return { valid: true };
+};
+
+const updatePairingValidation = () => {
+  const { valid, message } = validatePairingCode(elements.pairingCodeInput.value);
+  elements.setPairingBtn.disabled = !valid;
+  // Don't nag while the user is still typing the first digits.
+  setFieldError(elements.pairingCodeInput, elements.pairingError, !valid && state.pairingCodeTouched ? message : "");
+};
+
+const validateHex = (value) => {
+  const normalized = value.trim();
+  if (!normalized) {
+    return { valid: true };
+  }
+  if (!/^[0-9a-fA-F]+$/.test(normalized)) {
+    return { valid: false, immediate: true, message: "Hex payload can only include 0-9 and a-f characters." };
+  }
+  if (normalized.length % 2 !== 0) {
+    return { valid: false, immediate: false, message: "Hex payload must have an even length." };
+  }
+  return { valid: true };
+};
+
+const updateHexValidation = () => {
+  const { valid, immediate, message } = validateHex(elements.hexInput.value);
+  // Odd length is normal mid-typing, so only flag it once the user moves on.
+  setFieldError(elements.hexInput, elements.hexError, !valid && (immediate || state.hexTouched) ? message : "");
+  elements.notifyBtn.disabled = !valid;
+  elements.setCharBtn.disabled = !valid;
+};
+
+/* ---------- websocket ---------- */
 
 const wsUrl = () => {
   const scheme = window.location.protocol === "https:" ? "wss" : "ws";
   return `${scheme}://${window.location.host}/ws`;
-};
-
-const scheduleReconnect = () => {
-  if (!state.autoReconnect || state.reconnectTimer) {
-    return;
-  }
-  const delay = state.reconnectDelay;
-  updateWsStatus("reconnecting", `Reconnecting in ${Math.round(delay / 1000)}s`);
-  state.reconnectTimer = window.setTimeout(() => {
-    state.reconnectTimer = null;
-    connectWebSocket();
-  }, delay);
-  state.reconnectDelay = Math.min(state.reconnectDelay * 2, 30000);
 };
 
 const clearReconnect = () => {
@@ -167,7 +301,57 @@ const clearReconnect = () => {
     window.clearTimeout(state.reconnectTimer);
     state.reconnectTimer = null;
   }
+  if (state.countdownTimer) {
+    window.clearInterval(state.countdownTimer);
+    state.countdownTimer = null;
+  }
   elements.reconnectStatus.textContent = "";
+};
+
+const scheduleReconnect = () => {
+  if (!state.autoReconnect || state.reconnectTimer) {
+    return;
+  }
+  const delay = state.reconnectDelay;
+  const deadline = Date.now() + delay;
+  const renderCountdown = () => {
+    const seconds = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+    updateWsStatus("reconnecting", `Reconnecting in ${seconds}s`);
+  };
+  renderCountdown();
+  state.countdownTimer = window.setInterval(renderCountdown, 250);
+  state.reconnectTimer = window.setTimeout(() => {
+    clearReconnect();
+    connectWebSocket();
+  }, delay);
+  state.reconnectDelay = Math.min(state.reconnectDelay * 2, 30000);
+};
+
+const handleMessage = (payload) => {
+  if (typeof payload.connected === "boolean") {
+    setAppConnected(payload.connected);
+    return;
+  }
+  switch (payload.type) {
+    case "pairing_state":
+      updatePairingStatus(payload.pairing_code, payload.authenticated, payload.long_term_key);
+      return;
+    case "pairing_progress":
+    case "pairing_error":
+      setPairingProgress(payload.message, payload.type === "pairing_error");
+      return;
+    case "connected":
+    case "disconnected":
+      setAppConnected(payload.type === "connected");
+      return;
+    case "write":
+    case "read":
+    case "notify":
+      logEvent(payload.characteristic ?? "", payload.type, payload.data ?? "");
+      return;
+    default:
+      logEvent(`${payload.characteristic ? `${payload.characteristic} ` : ""}${payload.message ?? ""}`.trim() || "(empty event)", payload.type ?? "event", payload.data ?? "");
+  }
 };
 
 const connectWebSocket = () => {
@@ -175,7 +359,7 @@ const connectWebSocket = () => {
     return;
   }
   clearReconnect();
-  updateWsStatus("reconnecting", "Connecting...");
+  updateWsStatus("connecting", "Connecting…");
   const ws = new WebSocket(wsUrl());
   state.ws = ws;
 
@@ -183,46 +367,30 @@ const connectWebSocket = () => {
     state.reconnectDelay = 1000;
     updateWsStatus("connected");
     logEvent("WebSocket connected.");
-    sendCommand({ command: "getState" });
-    requestPairingState();
+    requestState();
   });
 
   ws.addEventListener("message", (event) => {
     try {
-      const payload = JSON.parse(event.data);
-      if (typeof payload.connected === "boolean") {
-        updatePumpStatus(payload.connected);
-        logEvent(`Pump connection state: ${payload.connected ? "connected" : "disconnected"}.`);
-        return;
-      }
-      if (payload.type === "pairing_state") {
-        updatePairingStatus(payload.pairing_code, payload.authenticated, payload.long_term_key);
-        logEvent("Pairing state updated.");
-        return;
-      }
-      if (payload.type === "connected" || payload.type === "disconnected") {
-        updatePumpStatus(payload.type === "connected");
-        logEvent(`Pump connection state: ${payload.type}.`);
-        return;
-      }
-      const type = payload.type ?? "event";
-      const characteristic = payload.characteristic ? ` (${payload.characteristic})` : "";
-      const data = payload.data ? ` data=${payload.data}` : "";
-      const message = payload.message ? ` ${payload.message}` : "";
-      logEvent(`${type}${characteristic}${data}${message}`);
+      handleMessage(JSON.parse(event.data));
     } catch (error) {
       logEvent(`Unparseable message: ${event.data}`, "error");
     }
   });
 
   ws.addEventListener("close", () => {
-    updateWsStatus("disconnected", "");
-    logEvent("WebSocket disconnected.");
-    if (state.manualClose) {
-      state.manualClose = false;
-      return;
+    if (state.ws !== ws) {
+      return; // A newer socket has replaced this one.
     }
-    scheduleReconnect();
+    state.appConnected = null;
+    setAppConnected(null);
+    const manual = state.manualClose;
+    state.manualClose = false;
+    updateWsStatus("disconnected");
+    logEvent("WebSocket disconnected.");
+    if (!manual) {
+      scheduleReconnect();
+    }
   });
 
   ws.addEventListener("error", () => {
@@ -231,77 +399,86 @@ const connectWebSocket = () => {
 };
 
 const disconnectWebSocket = () => {
-  if (!state.ws) {
+  clearReconnect();
+  if (state.ws && (state.ws.readyState === WebSocket.OPEN || state.ws.readyState === WebSocket.CONNECTING)) {
+    state.manualClose = true;
+    state.ws.close();
     return;
   }
-  state.manualClose = true;
-  state.ws.close();
+  updateWsStatus("disconnected");
 };
 
-const sendCommand = (payload) => {
+const sendCommand = (payload, { quiet = false } = {}) => {
   if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+    showToast("Not connected to the emulator. Connect first.", "error");
     logEvent("WebSocket is not connected.", "error");
-    return;
+    return false;
   }
   state.ws.send(JSON.stringify(payload));
-};
-
-const requestPairingState = () => {
-  sendCommand({ command: "getPairingState" });
-};
-
-const validateHex = (value) => {
-  if (!value) {
-    return { valid: true };
+  if (!quiet) {
+    showToast(`Sent: ${payload.command}`);
   }
-  const normalized = value.trim();
-  if (normalized.length % 2 !== 0) {
-    return { valid: false, message: "Hex payload must have an even length." };
-  }
-  if (!/^[0-9a-fA-F]+$/.test(normalized)) {
-    return { valid: false, message: "Hex payload can only include 0-9 and a-f characters." };
-  }
-  return { valid: true };
+  return true;
 };
 
-const updateHexValidation = () => {
-  const { valid, message } = validateHex(elements.hexInput.value);
-  elements.hexError.textContent = valid ? "" : message;
-  elements.notifyBtn.disabled = !valid;
-  elements.setCharBtn.disabled = !valid;
+const requestState = () => {
+  state.replayUntil = Date.now() + 1500;
+  sendCommand({ command: "getState" }, { quiet: true });
+  sendCommand({ command: "getPairingState" }, { quiet: true });
+  fetchPairingState();
 };
 
-const validatePairingCode = (value) => {
-  if (!value) {
-    return { valid: false, message: "Pairing code is required." };
+/* ---------- pairing mode (REST) ---------- */
+
+const fetchPairingState = async () => {
+  const requestId = ++state.pairingStateRequestId;
+  try {
+    const response = await fetch("/api/bluetooth/pairingstate");
+    if (!response.ok) {
+      throw new Error(`Failed to load pairing mode (${response.status}).`);
+    }
+    const data = await response.json();
+    if (requestId === state.pairingStateRequestId) {
+      updatePairingStateStatus(data.pairingState);
+    }
+  } catch (error) {
+    logEvent(`Failed to fetch pairing mode: ${error.message}`, "error");
   }
-  const normalized = value.trim();
-  if (!/^\d{6}$/.test(normalized)) {
-    return { valid: false, message: "Pairing code must be 6 digits." };
+};
+
+const setPairingState = async (pairingState) => {
+  const requestId = ++state.pairingStateRequestId;
+  elements.pairingStateForm.querySelector(".segmented").classList.add("busy");
+  try {
+    const response = await fetch("/api/bluetooth/pairingstate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pairingState }),
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text.trim() || `Failed to set pairing mode (${response.status}).`);
+    }
+    const data = await response.json();
+    if (requestId === state.pairingStateRequestId) {
+      updatePairingStateStatus(data.pairingState);
+    }
+    showToast(`Pairing mode: ${data.pairingState}`, "success");
+    logEvent(`Pairing mode set to ${data.pairingState}.`);
+  } catch (error) {
+    showToast(error.message, "error");
+    logEvent(`Failed to set pairing mode: ${error.message}`, "error");
+    fetchPairingState(); // Snap the selection back to what the server really has.
+  } finally {
+    elements.pairingStateForm.querySelector(".segmented").classList.remove("busy");
   }
-  return { valid: true };
 };
 
-const updatePairingValidation = () => {
-  const value = elements.pairingCodeInput.value.trim();
-  if (!value) {
-    elements.pairingError.textContent = "";
-    elements.setPairingBtn.disabled = true;
-    return;
-  }
-  const { valid, message } = validatePairingCode(value);
-  elements.pairingError.textContent = valid ? "" : message;
-  elements.setPairingBtn.disabled = !valid;
-};
+/* ---------- settings editor ---------- */
 
-const clearConfigStatus = () => {
-  elements.configStatus.textContent = "";
-  elements.configStatus.className = "status-banner";
-};
-
-const setConfigStatus = (text, type) => {
-  elements.configStatus.textContent = text;
-  elements.configStatus.className = `status-banner ${type}`;
+const setDirty = (dirty) => {
+  state.dirty = dirty;
+  elements.dirtyBadge.hidden = !dirty;
 };
 
 const setConfigError = (text) => {
@@ -319,6 +496,20 @@ const safeJsonParse = (value, label) => {
   }
 };
 
+const createRemoveButton = (row) => {
+  const actions = document.createElement("div");
+  actions.className = "row-actions";
+  const removeButton = document.createElement("button");
+  removeButton.type = "button";
+  removeButton.textContent = "Remove";
+  removeButton.addEventListener("click", () => {
+    row.remove();
+    setDirty(true);
+  });
+  actions.append(removeButton);
+  return actions;
+};
+
 const createIncrementalRow = (value = "{}") => {
   const row = document.createElement("div");
   row.className = "list-row";
@@ -326,129 +517,94 @@ const createIncrementalRow = (value = "{}") => {
   textarea.rows = 4;
   textarea.spellcheck = false;
   textarea.value = value;
-  const actions = document.createElement("div");
-  actions.className = "row-actions";
-  const removeButton = document.createElement("button");
-  removeButton.type = "button";
-  removeButton.textContent = "Remove";
-  removeButton.addEventListener("click", () => row.remove());
-  actions.append(removeButton);
-  row.append(textarea, actions);
+  textarea.setAttribute("aria-label", "Value (JSON)");
+  row.append(textarea, createRemoveButton(row));
   return row;
 };
 
 const createTimeBasedRow = (value = "{}", timing = "0") => {
   const row = document.createElement("div");
   row.className = "list-row time-row";
-  const valueWrap = document.createElement("div");
+
   const valueLabel = document.createElement("label");
-  valueLabel.textContent = "Value (JSON)";
+  valueLabel.append("Value (JSON)");
   const textarea = document.createElement("textarea");
   textarea.rows = 3;
   textarea.spellcheck = false;
   textarea.value = value;
-  valueWrap.append(valueLabel, textarea);
+  valueLabel.append(textarea);
 
-  const timingWrap = document.createElement("div");
   const timingLabel = document.createElement("label");
-  timingLabel.textContent = "Timing (s)";
+  timingLabel.append("Timing (s)");
   const timingInput = document.createElement("input");
   timingInput.type = "number";
   timingInput.min = "0";
   timingInput.value = timing;
-  timingWrap.append(timingLabel, timingInput);
+  timingLabel.append(timingInput);
 
-  const actions = document.createElement("div");
-  actions.className = "row-actions";
-  const removeButton = document.createElement("button");
-  removeButton.type = "button";
-  removeButton.textContent = "Remove";
-  removeButton.addEventListener("click", () => row.remove());
-  actions.append(removeButton);
-
-  row.append(valueWrap, timingWrap, actions);
+  row.append(valueLabel, timingLabel, createRemoveButton(row));
   return row;
 };
 
 const renderSettingsList = () => {
-  elements.settingsList.innerHTML = "";
-  const entries = Object.entries(state.configs).sort((a, b) => a[0].localeCompare(b[0]));
+  const scrollTop = elements.settingsList.scrollTop;
+  const filter = elements.settingsFilter.value.trim().toLowerCase();
+  const entries = Object.entries(state.configs)
+    .filter(([messageType]) => messageType.toLowerCase().includes(filter))
+    .sort((a, b) => a[0].localeCompare(b[0]));
+
+  elements.settingsList.replaceChildren();
+  elements.settingsList.setAttribute("aria-busy", "false");
   if (!entries.length) {
-    elements.settingsList.textContent = "No settings found.";
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = Object.keys(state.configs).length ? "No message types match the filter." : "No settings found.";
+    elements.settingsList.append(empty);
     return;
   }
   entries.forEach(([messageType, config]) => {
-    const item = document.createElement("div");
+    const item = document.createElement("button");
+    item.type = "button";
     item.className = "settings-item";
+    item.setAttribute("role", "listitem");
     if (messageType === state.selectedMessageType) {
-      item.classList.add("active");
+      item.setAttribute("aria-current", "true");
     }
-    const title = document.createElement("h3");
-    title.textContent = messageType;
-    const preview = document.createElement("pre");
-    preview.textContent = JSON.stringify(config, null, 2);
-    item.append(title, preview);
-    item.addEventListener("click", () => loadConfig(messageType, config));
+    const name = document.createElement("span");
+    name.className = "name";
+    name.textContent = messageType;
+    const mode = document.createElement("span");
+    mode.className = "badge";
+    mode.textContent = config.mode || "constant";
+    item.append(name, mode);
+    item.addEventListener("click", () => selectConfig(messageType, config));
     elements.settingsList.append(item);
+  });
+  elements.settingsList.scrollTop = scrollTop;
+};
+
+const updateEditorVisibility = () => {
+  const mode = elements.modeSelect.value;
+  document.querySelectorAll(".editor-section").forEach((section) => {
+    section.hidden = section.dataset.mode !== mode;
   });
 };
 
-const fetchPairingState = async () => {
-  try {
-    const response = await fetch("/api/bluetooth/pairingstate");
-    if (!response.ok) {
-      throw new Error(`Failed to load pairing state (${response.status}).`);
-    }
-    const data = await response.json();
-    updatePairingStateStatus(data.pairingState);
-    logEvent(`Pairing state: ${data.pairingState}.`);
-  } catch (error) {
-    logEvent(`Failed to fetch pairing state: ${error.message}`, "error");
-  }
-};
-
-const setPairingState = async (pairingState) => {
-  try {
-    const response = await fetch("/api/bluetooth/pairingstate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pairingState }),
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(text || `Failed to set pairing state (${response.status}).`);
-    }
-    const data = await response.json();
-    updatePairingStateStatus(data.pairingState);
-    logEvent(`Pairing state set to: ${data.pairingState}.`);
-  } catch (error) {
-    logEvent(`Failed to set pairing state: ${error.message}`, "error");
-  }
-};
-
-const fetchSettings = async () => {
-  clearConfigStatus();
-  try {
-    const response = await fetch("/api/settings");
-    if (!response.ok) {
-      throw new Error(`Failed to load settings (${response.status}).`);
-    }
-    state.configs = await response.json();
-    renderSettingsList();
-    setConfigStatus("Settings list refreshed.", "success");
-  } catch (error) {
-    setConfigStatus(error.message, "error");
-  }
+const setEditorEnabled = (enabled) => {
+  elements.editorEmpty.hidden = enabled;
+  elements.editorBody.hidden = !enabled;
+  elements.saveConfigBtn.disabled = !enabled;
+  elements.reloadConfigBtn.disabled = !enabled;
+  elements.resetConfigBtn.disabled = !enabled;
 };
 
 const loadConfig = (messageType, config) => {
   state.selectedMessageType = messageType;
-  renderSettingsList();
-  elements.messageTypeInput.value = messageType;
+  elements.editorTitle.textContent = messageType;
   elements.modeSelect.value = config.mode || "constant";
   elements.constantValue.value = config.value ? JSON.stringify(config.value, null, 2) : "";
-  elements.incrementalValues.innerHTML = "";
-  elements.timeBasedValues.innerHTML = "";
+  elements.incrementalValues.replaceChildren();
+  elements.timeBasedValues.replaceChildren();
   (config.values || []).forEach((value) => {
     elements.incrementalValues.append(createIncrementalRow(JSON.stringify(value, null, 2)));
   });
@@ -463,23 +619,50 @@ const loadConfig = (messageType, config) => {
   } else {
     elements.timeBasedValues.append(createTimeBasedRow());
   }
-  elements.configMeta.textContent = `Current index: ${config.current_index ?? 0} | Start time: ${config.start_time || "not started"}`;
+  elements.configMeta.textContent = `Current index: ${config.current_index ?? 0} · Start time: ${config.start_time || "not started"}`;
+  setEditorEnabled(true);
   updateEditorVisibility();
-  clearConfigStatus();
   setConfigError("");
+  setDirty(false);
+  renderSettingsList();
 };
 
-const updateEditorVisibility = () => {
-  const mode = elements.modeSelect.value;
-  document.querySelectorAll(".editor-section").forEach((section) => {
-    const sectionMode = section.dataset.mode;
-    section.style.display = sectionMode === mode ? "block" : "none";
-  });
+const selectConfig = (messageType, config) => {
+  if (messageType === state.selectedMessageType) {
+    return;
+  }
+  if (state.dirty && !window.confirm(`Discard unsaved changes to ${state.selectedMessageType}?`)) {
+    return;
+  }
+  loadConfig(messageType, config);
+};
+
+const fetchSettings = async ({ notify = false } = {}) => {
+  try {
+    const response = await fetch("/api/settings");
+    if (!response.ok) {
+      throw new Error(`Failed to load settings (${response.status}).`);
+    }
+    state.configs = await response.json();
+    renderSettingsList();
+    if (notify) {
+      showToast("Settings list refreshed.", "success");
+    }
+  } catch (error) {
+    elements.settingsList.setAttribute("aria-busy", "false");
+    if (!Object.keys(state.configs).length) {
+      elements.settingsList.innerHTML = "";
+      const empty = document.createElement("p");
+      empty.className = "empty";
+      empty.textContent = error.message;
+      elements.settingsList.append(empty);
+    }
+    showToast(error.message, "error");
+  }
 };
 
 const buildConfigPayload = () => {
   const mode = elements.modeSelect.value;
-  setConfigError("");
 
   if (mode === "constant") {
     const parsed = safeJsonParse(elements.constantValue.value, "Value");
@@ -537,75 +720,128 @@ const buildConfigPayload = () => {
   return { error: "Unsupported mode." };
 };
 
-const saveConfig = async () => {
-  clearConfigStatus();
+// withBusy disables a button for the duration of a request so a slow
+// round-trip can't be double-submitted.
+const withBusy = async (button, work) => {
+  const wasDisabled = button.disabled;
+  button.disabled = true;
+  try {
+    return await work();
+  } finally {
+    button.disabled = wasDisabled;
+  }
+};
+
+const apiError = async (response, fallback) => {
+  const text = (await response.text()).trim();
+  return new Error(text || `${fallback} (${response.status}).`);
+};
+
+const reloadConfig = async ({ notify = true } = {}) => {
   if (!state.selectedMessageType) {
-    setConfigStatus("Select a message type before saving.", "error");
+    return;
+  }
+  try {
+    const response = await fetch(`/api/settings/${encodeURIComponent(state.selectedMessageType)}`);
+    if (!response.ok) {
+      throw await apiError(response, "Failed to reload");
+    }
+    loadConfig(state.selectedMessageType, await response.json());
+    if (notify) {
+      showToast("Configuration reloaded.", "success");
+    }
+  } catch (error) {
+    showToast(error.message, "error");
+  }
+};
+
+const saveConfig = async () => {
+  if (!state.selectedMessageType) {
     return;
   }
   const { payload, error } = buildConfigPayload();
+  setConfigError(error || "");
   if (error) {
-    setConfigError(error);
     return;
   }
-  try {
-    const response = await fetch(`/api/settings/${state.selectedMessageType}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(text || `Failed to save settings (${response.status}).`);
+  await withBusy(elements.saveConfigBtn, async () => {
+    try {
+      const response = await fetch(`/api/settings/${encodeURIComponent(state.selectedMessageType)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        throw await apiError(response, "Failed to save settings");
+      }
+      await fetchSettings();
+      await reloadConfig({ notify: false });
+      showToast(`Saved ${state.selectedMessageType}.`, "success");
+    } catch (saveError) {
+      showToast(saveError.message, "error");
     }
-    setConfigStatus("Configuration saved successfully.", "success");
-    await fetchSettings();
-    await reloadConfig();
-  } catch (saveError) {
-    setConfigStatus(saveError.message, "error");
-  }
-};
-
-const reloadConfig = async () => {
-  clearConfigStatus();
-  if (!state.selectedMessageType) {
-    setConfigStatus("Select a message type to reload.", "error");
-    return;
-  }
-  try {
-    const response = await fetch(`/api/settings/${state.selectedMessageType}`);
-    if (!response.ok) {
-      throw new Error(`Failed to reload (${response.status}).`);
-    }
-    const config = await response.json();
-    loadConfig(state.selectedMessageType, config);
-    setConfigStatus("Configuration reloaded.", "success");
-  } catch (error) {
-    setConfigStatus(error.message, "error");
-  }
+  });
 };
 
 const resetConfigState = async () => {
-  clearConfigStatus();
   if (!state.selectedMessageType) {
-    setConfigStatus("Select a message type to reset.", "error");
     return;
   }
-  try {
-    const response = await fetch(`/api/settings/${state.selectedMessageType}/reset`, { method: "POST" });
-    if (!response.ok) {
-      throw new Error(`Failed to reset (${response.status}).`);
+  await withBusy(elements.resetConfigBtn, async () => {
+    try {
+      const response = await fetch(`/api/settings/${encodeURIComponent(state.selectedMessageType)}/reset`, { method: "POST" });
+      if (!response.ok) {
+        throw await apiError(response, "Failed to reset");
+      }
+      await reloadConfig({ notify: false });
+      showToast(`Reset state for ${state.selectedMessageType}.`, "success");
+    } catch (error) {
+      showToast(error.message, "error");
     }
-    setConfigStatus("State reset successfully.", "success");
-    await reloadConfig();
-  } catch (error) {
-    setConfigStatus(error.message, "error");
+  });
+};
+
+/* ---------- wiring ---------- */
+
+const submitPairingCode = () => {
+  state.pairingCodeTouched = true;
+  const { valid, message } = validatePairingCode(elements.pairingCodeInput.value);
+  updatePairingValidation();
+  if (!valid) {
+    setFieldError(elements.pairingCodeInput, elements.pairingError, message);
+    return;
   }
+  sendCommand({ command: "setPairingCode", pairingCode: elements.pairingCodeInput.value.trim() });
+};
+
+const submitLongTermKey = () => {
+  const longTermKey = elements.longTermKeyInput.value.trim();
+  if (!/^[0-9a-fA-F]+$/.test(longTermKey) || longTermKey.length % 2 !== 0) {
+    setFieldError(elements.longTermKeyInput, elements.longTermKeyError, "Long-term key must be an even-length hex string.");
+    return;
+  }
+  setFieldError(elements.longTermKeyInput, elements.longTermKeyError, "");
+  sendCommand({ command: "setLongTermKey", longTermKey });
+};
+
+const sendCharacteristicCommand = (command) => {
+  state.hexTouched = true;
+  updateHexValidation();
+  if (!validateHex(elements.hexInput.value).valid) {
+    return;
+  }
+  sendCommand({
+    command,
+    characteristic: elements.characteristicSelect.value,
+    data: elements.hexInput.value.trim(),
+  });
 };
 
 const init = () => {
   updateWsStatus("disconnected");
-  updatePumpStatus(null);
+  setAppConnected(null);
+  showLogPlaceholder();
+  setEditorEnabled(false);
   updateHexValidation();
   updatePairingValidation();
   updateEditorVisibility();
@@ -614,85 +850,92 @@ const init = () => {
 
   elements.connectBtn.addEventListener("click", connectWebSocket);
   elements.disconnectBtn.addEventListener("click", disconnectWebSocket);
-  elements.getStateBtn.addEventListener("click", () => sendCommand({ command: "getState" }));
-  elements.clearLogBtn.addEventListener("click", () => {
-    elements.eventLog.innerHTML = "";
-  });
+  elements.getStateBtn.addEventListener("click", requestState);
+  elements.refreshPairingBtn.addEventListener("click", requestState);
+  elements.clearLogBtn.addEventListener("click", showLogPlaceholder);
   elements.autoReconnectToggle.addEventListener("change", (event) => {
     state.autoReconnect = event.target.checked;
     if (!state.autoReconnect) {
       clearReconnect();
+      if (!state.ws || state.ws.readyState === WebSocket.CLOSED) {
+        updateWsStatus("disconnected");
+      }
     } else if (!state.ws || state.ws.readyState === WebSocket.CLOSED) {
       scheduleReconnect();
     }
   });
+
   elements.hexInput.addEventListener("input", updateHexValidation);
-  elements.pairingCodeInput.addEventListener("input", updatePairingValidation);
-  elements.notifyBtn.addEventListener("click", () => {
-    const data = elements.hexInput.value.trim();
-    sendCommand({
-      command: "notify",
-      characteristic: elements.characteristicSelect.value,
-      data,
-    });
+  elements.hexInput.addEventListener("blur", () => {
+    state.hexTouched = true;
+    updateHexValidation();
   });
-  elements.setCharBtn.addEventListener("click", () => {
-    const data = elements.hexInput.value.trim();
-    sendCommand({
-      command: "setCharacteristic",
-      characteristic: elements.characteristicSelect.value,
-      data,
-    });
+  elements.commandForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    sendCharacteristicCommand("notify");
   });
-  elements.refreshPairingStateBtn.addEventListener("click", fetchPairingState);
-  elements.setPairingStateBtn.addEventListener("click", () => {
-    const selectedRadio = elements.pairingStateForm.querySelector('input[name="pairing-state"]:checked');
-    if (selectedRadio) {
-      setPairingState(selectedRadio.value);
-    } else {
-      logEvent("Please select a pairing state.", "error");
+  elements.setCharBtn.addEventListener("click", () => sendCharacteristicCommand("setCharacteristic"));
+
+  elements.pairingStateForm.addEventListener("change", (event) => {
+    if (event.target.name === "pairing-state") {
+      setPairingState(event.target.value);
     }
   });
-  elements.refreshPairingBtn.addEventListener("click", requestPairingState);
-  elements.setPairingBtn.addEventListener("click", () => {
-    const { valid, message } = validatePairingCode(elements.pairingCodeInput.value);
-    if (!valid) {
-      elements.pairingError.textContent = message;
-      return;
+  elements.pairingCodeInput.addEventListener("input", () => {
+    const digits = elements.pairingCodeInput.value.replace(/\D/g, "").slice(0, 6);
+    if (digits !== elements.pairingCodeInput.value) {
+      elements.pairingCodeInput.value = digits;
     }
-    elements.pairingError.textContent = "";
-    sendCommand({ command: "setPairingCode", pairingCode: elements.pairingCodeInput.value.trim() });
+    updatePairingValidation();
   });
-  elements.resetPairingBtn.addEventListener("click", () => {
-    sendCommand({ command: "resetPairing" });
+  elements.pairingCodeInput.addEventListener("blur", () => {
+    state.pairingCodeTouched = true;
+    updatePairingValidation();
   });
-  elements.disconnectPumpBtn.addEventListener("click", () => {
-    sendCommand({ command: "disconnectPump" });
+  elements.pairingForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitPairingCode();
   });
-  elements.setLongTermKeyBtn.addEventListener("click", () => {
-    const longTermKey = elements.longTermKeyInput.value.trim();
-    if (!/^[0-9a-fA-F]+$/.test(longTermKey) || longTermKey.length % 2 !== 0) {
-      elements.longTermKeyError.textContent = "Long-term key must be an even-length hex string.";
-      return;
-    }
-    elements.longTermKeyError.textContent = "";
-    sendCommand({ command: "setLongTermKey", longTermKey });
+  elements.resetPairingBtn.addEventListener("click", () => sendCommand({ command: "resetPairing" }));
+  elements.disconnectPumpBtn.addEventListener("click", () => sendCommand({ command: "disconnectPump" }));
+  elements.longTermKeyForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitLongTermKey();
   });
   elements.resetLongTermKeyBtn.addEventListener("click", () => {
-    elements.longTermKeyError.textContent = "";
+    setFieldError(elements.longTermKeyInput, elements.longTermKeyError, "");
     sendCommand({ command: "resetLongTermKey" });
   });
-  elements.refreshSettingsBtn.addEventListener("click", fetchSettings);
+
+  elements.refreshSettingsBtn.addEventListener("click", () => fetchSettings({ notify: true }));
+  elements.settingsFilter.addEventListener("input", renderSettingsList);
   elements.modeSelect.addEventListener("change", updateEditorVisibility);
+  elements.editorBody.addEventListener("input", () => setDirty(true));
   elements.addIncrementalBtn.addEventListener("click", () => {
     elements.incrementalValues.append(createIncrementalRow());
+    setDirty(true);
   });
   elements.addTimeBasedBtn.addEventListener("click", () => {
     elements.timeBasedValues.append(createTimeBasedRow());
+    setDirty(true);
   });
   elements.saveConfigBtn.addEventListener("click", saveConfig);
-  elements.reloadConfigBtn.addEventListener("click", reloadConfig);
+  elements.reloadConfigBtn.addEventListener("click", () => {
+    if (state.dirty && !window.confirm("Discard unsaved changes and reload from the emulator?")) {
+      return;
+    }
+    reloadConfig();
+  });
   elements.resetConfigBtn.addEventListener("click", resetConfigState);
+
+  window.addEventListener("beforeunload", (event) => {
+    if (state.dirty) {
+      event.preventDefault();
+    }
+  });
+
+  // The old UI required clicking Connect before anything worked.
+  connectWebSocket();
 };
 
 window.addEventListener("DOMContentLoaded", init);
