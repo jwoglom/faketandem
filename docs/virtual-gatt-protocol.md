@@ -47,7 +47,9 @@ are opaque bytes.
 - {"type":"notify","characteristic":"<uuid>","value":"<hex>"}  (BLE notify, never indicate;
   value is exactly one ATT notification payload, i.e. one fragment as the pump would send it)
 - {"type":"disconnect","reason":"<string>"} followed by socket close (pump-initiated drop,
-  e.g. ShutdownConnection / fault injection).
+  e.g. ShutdownConnection / fault injection). The reason is `radio_off` when the radio fault took
+  the link down, which a central reports as the link going out of range (CoreBluetooth's
+  `connectionTimeout`) rather than the pump ending it (`peripheralDisconnected`).
 
 ## Sizes and the ATT MTU
 The link is transparent: a `write` value is delivered as one ATT write of that exact length; a `notify`
