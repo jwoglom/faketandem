@@ -2,8 +2,8 @@ package handler
 
 import (
 	"bufio"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -298,97 +298,19 @@ func min(a, b int) int {
 	return b
 }
 
-// TestGoJPAKEAuthenticator_FullFlow tests the Go implementation
-func TestGoJPAKEAuthenticator_FullFlow(t *testing.T) {
-	// Setup logging
-	log.SetLevel(log.DebugLevel)
-
-	// Test pairing code
-	pairingCode := "123456"
-
-	// Create bridge (mock for Go implementation)
-	bridge := &pumpx2.Bridge{} // Minimal bridge for testing
-
-	// Create authenticator
-	auth := NewJPAKEAuthenticator(pairingCode, bridge)
-
-	t.Log("Testing Go JPAKE Round 1")
-	clientRound1Data := generateMockJpake1aRequest()
-	resp1, err := auth.ProcessRound(1, clientRound1Data)
-	if err != nil {
-		t.Fatalf("Round 1 failed: %v", err)
-	}
-	if resp1 == nil {
-		t.Fatal("Round 1 response is nil")
-	}
-	t.Logf("Round 1 response: %+v", resp1)
-
-	t.Log("Testing Go JPAKE Round 2")
-	clientRound2Data := generateMockJpake2Request()
-	resp2, err := auth.ProcessRound(2, clientRound2Data)
-	if err != nil {
-		t.Fatalf("Round 2 failed: %v", err)
-	}
-	if resp2 == nil {
-		t.Fatal("Round 2 response is nil")
-	}
-	t.Logf("Round 2 response: %+v", resp2)
-
-	t.Log("Testing Go JPAKE Round 3")
-	clientRound3Data := generateMockJpake3Request()
-	resp3, err := auth.ProcessRound(3, clientRound3Data)
-	if err != nil {
-		t.Fatalf("Round 3 failed: %v", err)
-	}
-	if resp3 == nil {
-		t.Fatal("Round 3 response is nil")
-	}
-	t.Logf("Round 3 response: %+v", resp3)
-
-	t.Log("Testing Go JPAKE Round 4")
-	clientRound4Data := generateMockJpake4Request()
-	resp4, err := auth.ProcessRound(4, clientRound4Data)
-	if err != nil {
-		t.Fatalf("Round 4 failed: %v", err)
-	}
-	if resp4 == nil {
-		t.Fatal("Round 4 response is nil")
-	}
-	t.Logf("Round 4 response: %+v", resp4)
-
-	// Verify authentication is complete
-	if !auth.IsComplete() {
-		t.Error("Authentication should be complete after round 4")
-	}
-
-	// Verify shared secret was derived
-	sharedSecret, err := auth.GetSharedSecret()
-	if err != nil {
-		t.Fatalf("Failed to get shared secret: %v", err)
-	}
-	if len(sharedSecret) == 0 {
-		t.Error("Shared secret is empty")
-	}
-	t.Logf("Shared secret length: %d bytes", len(sharedSecret))
-}
-
 // TestJPAKEAuthenticator_InvalidRound tests error handling for invalid rounds
 func TestJPAKEAuthenticator_InvalidRound(t *testing.T) {
-	auth := NewJPAKEAuthenticator("123456", &pumpx2.Bridge{})
+	auth := NewJPAKEAuthenticator("123456")
 
-	// Test invalid round number
 	_, err := auth.ProcessRound(99, nil)
-	if err == nil {
-		t.Error("Expected error for invalid round number")
-	}
-	if err.Error() != "invalid JPAKE round: 99" {
-		t.Errorf("Unexpected error message: %v", err)
+	if !errors.Is(err, ErrJPAKEHandshakeFailed) {
+		t.Errorf("round 99: got %v, want ErrJPAKEHandshakeFailed", err)
 	}
 }
 
 // TestJPAKEAuthenticator_IncompleteAuth tests getting shared secret before completion
 func TestJPAKEAuthenticator_IncompleteAuth(t *testing.T) {
-	auth := NewJPAKEAuthenticator("123456", &pumpx2.Bridge{})
+	auth := NewJPAKEAuthenticator("123456")
 
 	// Try to get shared secret before completing authentication
 	_, err := auth.GetSharedSecret()
@@ -448,46 +370,4 @@ func TestJPAKESessionManager(t *testing.T) {
 	if session1 == session1New {
 		t.Error("Expected new session instance after removal")
 	}
-}
-
-// Helper functions for generating mock client data for Go JPAKE tests
-
-func generateMockJpake1aRequest() map[string]interface{} {
-	// Generate mock Jpake1aRequest data
-	// In a real scenario, this would come from an actual client
-	return map[string]interface{}{
-		"messageName":          "Jpake1aRequest",
-		"centralChallengeHash": generateRandomHex(165),
-	}
-}
-
-func generateMockJpake2Request() map[string]interface{} {
-	return map[string]interface{}{
-		"messageName":          "Jpake2Request",
-		"centralChallengeHash": generateRandomHex(165),
-	}
-}
-
-func generateMockJpake3Request() map[string]interface{} {
-	return map[string]interface{}{
-		"messageName": "Jpake3SessionKeyRequest",
-	}
-}
-
-func generateMockJpake4Request() map[string]interface{} {
-	return map[string]interface{}{
-		"messageName": "Jpake4KeyConfirmationRequest",
-		"nonce":       generateRandomHex(8),
-		"reserved":    "00000000",
-		"hashDigest":  generateRandomHex(32),
-	}
-}
-
-func generateRandomHex(byteLength int) string {
-	// Generate random hex string of specified byte length
-	bytes := make([]byte, byteLength)
-	for i := range bytes {
-		bytes[i] = byte(i % 256)
-	}
-	return hex.EncodeToString(bytes)
 }

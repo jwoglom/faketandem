@@ -649,6 +649,8 @@ Client: Can now send authenticated commands
 Enable verbose logging to debug pairing:
 
 ```bash
+./faketandem -v
+# or with pumpX2's own jpake-server instead of the Go port:
 ./faketandem -v -pumpx2-path /path/to/pumpX2 -jpake-mode pumpx2
 ```
 

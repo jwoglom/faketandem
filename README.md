@@ -14,14 +14,15 @@ the emulator runs unchanged on a Mac or in CI.
 `-transport` defaults to `ble` on Linux and `virtual` everywhere else. The wire
 protocol is documented in [docs/virtual-gatt-protocol.md](docs/virtual-gatt-protocol.md).
 
-Fetch the pumpX2 cliparser jar (into `third_party/`) and run:
+Run it:
 
 ```bash
-make jar
-go run . -transport virtual \
-  -pumpx2-jar-path third_party/pumpx2-cliparser-1.9.2.jar \
-  -q
+go run . -transport virtual -q
 ```
+
+Nothing else is needed: messages are parsed and encoded by a Go port of
+pumpX2's message library, and pairing runs a Go port of pumpX2's EC-JPAKE (see
+[pumpX2 is optional](#pumpx2-is-optional)).
 
 The virtual link then listens on `127.0.0.1:8081` and the web UI and HTTP API on
 `http://127.0.0.1:8080/ui/`.
@@ -53,12 +54,15 @@ Flags:
 | `-transport` | `ble` on Linux, `virtual` elsewhere | Which link to use. |
 | `-virtual-addr` | `127.0.0.1:8081` | Address the virtual link listens on. |
 | `-virtual-peripheral-id` | derived from the pump serial number | Stable peripheral UUID reported in `hello`. |
-| `-virtual-mtu` | `23` | Virtual transport only: the ATT MTU to announce and fragment responses to. 23 is the Bluetooth spec minimum and gives the 20-byte notifications pumpX2 and the cliparser jar produce; a real Mobi over iOS negotiates a much larger MTU, so most responses arrive in a single notification. Changeable at runtime via `PUT /api/transport`. |
+| `-virtual-mtu` | `23` | Virtual transport only: the ATT MTU to announce and fragment responses to. 23 is the Bluetooth spec minimum and gives the 20-byte notifications pumpX2's `Packetize` produces; a real Mobi over iOS negotiates a much larger MTU, so most responses arrive in a single notification. Changeable at runtime via `PUT /api/transport`. |
 | `-virtual-ack-after-handling` | `false` | Acknowledge a write only after its handler has run, reproducing the Linux/gatt ordering instead of real-pump ordering (ack first). |
 | `-api-addr` | `:8080` | Address of the HTTP/WebSocket API and web UI. |
 | `-ui-dir` | `ui` beside the executable, else `./ui` | Where the web UI is served from. |
 | `-pump-timezone` | the host's local zone | IANA zone the emulated pump keeps its clock in, e.g. `America/New_York`. A Tandem pump holds local time with no zone attached and every consumer decodes its wire timestamps on that assumption, so this is the zone pump-epoch seconds are encoded in. `UTC` turns the convention off. Changeable at runtime via `PUT /api/clock`. |
 | `-request-log-size` | `4096` | How many messages the harness request log (`GET /api/log`) retains. |
+| `-message-codec` | `native` | How messages are parsed and encoded: `native` (the Go port), `pumpx2` (pumpX2's cliparser) or `compare` (the Go port, checked against cliparser on every message). |
+| `-jpake-mode` | `go` | Pairing: `go` (native EC-JPAKE) or `pumpx2` (pumpX2's `jpake-server` subprocess). |
+| `-pumpx2-jar-path`, `-pumpx2-path`, `-pumpx2-mode`, `-java-cmd`, `-gradle-cmd` | | Where pumpX2 is, for `-message-codec pumpx2`/`compare` and `-jpake-mode pumpx2` only. |
 
 ## Integration harness API
 
@@ -462,7 +466,7 @@ notification carry; `PUT` (or `PATCH`) changes it.
 
 The emulator defaults to 23, the Bluetooth spec minimum, which allows 20-byte
 notifications: 2 bytes of `[remainingPackets][txId]` framing plus 18 bytes of
-message, exactly what pumpX2's `Packetize` and the cliparser jar produce. A real
+message, exactly what pumpX2's `Packetize` produces. A real
 Mobi paired with the official iOS app negotiates a much larger MTU, so most
 responses reach the phone as a **single** notification with `remaining=0`
 instead of a run of 18-byte fragments.
@@ -569,8 +573,9 @@ request log still records the response as fully sent — the loss happens below
 the router, which is exactly the asymmetry a driver has to cope with.
 
 **`error_response`.** `ErrorResponse` (opcode 77) cannot be produced through
-cliparser — pumpX2 has no encodable `ErrorResponse` class — so it is framed by
-the native encoder in `pkg/protocol` and sent on `CurrentStatus`, where the
+the message codec — `ErrorResponse` is not in pumpX2's `Messages` table, which
+is where cliparser's encode looks names up — so it is framed by the encoder
+in `pkg/protocol` and sent on `CurrentStatus`, where the
 driver looks for it, whatever characteristic the rejected request arrived on.
 The cargo is `[requestCodeId][errorCodeId]`: the opcode of the request being
 rejected and the `error_code` the fault carries. The request is refused, not
@@ -589,15 +594,16 @@ marks `signed` — carry a 24-byte trailer: a little-endian `timeSinceReset`
 followed by an HMAC-SHA1 over every preceding byte of the message, keyed with
 the session key derived during JPAKE.
 
-These are now signed correctly. The cliparser subprocess cannot do it: its
-signing inputs arrive only through the environment, and it uses the raw ASCII
-bytes of `PUMP_AUTHENTICATION_KEY` as the HMAC key rather than decoding it, so a
-binary JPAKE-derived key cannot be handed to it at all — left alone it signs
-every signed message with the ASCII of its own `IGNORE_HMAC_SIGNATURE_EXCEPTION`
-placeholder, which no driver will accept. The router therefore re-signs: the
-cargo cliparser produced is kept verbatim, and only the trailer and the CRC are
-rebuilt, with the pump's real key and its current time since reset. Responses
-that are not signed go out exactly as cliparser encoded them, byte for byte.
+These are now signed correctly. The message codec cannot do it: cliparser takes
+its signing inputs only from the environment, and it uses the raw ASCII bytes of
+`PUMP_AUTHENTICATION_KEY` as the HMAC key rather than decoding it, so a binary
+JPAKE-derived key cannot be handed to it at all — left alone it signs every
+signed message with the ASCII of its own `IGNORE_HMAC_SIGNATURE_EXCEPTION`
+placeholder, which no driver will accept. The Go port reproduces that exactly,
+so the router re-signs whichever codec encoded the message: the cargo is kept
+verbatim, and only the trailer and the CRC are rebuilt, with the pump's real key
+and its current time since reset. Responses that are not signed go out exactly
+as the codec encoded them, byte for byte.
 
 Which messages are signed comes from `pkg/protocol/signed_messages.go`, a table
 generated from TandemKit's `MessageProps` declarations. Regenerate it with:
@@ -612,3 +618,62 @@ have drifted apart in either direction. A jar-gated test in `pkg/pumpx2`
 independently cross-checks the table against pumpX2 itself, by encoding the
 same message twice under different keys and seeing whether cliparser's output
 changes.
+
+## pumpX2 is optional
+
+faketandem used to run every message through pumpX2's `cliparser` jar (one JVM
+for the life of the emulator) and every pairing through pumpX2's `jpake-server`
+(one JVM per pairing). Both are now ported to Go and are the defaults:
+
+- **`pkg/pumpx2/messages`** is pumpX2's message library as `cliparser` drives
+  it: the same `Messages`/`OPCODES` tables, the same characteristic resolution,
+  `PacketArrayList` reassembly and CRC/HMAC checks, each of the 281 message
+  classes' `parse()` and constructors, the `toString()` that faketandem reads a
+  request's fields from, and `encode`'s constructor choice and JSON-to-Java
+  argument conversion. The catalog (`catalog_gen.go`) is generated from the jar
+  by `tools/pumpx2catalog/regen.sh`; the classes are ported by hand in the
+  `msg_*.go` files.
+- **`pkg/jpake`** is pumpX2's `EcJpake` (mbed TLS's EC-JPAKE on P-256), and
+  `handler.JPAKEAuthenticator` runs the pump's side of pairing with it as
+  `jpake-server` does, failing at the same round for a wrong code or a bad proof.
+
+pumpX2 is still there to check against, or to run instead:
+
+```bash
+# Answer with the Go port, but also run every message through cliparser and
+# log any difference as "pumpX2 parity mismatch" (an ERROR line).
+go run . -transport virtual -message-codec compare -pumpx2-jar-path cliparser.jar
+
+# Run on pumpX2 alone, as faketandem used to.
+go run . -transport virtual -message-codec pumpx2 -jpake-mode pumpx2 -pumpx2-jar-path cliparser.jar
+```
+
+The port is held to the jar by tests:
+
+- `pkg/pumpx2/messages` parses ~4,800 framed messages (every `OPCODES` entry,
+  with zeroed, random, all-0xFF, signed, wrong-size and misdirected cargo, plus
+  framing faults) and encodes ~3,100 (every class's no-arg form and each of its
+  constructors with zero, typical, random, extreme, negative and lossy JSON
+  arguments). Each must print the jar's own `toString` or packets exactly, or
+  fail where the jar fails. The jar's answers are recorded in
+  `parity/testdata`, so this runs in every `go test` without a JVM.
+- With `FAKETANDEM_TEST_CLIPARSER_JAR` set, the same cases run live against the
+  jar, through `pkg/pumpx2/messages` and through the bridge (the
+  `ParsedMessage`/`EncodedMessage` a handler sees), and `compare` mode is run
+  over all of them expecting no mismatch. The JPAKE tests pair the Go pump side
+  with pumpX2's own client, and a Go client with `jpake-server`.
+
+After a pumpX2 change, regenerate and re-record with the new jar:
+
+```bash
+tools/pumpx2catalog/regen.sh path/to/cliparser.jar
+FAKETANDEM_TEST_CLIPARSER_JAR=path/to/cliparser.jar \
+  go test ./pkg/pumpx2/messages -run MatchesJar -update-golden
+```
+
+A class the new catalog adds fails `TestEveryClassIsPorted` until it is ported.
+Two things are deliberately not ported: `HistoryLogStreamResponse`'s `parse()`,
+whose `toString` prints pumpX2's 185 history log classes (it is a pump-to-app
+stream no client writes), and the jar path's habit of reading an exception's
+text as a message name when `cliparser` prints no message, where the port
+leaves the name empty; no handler matches either.

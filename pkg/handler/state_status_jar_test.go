@@ -15,7 +15,7 @@ import (
 // reasons that are invisible until you try), and that the values a driver would
 // read back are the ones live pump state actually holds.
 //
-// Skipped unless FAKETANDEM_TEST_CLIPARSER_JAR is set.
+// Runs through the Go codec, or through cliparser when FAKETANDEM_TEST_CLIPARSER_JAR is set.
 
 // handleAndParse runs a handler and parses its response back into the message a
 // driver would decode.

@@ -41,6 +41,11 @@ func encodeParamsJSON(params map[string]interface{}) (string, error) {
 	return string(paramsBytes), nil
 }
 
+// jvmUTF8Flags make the JVM print UTF-8 whatever the host locale; under a
+// POSIX locale it prints every non-ASCII character of a parsed string field as
+// '?'. The first covers JDK 17, the others JDK 18 and later.
+var jvmUTF8Flags = []string{"-Dfile.encoding=UTF-8", "-Dstdout.encoding=UTF-8", "-Dsun.stdout.encoding=UTF-8"}
+
 // Runner is an interface for executing cliparser commands
 type Runner interface {
 	// Parse decodes a message from its raw BLE fragments. rawPacketsHex must be the
@@ -147,7 +152,7 @@ func (r *JarRunner) Parse(btChar string, rawPacketsHex []string) (string, error)
 	// framing bytes) as its own whitespace-delimited token; see
 	// Main.splitRawHexPackets in pumpX2's cliparser module.
 	hexValue := strings.Join(rawPacketsHex, " ")
-	args := []string{"-jar", r.jarPath, "parse", hexValue}
+	args := append(append([]string{}, jvmUTF8Flags...), "-jar", r.jarPath, "parse", hexValue)
 
 	cmd := exec.Command(r.javaCmd, args...)
 	cmd.Env = parseEnv(btChar)
@@ -178,7 +183,7 @@ func (r *JarRunner) Encode(txID int, messageName string, params map[string]inter
 		return "", err
 	}
 
-	args := []string{"-jar", r.jarPath, "encode", fmt.Sprintf("%d", txID), messageName, paramsJSON}
+	args := append(append([]string{}, jvmUTF8Flags...), "-jar", r.jarPath, "encode", fmt.Sprintf("%d", txID), messageName, paramsJSON)
 
 	cmd := exec.Command(r.javaCmd, args...)
 

@@ -58,7 +58,7 @@ jobs:
       run: go test -bench=. -benchmem ./pkg/handler -run=^$ || true
 
   integration-tests:
-    name: Integration Tests
+    name: Integration Tests (against pumpX2)
     runs-on: ubuntu-latest
 
     steps:
@@ -99,29 +99,23 @@ jobs:
         ./gradlew :cliparser:build --console=plain -q
         echo "Build complete"
 
-    - name: Verify cliparser JAR and jpake-server support
+    - name: Verify cliparser JAR
       working-directory: pumpX2
-      run: |
-        if [ -f cliparser/build/libs/cliparser.jar ]; then
-          echo "✓ cliparser.jar found"
-          ls -lh cliparser/build/libs/cliparser.jar
-          echo ""
-          echo "Checking if jpake-server is implemented..."
-          grep -r "jpake-server" cliparser/src/ || echo "⚠️  jpake-server not found in source"
-        else
-          echo "✗ cliparser.jar not found"
-          exit 1
-        fi
+      run: ls -lh cliparser/build/libs/cliparser.jar
 
     - name: Download Go dependencies
       working-directory: faketandem
       run: go mod download
 
-    - name: Run integration tests
+    # The Go port of pumpX2 against pumpX2 itself: every parity case live
+    # against the jar, the handler and harness tests through it, and the JPAKE
+    # cross-checks. Fails when pumpX2's dev branch drifts from the port.
+    - name: Run tests against pumpX2
       working-directory: faketandem
       env:
         PUMPX2_PATH: ${{ github.workspace }}/pumpX2
-      run: go test -v -timeout 5m ./pkg/handler
+        FAKETANDEM_TEST_CLIPARSER_JAR: ${{ github.workspace }}/pumpX2/cliparser/build/libs/cliparser.jar
+      run: go test -v -timeout 20m ./...
 
   build:
     name: Build

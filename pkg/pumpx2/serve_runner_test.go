@@ -11,10 +11,15 @@ import (
 
 // The test binary doubles as the "java" these runners exec: with FAKE_CLIPARSER
 // set it acts as a cliparser jar instead of running tests. Its arguments are
-// "-jar <path> <command...>".
+// JVM flags, then "-jar <path> <command...>".
 func TestMain(m *testing.M) {
 	if mode := os.Getenv("FAKE_CLIPARSER"); mode != "" {
-		os.Exit(fakeCliparser(mode, os.Args[3:]))
+		for i, arg := range os.Args {
+			if arg == "-jar" {
+				os.Exit(fakeCliparser(mode, os.Args[i+2:]))
+			}
+		}
+		os.Exit(3)
 	}
 	os.Exit(m.Run())
 }

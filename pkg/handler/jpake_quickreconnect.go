@@ -3,10 +3,11 @@ package handler
 import (
 	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"sync"
+
+	"github.com/jwoglom/faketandem/pkg/jpake"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -64,7 +65,7 @@ func (j *QuickReconnectJPAKEAuthenticator) processRound3() (map[string]interface
 	}
 
 	j.serverNonce = serverNonce
-	j.sessionKey = hkdfBuild(serverNonce, j.longTermSecret)
+	j.sessionKey = jpake.HKDF(serverNonce, j.longTermSecret)
 	j.round = 3
 
 	log.Debug("Quick-pair reconnect: answered round 3 from cached long-term key")
@@ -94,7 +95,7 @@ func (j *QuickReconnectJPAKEAuthenticator) processRound4(requestData map[string]
 		return nil, fmt.Errorf("invalid client hashDigest in Jpake4KeyConfirmationRequest: %w", err)
 	}
 
-	expectedClientHash := hmacSha256(j.sessionKey, clientNonce)
+	expectedClientHash := jpake.HMACSHA256(j.sessionKey, clientNonce)
 	if !hmac.Equal(expectedClientHash, clientHash) {
 		return nil, fmt.Errorf("quick-pair client HMAC validation failed (cached long-term key no longer matches the client)")
 	}
@@ -103,7 +104,7 @@ func (j *QuickReconnectJPAKEAuthenticator) processRound4(requestData map[string]
 	if _, err := rand.Read(serverNonce); err != nil {
 		return nil, fmt.Errorf("failed to generate server confirmation nonce: %w", err)
 	}
-	serverHash := hmacSha256(j.sessionKey, serverNonce)
+	serverHash := jpake.HMACSHA256(j.sessionKey, serverNonce)
 
 	j.round = 4
 
@@ -147,29 +148,4 @@ func (j *QuickReconnectJPAKEAuthenticator) IsComplete() bool {
 	defer j.mutex.Unlock()
 
 	return j.round == 4
-}
-
-// hkdfBuild replicates pumpX2's Hkdf.build(nonce, keyMaterial):
-//
-//	step1 := HMAC-SHA256(key=nonce, data=keyMaterial)
-//	return HMAC-SHA256(key=step1, data=0x01)
-//
-// (a single-block expansion producing exactly 32 bytes, since Hkdf.build
-// always requests a 32-byte key -- see pumpX2's
-// messages/builders/crypto/Hkdf.java: build() calls
-// expandKey(updateMacWithKeyMaterial(nonce, keyMaterial), new byte[0], 32),
-// and expandKey's loop runs a single iteration for a 32-byte keyLength,
-// hashing counter byte 0x01 with no additional nonce/salt.)
-func hkdfBuild(nonce, keyMaterial []byte) []byte {
-	step1 := hmacSha256(nonce, keyMaterial)
-	return hmacSha256(step1, []byte{0x01})
-}
-
-// hmacSha256 computes HMAC-SHA256(key, data), matching pumpX2's
-// HmacSha256.hmacSha256(data, key) (its mod255 byte-sign massaging is a no-op
-// for Go's unsigned byte slices, so this is a direct HMAC-SHA256 call).
-func hmacSha256(key, data []byte) []byte {
-	mac := hmac.New(sha256.New, key)
-	mac.Write(data)
-	return mac.Sum(nil)
 }

@@ -184,8 +184,6 @@ var jpakeStressRequestOrder = []string{
 // PumpX2JPAKEAuthenticator, returning the failure (and whatever jpake-server
 // wrote to stderr) rather than failing the test, so the caller can count
 // failures across many attempts.
-//
-//nolint:gocyclo // a sequential protocol drive; splitting it would obscure the order
 func runOneJPAKEHandshake(jarPath, pairingCode string) (serverStderr string, err error) {
 	bridge, berr := pumpx2.NewBridge("", "jar", "", "java", jarPath)
 	if berr != nil {
@@ -200,25 +198,33 @@ func runOneJPAKEHandshake(jarPath, pairingCode string) (serverStderr string, err
 		}
 		_ = auth.Close()
 	}()
+	return "", driveJPAKEClient(jarPath, pairingCode, bridge, auth)
+}
 
+// driveJPAKEClient runs pumpX2's own jpake client (the jar's "jpake" command)
+// against auth, carrying every message through bridge as the emulator does,
+// and checks that the client derives the secret auth did.
+//
+//nolint:gocyclo // a sequential protocol drive; splitting it would obscure the order
+func driveJPAKEClient(jarPath, pairingCode string, bridge *pumpx2.Bridge, auth JPAKEAuthenticatorInterface) error {
 	client, cerr := startJPAKEClient(jarPath, pairingCode)
 	if cerr != nil {
-		return "", fmt.Errorf("failed to start jpake client: %w", cerr)
+		return fmt.Errorf("failed to start jpake client: %w", cerr)
 	}
 	defer client.close()
 
 	for _, expectedRequestType := range jpakeStressRequestOrder {
 		frags, ferr := client.nextRequestPackets(60 * time.Second)
 		if ferr != nil {
-			return "", fmt.Errorf("waiting for client %s: %w", expectedRequestType, ferr)
+			return fmt.Errorf("waiting for client %s: %w", expectedRequestType, ferr)
 		}
 
 		parsed, perr := bridge.ParseMessage(bluetooth.CharAuthorization, frags)
 		if perr != nil {
-			return "", fmt.Errorf("ParseMessage failed for %s: %w", expectedRequestType, perr)
+			return fmt.Errorf("ParseMessage failed for %s: %w", expectedRequestType, perr)
 		}
 		if parsed.MessageType != expectedRequestType {
-			return "", fmt.Errorf("expected parsed message type %s, got %s", expectedRequestType, parsed.MessageType)
+			return fmt.Errorf("expected parsed message type %s, got %s", expectedRequestType, parsed.MessageType)
 		}
 
 		requestData := make(map[string]interface{}, len(parsed.Cargo)+2)
@@ -230,32 +236,32 @@ func runOneJPAKEHandshake(jarPath, pairingCode string) (serverStderr string, err
 
 		responseParams, rerr := auth.ProcessRound(jpakeRoundForTest(parsed.MessageType), requestData)
 		if rerr != nil {
-			return "", fmt.Errorf("ProcessRound for %s failed: %w", expectedRequestType, rerr)
+			return fmt.Errorf("ProcessRound for %s failed: %w", expectedRequestType, rerr)
 		}
 
 		responseType := jpakeResponseTypeForTest(parsed.MessageType)
 		encoded, eerr := bridge.EncodeMessage(parsed.TxID, responseType, responseParams)
 		if eerr != nil {
-			return "", fmt.Errorf("EncodeMessage failed for %s: %w", responseType, eerr)
+			return fmt.Errorf("EncodeMessage failed for %s: %w", responseType, eerr)
 		}
 		if len(encoded.Packets) == 0 {
-			return "", fmt.Errorf("EncodeMessage returned no packets for %s", responseType)
+			return fmt.Errorf("EncodeMessage returned no packets for %s", responseType)
 		}
 
 		if _, werr := io.WriteString(client.stdin, strings.Join(encoded.Packets, " ")+"\n"); werr != nil {
-			return "", fmt.Errorf("failed to write %s to client stdin: %w", responseType, werr)
+			return fmt.Errorf("failed to write %s to client stdin: %w", responseType, werr)
 		}
 	}
 
 	if !auth.IsComplete() {
-		return "", errors.New("authenticator did not reach round 4 completion")
+		return errors.New("authenticator did not reach round 4 completion")
 	}
 	secret, serr := auth.GetSharedSecret()
 	if serr != nil {
-		return "", fmt.Errorf("GetSharedSecret failed: %w", serr)
+		return fmt.Errorf("GetSharedSecret failed: %w", serr)
 	}
 	if len(secret) == 0 {
-		return "", errors.New("empty derived shared secret")
+		return errors.New("empty derived shared secret")
 	}
 
 	// Confirm the client agrees on the secret -- a handshake that "completes"
@@ -263,19 +269,19 @@ func runOneJPAKEHandshake(jarPath, pairingCode string) (serverStderr string, err
 	for i := 0; i < 20; i++ {
 		line, lerr := client.readLine(30 * time.Second)
 		if lerr != nil {
-			return "", fmt.Errorf("client produced no derived secret: %w", lerr)
+			return fmt.Errorf("client produced no derived secret: %w", lerr)
 		}
 		if strings.Contains(line, "derivedSecret") {
 			if !strings.Contains(line, string(secret)) {
-				return "", fmt.Errorf("client derived a different secret: %s (server: %s)", line, secret)
+				return fmt.Errorf("client derived a different secret: %s (server: %s)", line, secret)
 			}
-			return "", nil
+			return nil
 		}
 		if strings.Contains(line, "error") {
-			return "", fmt.Errorf("client reported an error: %s", line)
+			return fmt.Errorf("client reported an error: %s", line)
 		}
 	}
-	return "", errors.New("client never reported a derived secret")
+	return errors.New("client never reported a derived secret")
 }
 
 // TestJPAKEStress_FullPairing runs the full pairing handshake many times, in

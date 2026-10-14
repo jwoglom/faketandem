@@ -15,7 +15,7 @@ import (
 // HISTORY_LOG. The ack is parsed back through the real cliparser so the
 // streamId a driver would read is checked, not just the bytes we meant to send.
 //
-// Skipped unless FAKETANDEM_TEST_CLIPARSER_JAR is set.
+// Runs through the Go codec, or through cliparser when FAKETANDEM_TEST_CLIPARSER_JAR is set.
 func TestHistoryLogRequest_AcksAndStreams(t *testing.T) {
 	bridge := testBridge(t)
 

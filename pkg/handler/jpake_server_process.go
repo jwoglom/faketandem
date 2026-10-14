@@ -2,7 +2,6 @@ package handler
 
 import (
 	"bufio"
-	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -70,7 +69,7 @@ const jpakeServerLineBuffer = 1 << 20
 // right move is to fail the round immediately, throw the dead server away, and
 // let the client re-pair against a fresh one, rather than sit on a stalled
 // subprocess until the driver's own 30-90 second timeout.
-var ErrJPAKEServerFailed = errors.New("pumpX2 jpake-server failed mid-handshake")
+var ErrJPAKEServerFailed = fmt.Errorf("pumpX2 jpake-server failed mid-handshake: %w", ErrJPAKEHandshakeFailed)
 
 // jpakeServerErrorLineRegex matches the JSON envelope jpake-server prints when
 // it gives up: {"error":"..."}. Main.jpakeAuthServer returns that string and
