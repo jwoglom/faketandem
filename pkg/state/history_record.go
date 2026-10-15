@@ -35,9 +35,10 @@ const (
 //	})
 //
 // Fields are looked up by the names pumpX2/TandemKit give the record's fields
-// (see encodeHistoryPayload for the per-type list); anything absent encodes as
-// zero, and anything unrecognized is ignored but kept in the stored entry for
-// the state snapshot API.
+// (see encodeHistoryPayload for dedicated field layouts). Every tracked
+// PumpX2 history type is named in history_types.go; types without a dedicated
+// layout encoder accept their 16 payload bytes in Fields["raw"]. Unrecognized
+// fields remain in the stored entry for the state snapshot API.
 type HistoryEvent struct {
 	// TypeID is the record's pumpX2 type ID; use the History* constants in
 	// history_types.go.
@@ -197,6 +198,20 @@ func encodeHistoryPayload(payload []byte, typeID int, fields map[string]interfac
 		putFloat32(payload[4:8], fieldFloat(fields, "iob"))
 		putFloat32(payload[8:12], fieldFloat(fields, "insulinDelivered", "unitsDelivered"))
 		putFloat32(payload[12:16], fieldFloat(fields, "insulinRequested", "unitsTotal"))
+
+	case HistoryBolusRequestedMsg2:
+		// bolusId u16 @0, options u8 @2, standardPercent u8 @3, duration u16 @4 (minutes the
+		// extended part runs), spare u16 @6, isf u16 @8, targetBG u16 @10, userOverride u8 @12,
+		// declinedCorrection u8 @13, selectedIOB u8 @14
+		binary.LittleEndian.PutUint16(payload[0:2], uint16(fieldInt(fields, "bolusId", "bolusID")))
+		payload[2] = uint8(fieldInt(fields, "options"))
+		payload[3] = uint8(fieldIntDefault(fields, 100, "standardPercent"))
+		binary.LittleEndian.PutUint16(payload[4:6], uint16(fieldInt(fields, "duration")))
+		binary.LittleEndian.PutUint16(payload[8:10], uint16(fieldInt(fields, "isf")))
+		binary.LittleEndian.PutUint16(payload[10:12], uint16(fieldInt(fields, "targetBG", "targetBg")))
+		payload[12] = uint8(fieldFlag(fields, "userOverride"))
+		payload[13] = uint8(fieldFlag(fields, "declinedCorrection"))
+		payload[14] = uint8(fieldInt(fields, "selectedIOB", "selectedIob"))
 
 	case HistoryBolexActivated:
 		// bolusId u16 @0, selectedIob u8 @2, iob f32 @4, bolexSize f32 @8 -- the
