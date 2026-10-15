@@ -223,6 +223,47 @@ func TestEncodeRecord_BolexCompleted(t *testing.T) {
 	}
 }
 
+// TestEncodeRecord_BolusRequestedMsg2 pins BolusRequestedMsg2 to the offsets
+// TandemKit's BolusRequestedMsg2HistoryLog parses: a record from pumpX2's tests,
+// and a synthetic extended request, whose duration (minutes) older t:slim X2
+// firmware logs nowhere else.
+func TestEncodeRecord_BolusRequestedMsg2(t *testing.T) {
+	cases := []struct {
+		name  string
+		entry HistoryLogEntry
+		want  string
+	}{
+		{
+			name: "pumpX2 standard bolus",
+			entry: HistoryLogEntry{
+				TypeID: HistoryBolusRequestedMsg2, PumpTime: 445961478, Sequence: 180876,
+				Data: map[string]interface{}{
+					"bolusId": 1028, "options": 0, "standardPercent": 100, "duration": 0,
+					"isf": 30, "targetBG": 110, "userOverride": true, "declinedCorrection": false, "selectedIOB": 1,
+				},
+			},
+			want: "410006d5941a8cc2020004040064000000001e006e0001000100",
+		},
+		{
+			name: "extended, half up front over 60 minutes",
+			entry: HistoryLogEntry{
+				TypeID: HistoryBolusRequestedMsg2, PumpTime: 1000, Sequence: 2000,
+				Data: map[string]interface{}{
+					"bolusId": 0x1234, "options": 1, "standardPercent": 50, "duration": 60,
+				},
+			},
+			want: "4100e8030000d0070000341201323c0000000000000000000000",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := hex.EncodeToString(c.entry.EncodeRecord()); got != c.want {
+				t.Errorf("EncodeRecord() =\n  %s\nwant\n  %s", got, c.want)
+			}
+		})
+	}
+}
+
 // TestEncodeRecord_UnknownTypeIsStillWellFormed checks that an event with no
 // dedicated payload encoder still produces a correctly typed, timestamped and
 // sequenced 26-byte record.
