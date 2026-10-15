@@ -35,9 +35,10 @@ const (
 //	})
 //
 // Fields are looked up by the names pumpX2/TandemKit give the record's fields
-// (see encodeHistoryPayload for the per-type list); anything absent encodes as
-// zero, and anything unrecognized is ignored but kept in the stored entry for
-// the state snapshot API.
+// (see encodeHistoryPayload for dedicated field layouts). Every tracked
+// PumpX2 history type is named in history_types.go; types without a dedicated
+// layout encoder accept their 16 payload bytes in Fields["raw"]. Unrecognized
+// fields remain in the stored entry for the state snapshot API.
 type HistoryEvent struct {
 	// TypeID is the record's pumpX2 type ID; use the History* constants in
 	// history_types.go.
