@@ -759,6 +759,10 @@ func (v *VirtualTransport) IsConnected() bool {
 
 // ShutdownConnection closes the connection with the attached central
 func (v *VirtualTransport) ShutdownConnection() {
+	v.dropAttached("peripheral_shutdown")
+}
+
+func (v *VirtualTransport) dropAttached(reason string) {
 	v.mu.Lock()
 	c := v.attached
 	v.mu.Unlock()
@@ -766,7 +770,7 @@ func (v *VirtualTransport) ShutdownConnection() {
 	if c == nil {
 		return
 	}
-	c.sendDisconnect("peripheral_shutdown")
+	c.sendDisconnect(reason)
 	c.close()
 }
 
@@ -835,7 +839,9 @@ func (v *VirtualTransport) SetRadioEnabled(enabled bool) {
 	}
 
 	log.Info("pkg bluetooth; virtual transport radio off; dropping any attached central")
-	v.ShutdownConnection()
+	// Not peripheral_shutdown: a central tells a link that went out of range (CoreBluetooth's
+	// connectionTimeout) from one the pump ended (peripheralDisconnected), and acts on the difference.
+	v.dropAttached("radio_off")
 }
 
 // RadioEnabled reports whether the virtual radio is on.

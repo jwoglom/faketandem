@@ -427,7 +427,9 @@ func TestRadioOffRefusesConnectionsAndRadioOnRestoresThem(t *testing.T) {
 
 	mustDo(t, rig.mux, http.MethodPost, "/api/faults", `{"kind":"radio_off"}`)
 
-	rig.client.ExpectDisconnect(time.Second)
+	if msg := rig.client.Recv(); msg.Type != "disconnect" || msg.Reason != "radio_off" {
+		t.Errorf("the attached central got %+v, want a radio_off disconnect", msg)
+	}
 	waitFor(t, "the transport to drop the central", func() bool { return !rig.transport.IsConnected() })
 	if rig.transport.RadioEnabled() {
 		t.Error("RadioEnabled() is still true after radio_off")
