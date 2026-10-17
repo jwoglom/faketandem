@@ -235,7 +235,7 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewChangeTimeDateHandler(r.bridge))
 
 	// Simple control handlers (log and return success)
-	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "DismissNotificationRequest"))
+	r.RegisterHandler(NewDismissNotificationHandler(r.bridge, r.settingsManager))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "PlaySoundRequest"))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "DisconnectPumpRequest"))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "UserInteractionRequest"))

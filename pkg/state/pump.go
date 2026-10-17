@@ -919,6 +919,36 @@ func (ps *PumpState) SetAlarm(bit uint, active bool) {
 	}
 }
 
+// DismissAlarm clears one AlarmStatusResponse bit, as acknowledging that alarm
+// on the pump does: the bit set directly and every standing alert raised as
+// that alarm, each moved into the cleared-alarm log stamped `when` (the pump's
+// current clock when zero) and returned in the order they were raised.
+func (ps *PumpState) DismissAlarm(bit uint, when time.Time) []ClearedAlert {
+	if bit > 63 {
+		return nil
+	}
+	if when.IsZero() {
+		when = ps.Now()
+	}
+
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+
+	ps.AlarmBitmask &^= uint64(1) << bit
+	var cleared []ClearedAlert
+	standing := make([]Alert, 0, len(ps.ActiveAlerts))
+	for _, a := range ps.ActiveAlerts {
+		if alarmBit, ok := alertAlarmBits[a.Type]; ok && alarmBit == bit {
+			cleared = append(cleared, ClearedAlert{Alert: a, ClearedAt: when})
+			continue
+		}
+		standing = append(standing, a)
+	}
+	ps.ActiveAlerts = standing
+	ps.clearedAlerts = append(ps.clearedAlerts, cleared...)
+	return cleared
+}
+
 // alertAlarmBits maps the alerts a pump raises as alarms to their
 // AlarmStatusResponse bit.
 var alertAlarmBits = map[AlertType]uint{
