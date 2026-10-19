@@ -35,6 +35,15 @@ curl -X POST http://127.0.0.1:8080/api/bluetooth/pairingstate \
   -d '{"pairingState":"PairStep1"}'
 ```
 
+### Over real Bluetooth, from a Mac
+
+The [unified pump simulator](https://github.com/bastiaanv/unified-pump-simulator)'s Tandem tab
+is a CoreBluetooth peripheral fronting this transport: it advertises as the pump and forwards
+every subscription, write and read the phone makes over the link above, so a phone running
+TandemKit (or any other client) pairs and talks to this emulator over the air, unchanged. Start
+the emulator with `-transport virtual`, set a pairing state, and start the tab; its panel reads
+and drives the pump through the harness API below.
+
 ### Web UI smoke test
 
 `scripts/ui-smoke.mjs` loads the web UI in headless Chrome and exercises its
