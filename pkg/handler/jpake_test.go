@@ -33,10 +33,6 @@ func TestPumpX2JPAKEAuthenticator_Initialization(t *testing.T) {
 		"",
 	)
 
-	if auth == nil {
-		t.Fatal("NewPumpX2JPAKEAuthenticator returned nil")
-	}
-
 	if auth.pairingCode != pairingCode {
 		t.Errorf("Expected pairing code %s, got %s", pairingCode, auth.pairingCode)
 	}
