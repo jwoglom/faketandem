@@ -1,14 +1,14 @@
 name: Release
 
-# Static binaries for every platform the emulator runs on, with the web UI beside each, as GitHub
-# Release assets: what the unified pump simulator fetches to bundle faketandem, and what a
-# Raspberry Pi runs without a Go toolchain.
+# A static binary for every platform the emulator runs on, the web UI built in, as GitHub Release
+# assets: what the unified pump simulator fetches to bundle faketandem, and what a Raspberry Pi
+# runs without a Go toolchain. Each asset is the binary itself, nothing to unpack.
 #
 # - A push to main publishes a prerelease tagged main-<date>-<sha>, so a build can be pinned, and
 #   moves the `latest` prerelease to it, whose asset names never change. Older main builds are
 #   pruned past the newest 50.
 # - A v* tag publishes a release.
-# - A manual run only builds the tarballs as workflow artifacts, to check them before tagging.
+# - A manual run only builds the binaries as workflow artifacts, to check them before tagging.
 
 on:
   push:
@@ -83,24 +83,25 @@ jobs:
       with:
         go-version: '1.22'
 
-    - name: Build the tarball
+    - name: Build the binary
       id: build
       env:
         GOARM: ${{ matrix.goarm }}
       run: |
-        tarball="$(scripts/build-release.sh "${{ matrix.goos }}" "${{ matrix.goarch }}" "${{ needs.plan.outputs.version }}" dist)"
-        echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+        binary="$(scripts/build-release.sh "${{ matrix.goos }}" "${{ matrix.goarch }}" "${{ needs.plan.outputs.version }}" dist)"
+        echo "binary=$binary" >> "$GITHUB_OUTPUT"
         ls -l dist
 
     # Run from an empty directory, so the UI can only have come from inside the binary.
-    - name: Check the tarball is one binary that runs on its own
+    - name: Check the binary is static and runs on its own
       run: |
-        mkdir check && tar -C check -xzf "${{ steps.build.outputs.tarball }}"
-        cd check
-        test "$(ls)" = faketandem && test -x faketandem
+        binary="$PWD/${{ steps.build.outputs.binary }}"
+        test -x "$binary"
         if [ "${{ matrix.goos }}/${{ matrix.goarch }}" = linux/amd64 ]; then
-          test "$(./faketandem -version)" = "${{ needs.plan.outputs.version }}"
-          ./faketandem -transport virtual -q -api-addr 127.0.0.1:18080 -virtual-addr 127.0.0.1:18081 >log 2>&1 &
+          file "$binary" | grep -q 'statically linked'
+          mkdir check && cd check
+          test "$("$binary" -version)" = "${{ needs.plan.outputs.version }}"
+          "$binary" -transport virtual -q -api-addr 127.0.0.1:18080 -virtual-addr 127.0.0.1:18081 >log 2>&1 &
           pid=$!
           for _ in $(seq 50); do curl -fsS -o index.html http://127.0.0.1:18080/ui/ && break; sleep 0.2; done
           ok=1
@@ -109,11 +110,11 @@ jobs:
           if [ "$ok" != 1 ] || ! grep -q '<script src="app.js">' index.html; then cat log; exit 1; fi
         fi
 
-    - name: Upload the tarball
+    - name: Upload the binary
       uses: actions/upload-artifact@v4
       with:
         name: faketandem-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm }}
-        path: dist/*.tar.gz
+        path: dist/faketandem-*
         if-no-files-found: error
         retention-days: 14
 
@@ -128,7 +129,7 @@ jobs:
       VERSION: ${{ needs.plan.outputs.version }}
 
     steps:
-    - name: Download every tarball
+    - name: Download every binary
       uses: actions/download-artifact@v4
       with:
         pattern: faketandem-*
@@ -138,7 +139,7 @@ jobs:
     - name: Write the checksums
       run: |
         cd dist
-        sha256sum *.tar.gz > SHA256SUMS
+        sha256sum faketandem-* > SHA256SUMS
         cat SHA256SUMS
 
     # A re-run of a tag's workflow replaces the assets of the release it made.
@@ -154,7 +155,7 @@ jobs:
     - name: Publish the main build as a prerelease
       if: needs.plan.outputs.publish == 'main'
       run: |
-        notes="Build of main at $GITHUB_SHA. Each tarball holds the faketandem binary, with the web UI built in."
+        notes="Build of main at $GITHUB_SHA. Each asset is the faketandem binary itself, static, with the web UI built in."
         if gh release view "$VERSION" >/dev/null 2>&1; then
           gh release upload "$VERSION" dist/* --clobber
         else
@@ -166,15 +167,15 @@ jobs:
       if: needs.plan.outputs.publish == 'main'
       run: |
         mkdir latest
-        for tarball in dist/*.tar.gz; do
-          cp "$tarball" "latest/$(basename "$tarball" | sed "s/faketandem-$VERSION-/faketandem-latest-/")"
+        for binary in dist/faketandem-*; do
+          cp "$binary" "latest/$(basename "$binary" | sed "s/faketandem-$VERSION-/faketandem-latest-/")"
         done
-        (cd latest && sha256sum *.tar.gz > SHA256SUMS)
+        (cd latest && sha256sum faketandem-* > SHA256SUMS)
         if gh release view latest >/dev/null 2>&1; then
           gh release delete latest --yes --cleanup-tag
         fi
         gh release create latest --target "$GITHUB_SHA" --prerelease --title "Latest main build ($VERSION)" \
-          --notes "The newest push to main, $VERSION ($GITHUB_SHA); the same tarballs under fixed names." latest/*
+          --notes "The newest push to main, $VERSION ($GITHUB_SHA); the same binaries under fixed names." latest/*
 
     - name: Prune main builds past the newest 50
       if: needs.plan.outputs.publish == 'main'

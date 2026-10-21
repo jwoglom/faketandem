@@ -47,25 +47,31 @@ and drives the pump through the harness API below.
 ### Releases
 
 [release.yml](.github/workflows/release.yml) builds a static binary for each platform the
-emulator runs on and attaches the tarballs, with a `SHA256SUMS`, to a GitHub Release. Every push
-to `main` publishes a prerelease tagged `main-<date>-<sha>`, so a build can be pinned, and moves
-the `latest` prerelease to it, whose assets are the same tarballs under fixed names
-(`faketandem-latest-darwin-arm64.tar.gz`, ...); main builds past the newest 50 are pruned. A `v*`
-tag publishes a release:
+emulator runs on and attaches them, with a `SHA256SUMS`, to a GitHub Release. Every push to
+`main` publishes a prerelease tagged `main-<date>-<sha>`, so a build can be pinned, and moves the
+`latest` prerelease to it, whose assets are the same binaries under fixed names
+(`faketandem-latest-darwin-arm64`, ...); main builds past the newest 50 are pruned. A `v*` tag
+publishes a release:
 
 | Asset | For |
 |---|---|
-| `faketandem-<version>-darwin-arm64.tar.gz`, `faketandem-<version>-darwin-amd64.tar.gz` | A Mac, Apple silicon or Intel; what the unified pump simulator bundles. |
-| `faketandem-<version>-linux-arm64.tar.gz`, `faketandem-<version>-linux-armv7.tar.gz`, `faketandem-<version>-linux-armv6.tar.gz` | A Raspberry Pi (64-bit, 32-bit, or a Zero/1), with the real BLE transport. |
-| `faketandem-<version>-linux-amd64.tar.gz` | A Linux box or CI. |
+| `faketandem-<version>-darwin-arm64`, `faketandem-<version>-darwin-amd64` | A Mac, Apple silicon or Intel; what the unified pump simulator bundles. |
+| `faketandem-<version>-linux-arm64`, `faketandem-<version>-linux-armv7`, `faketandem-<version>-linux-armv6` | A Raspberry Pi (64-bit, 32-bit, or a Zero/1), with the real BLE transport. |
+| `faketandem-<version>-linux-amd64` | A Linux box or CI. |
 
-Each tarball holds `faketandem` alone: the web UI is built into the binary, so it runs from any
-directory. `faketandem -version` prints the version it was built as, the tag or
-`main-<date>-<sha>` (`dev` for a `go build`). CGO is off: the Linux BLE transport is pure Go, and
-every other platform builds the virtual transport only, so a binary needs nothing installed.
-`scripts/build-release.sh <goos> <goarch> <version> [outdir]` builds the same tarball locally; a
-manual run of the workflow builds them all as workflow artifacts without publishing, to check them
-before tagging:
+Each asset is the binary itself, nothing to unpack: the web UI is built in, and CGO is off, so it
+needs nothing installed (the Linux BLE transport is pure Go; every other platform builds the
+virtual transport only). A download needs its execute bit back:
+
+```bash
+curl -fsSLo faketandem https://github.com/jwoglom/faketandem/releases/download/latest/faketandem-latest-darwin-arm64
+chmod +x faketandem && ./faketandem -version
+```
+
+`faketandem -version` prints the version it was built as, the tag or `main-<date>-<sha>` (`dev`
+for a `go build`). `scripts/build-release.sh <goos> <goarch> <version> [outdir]` builds the same
+binary locally; a manual run of the workflow builds them all as workflow artifacts without
+publishing, to check them before tagging:
 
 ```bash
 git tag v0.1.0 && git push origin v0.1.0
