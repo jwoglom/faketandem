@@ -356,11 +356,7 @@ func TestPumpX2JPAKEAuthenticator_CloseKillsServer(t *testing.T) {
 		t.Fatalf("failed to start jpake-server: %v", err)
 	}
 
-	proc := auth.server.cmd.Process
-	if proc == nil {
-		t.Fatal("jpake-server started but has no OS process")
-	}
-	pid := proc.Pid
+	pid := auth.server.cmd.Process.Pid
 
 	// It must be alive before Close -- otherwise this test would pass for the
 	// wrong reason.

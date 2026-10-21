@@ -3,8 +3,11 @@ package api
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -199,4 +202,55 @@ func waitForClients(t *testing.T, s *Server, want int) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+}
+
+func TestTheWebUIIsBuiltIntoTheBinary(t *testing.T) {
+	srv := httptest.NewServer(routes(New(&fakeTransport{})))
+	defer srv.Close()
+	for path, marker := range map[string]string{
+		"/ui/":           `<script src="app.js">`,
+		"/ui/app.js":     "/api/bluetooth/pairingstate",
+		"/ui/styles.css": "{",
+	} {
+		if body := get(t, srv.URL+path); !strings.Contains(body, marker) {
+			t.Errorf("%s: %q not in body:\n%.200s", path, marker, body)
+		}
+	}
+}
+
+func TestUIDirServesTheWebUIFromDiskInstead(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<p>edited on disk</p>"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	server := New(&fakeTransport{})
+	server.SetUIDir(dir)
+	srv := httptest.NewServer(routes(server))
+	defer srv.Close()
+	if body := get(t, srv.URL+"/ui/"); body != "<p>edited on disk</p>" {
+		t.Fatalf("got %q", body)
+	}
+}
+
+func routes(s *Server) http.Handler {
+	mux := http.NewServeMux()
+	s.setupRoutes(mux)
+	return mux
+}
+
+func get(t *testing.T, url string) string {
+	t.Helper()
+	resp, err := http.Get(url) //nolint:gosec // test URL
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("%s: %d %s", url, resp.StatusCode, body)
+	}
+	return string(body)
 }

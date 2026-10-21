@@ -35,6 +35,48 @@ curl -X POST http://127.0.0.1:8080/api/bluetooth/pairingstate \
   -d '{"pairingState":"PairStep1"}'
 ```
 
+### Over real Bluetooth, from a Mac
+
+The [unified pump simulator](https://github.com/bastiaanv/unified-pump-simulator)'s Tandem tab
+is a CoreBluetooth peripheral fronting this transport: it advertises as the pump and forwards
+every subscription, write and read the phone makes over the link above, so a phone running
+TandemKit (or any other client) pairs and talks to this emulator over the air, unchanged. Start
+the emulator with `-transport virtual`, set a pairing state, and start the tab; its panel reads
+and drives the pump through the harness API below.
+
+### Releases
+
+[release.yml](.github/workflows/release.yml) builds a static binary for each platform the
+emulator runs on and attaches them, with a `SHA256SUMS`, to a GitHub Release. Every push to
+`main` publishes a prerelease tagged `main-<date>-<sha>`, so a build can be pinned, and moves the
+`latest` prerelease to it, whose assets are the same binaries under fixed names
+(`faketandem-latest-darwin-arm64`, ...); main builds past the newest 50 are pruned. A `v*` tag
+publishes a release:
+
+| Asset | For |
+|---|---|
+| `faketandem-<version>-darwin-arm64`, `faketandem-<version>-darwin-amd64` | A Mac, Apple silicon or Intel; what the unified pump simulator bundles. |
+| `faketandem-<version>-linux-arm64`, `faketandem-<version>-linux-armv7`, `faketandem-<version>-linux-armv6` | A Raspberry Pi (64-bit, 32-bit, or a Zero/1), with the real BLE transport. |
+| `faketandem-<version>-linux-amd64` | A Linux box or CI. |
+
+Each asset is the binary itself, nothing to unpack: the web UI is built in, and CGO is off, so it
+needs nothing installed (the Linux BLE transport is pure Go; every other platform builds the
+virtual transport only). A download needs its execute bit back:
+
+```bash
+curl -fsSLo faketandem https://github.com/jwoglom/faketandem/releases/download/latest/faketandem-latest-darwin-arm64
+chmod +x faketandem && ./faketandem -version
+```
+
+`faketandem -version` prints the version it was built as, the tag or `main-<date>-<sha>` (`dev`
+for a `go build`). `scripts/build-release.sh <goos> <goarch> <version> [outdir]` builds the same
+binary locally; a manual run of the workflow builds them all as workflow artifacts without
+publishing, to check them before tagging:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
 ### Web UI smoke test
 
 `scripts/ui-smoke.mjs` loads the web UI in headless Chrome and exercises its
@@ -57,7 +99,7 @@ Flags:
 | `-virtual-mtu` | `23` | Virtual transport only: the ATT MTU to announce and fragment responses to. 23 is the Bluetooth spec minimum and gives the 20-byte notifications pumpX2's `Packetize` produces; a real Mobi over iOS negotiates a much larger MTU, so most responses arrive in a single notification. Changeable at runtime via `PUT /api/transport`. |
 | `-virtual-ack-after-handling` | `false` | Acknowledge a write only after its handler has run, reproducing the Linux/gatt ordering instead of real-pump ordering (ack first). |
 | `-api-addr` | `:8080` | Address of the HTTP/WebSocket API and web UI. |
-| `-ui-dir` | `ui` beside the executable, else `./ui` | Where the web UI is served from. |
+| `-ui-dir` | the copy built into the binary | Serve the web UI from this directory instead, to edit it without a rebuild. |
 | `-pump-timezone` | the host's local zone | IANA zone the emulated pump keeps its clock in, e.g. `America/New_York`. A Tandem pump holds local time with no zone attached and every consumer decodes its wire timestamps on that assumption, so this is the zone pump-epoch seconds are encoded in. `UTC` turns the convention off. Changeable at runtime via `PUT /api/clock`. |
 | `-request-log-size` | `4096` | How many messages the harness request log (`GET /api/log`) retains. |
 | `-message-codec` | `native` | How messages are parsed and encoded: `native` (the Go message types), `pumpx2` (pumpX2's cliparser) or `compare` (the Go message types, checked against cliparser on every message). |
