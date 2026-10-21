@@ -2,20 +2,59 @@ name: Release
 
 # Static binaries for every platform the emulator runs on, with the web UI beside each, as GitHub
 # Release assets: what the unified pump simulator fetches to bundle faketandem, and what a
-# Raspberry Pi runs without a Go toolchain. A tag publishes a release; a manual run only builds
-# the tarballs as workflow artifacts, to check them before tagging.
+# Raspberry Pi runs without a Go toolchain.
+#
+# - A push to main publishes a prerelease tagged main-<date>-<sha>, so a build can be pinned, and
+#   moves the `latest` prerelease to it, whose asset names never change. Older main builds are
+#   pruned past the newest 50.
+# - A v* tag publishes a release.
+# - A manual run only builds the tarballs as workflow artifacts, to check them before tagging.
 
 on:
   push:
+    branches: [main]
     tags: ['v*']
   workflow_dispatch:
 
 permissions:
   contents: write
 
+# Two pushes to main in a row take turns at `latest`.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  plan:
+    name: Name the build
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+      publish: ${{ steps.plan.outputs.publish }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # One name for every target: a main build's date is taken once, here, not per job.
+    - name: Decide the version and whether to publish
+      id: plan
+      run: |
+        short="$(git rev-parse --short HEAD)"
+        if [ "$GITHUB_REF_TYPE" = tag ]; then
+          echo "version=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          echo "publish=tag" >> "$GITHUB_OUTPUT"
+        elif [ "$GITHUB_EVENT_NAME" = push ]; then
+          echo "version=main-$(date -u +%Y%m%d)-$short" >> "$GITHUB_OUTPUT"
+          echo "publish=main" >> "$GITHUB_OUTPUT"
+        else
+          echo "version=0.0.0-g$short" >> "$GITHUB_OUTPUT"
+          echo "publish=none" >> "$GITHUB_OUTPUT"
+        fi
+        cat "$GITHUB_OUTPUT"
+
   build:
     name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    needs: plan
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -30,6 +69,10 @@ jobs:
             goarch: amd64
           - goos: linux
             goarch: arm
+            goarm: 7
+          - goos: linux
+            goarch: arm
+            goarm: 6
 
     steps:
     - name: Checkout code
@@ -42,13 +85,10 @@ jobs:
 
     - name: Build the tarball
       id: build
+      env:
+        GOARM: ${{ matrix.goarm }}
       run: |
-        if [ "$GITHUB_REF_TYPE" = tag ]; then
-          version="$GITHUB_REF_NAME"
-        else
-          version="0.0.0-g$(git rev-parse --short HEAD)"
-        fi
-        tarball="$(scripts/build-release.sh "${{ matrix.goos }}" "${{ matrix.goarch }}" "$version" dist)"
+        tarball="$(scripts/build-release.sh "${{ matrix.goos }}" "${{ matrix.goarch }}" "${{ needs.plan.outputs.version }}" dist)"
         echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
         ls -l dist
 
@@ -57,22 +97,26 @@ jobs:
         mkdir check && tar -C check -xzf "${{ steps.build.outputs.tarball }}"
         test -x check/faketandem && test -f check/ui/index.html
         if [ "${{ matrix.goos }}/${{ matrix.goarch }}" = linux/amd64 ]; then
-          check/faketandem -version
+          test "$(check/faketandem -version)" = "${{ needs.plan.outputs.version }}"
         fi
 
     - name: Upload the tarball
       uses: actions/upload-artifact@v4
       with:
-        name: faketandem-${{ matrix.goos }}-${{ matrix.goarch }}
+        name: faketandem-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm }}
         path: dist/*.tar.gz
         if-no-files-found: error
         retention-days: 14
 
   release:
     name: Publish the release
-    needs: build
-    if: github.ref_type == 'tag'
+    needs: [plan, build]
+    if: needs.plan.outputs.publish != 'none'
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.plan.outputs.version }}
 
     steps:
     - name: Download every tarball
@@ -89,14 +133,45 @@ jobs:
         cat SHA256SUMS
 
     # A re-run of a tag's workflow replaces the assets of the release it made.
-    - name: Create or update the GitHub Release
-      env:
-        GH_TOKEN: ${{ github.token }}
-        GH_REPO: ${{ github.repository }}
+    - name: Publish the tagged release
+      if: needs.plan.outputs.publish == 'tag'
       run: |
-        tag="$GITHUB_REF_NAME"
-        if gh release view "$tag" >/dev/null 2>&1; then
-          gh release upload "$tag" dist/* --clobber
+        if gh release view "$VERSION" >/dev/null 2>&1; then
+          gh release upload "$VERSION" dist/* --clobber
         else
-          gh release create "$tag" --verify-tag --title "$tag" --generate-notes dist/*
+          gh release create "$VERSION" --verify-tag --title "$VERSION" --generate-notes dist/*
         fi
+
+    - name: Publish the main build as a prerelease
+      if: needs.plan.outputs.publish == 'main'
+      run: |
+        notes="Build of main at $GITHUB_SHA. Each tarball holds the faketandem binary and ui/."
+        if gh release view "$VERSION" >/dev/null 2>&1; then
+          gh release upload "$VERSION" dist/* --clobber
+        else
+          gh release create "$VERSION" --target "$GITHUB_SHA" --prerelease --title "$VERSION" --notes "$notes" dist/*
+        fi
+
+    # Fixed asset names, so a consumer that wants the newest main build needs no lookup.
+    - name: Move `latest` to this build
+      if: needs.plan.outputs.publish == 'main'
+      run: |
+        mkdir latest
+        for tarball in dist/*.tar.gz; do
+          cp "$tarball" "latest/$(basename "$tarball" | sed "s/faketandem-$VERSION-/faketandem-latest-/")"
+        done
+        (cd latest && sha256sum *.tar.gz > SHA256SUMS)
+        if gh release view latest >/dev/null 2>&1; then
+          gh release delete latest --yes --cleanup-tag
+        fi
+        gh release create latest --target "$GITHUB_SHA" --prerelease --title "Latest main build ($VERSION)" \
+          --notes "The newest push to main, $VERSION ($GITHUB_SHA); the same tarballs under fixed names." latest/*
+
+    - name: Prune main builds past the newest 50
+      if: needs.plan.outputs.publish == 'main'
+      run: |
+        gh release list --limit 500 --json tagName --jq '.[].tagName | select(startswith("main-"))' \
+          | sort -r | tail -n +51 | while read -r tag; do
+            echo "pruning $tag"
+            gh release delete "$tag" --yes --cleanup-tag
+          done
