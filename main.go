@@ -28,7 +28,11 @@ const (
 	transportVirtual = "virtual"
 )
 
+// version is the release tag a binary was built from, set by scripts/build-release.sh.
+var version = "dev"
+
 func main() {
+	var showVersion = flag.Bool("version", false, "print the version and exit")
 	// if both verbose and quiet are chosen, e.g., -v -q, the verbose dominates
 	var traceLevel = flag.Bool("v", false, "verbose off by default, TraceLevel")
 	var infoLevel = flag.Bool("q", false, "quiet off by default, InfoLevel")
@@ -51,6 +55,11 @@ func main() {
 	var requestLogSize = flag.Int("request-log-size", reqlog.DefaultCapacity, "how many messages the integration-harness request log (GET /api/log) retains")
 
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println(version)
+		return
+	}
 
 	// Determine log level
 	logLevel := "debug"

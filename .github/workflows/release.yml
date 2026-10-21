@@ -1,0 +1,102 @@
+name: Release
+
+# Static binaries for every platform the emulator runs on, with the web UI beside each, as GitHub
+# Release assets: what the unified pump simulator fetches to bundle faketandem, and what a
+# Raspberry Pi runs without a Go toolchain. A tag publishes a release; a manual run only builds
+# the tarballs as workflow artifacts, to check them before tagging.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: darwin
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.22'
+
+    - name: Build the tarball
+      id: build
+      run: |
+        if [ "$GITHUB_REF_TYPE" = tag ]; then
+          version="$GITHUB_REF_NAME"
+        else
+          version="0.0.0-g$(git rev-parse --short HEAD)"
+        fi
+        tarball="$(scripts/build-release.sh "${{ matrix.goos }}" "${{ matrix.goarch }}" "$version" dist)"
+        echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+        ls -l dist
+
+    - name: Check the tarball unpacks into a binary and the UI
+      run: |
+        mkdir check && tar -C check -xzf "${{ steps.build.outputs.tarball }}"
+        test -x check/faketandem && test -f check/ui/index.html
+        if [ "${{ matrix.goos }}/${{ matrix.goarch }}" = linux/amd64 ]; then
+          check/faketandem -version
+        fi
+
+    - name: Upload the tarball
+      uses: actions/upload-artifact@v4
+      with:
+        name: faketandem-${{ matrix.goos }}-${{ matrix.goarch }}
+        path: dist/*.tar.gz
+        if-no-files-found: error
+        retention-days: 14
+
+  release:
+    name: Publish the release
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Download every tarball
+      uses: actions/download-artifact@v4
+      with:
+        pattern: faketandem-*
+        path: dist
+        merge-multiple: true
+
+    - name: Write the checksums
+      run: |
+        cd dist
+        sha256sum *.tar.gz > SHA256SUMS
+        cat SHA256SUMS
+
+    # A re-run of a tag's workflow replaces the assets of the release it made.
+    - name: Create or update the GitHub Release
+      env:
+        GH_TOKEN: ${{ github.token }}
+        GH_REPO: ${{ github.repository }}
+      run: |
+        tag="$GITHUB_REF_NAME"
+        if gh release view "$tag" >/dev/null 2>&1; then
+          gh release upload "$tag" dist/* --clobber
+        else
+          gh release create "$tag" --verify-tag --title "$tag" --generate-notes dist/*
+        fi

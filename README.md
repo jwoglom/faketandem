@@ -44,6 +44,29 @@ TandemKit (or any other client) pairs and talks to this emulator over the air, u
 the emulator with `-transport virtual`, set a pairing state, and start the tab; its panel reads
 and drives the pump through the harness API below.
 
+### Releases
+
+Pushing a `v*` tag runs [release.yml](.github/workflows/release.yml), which builds a static
+binary for each platform the emulator runs on and attaches the tarballs, with a `SHA256SUMS`, to a
+GitHub Release:
+
+| Asset | For |
+|---|---|
+| `faketandem-<tag>-darwin-arm64.tar.gz`, `faketandem-<tag>-darwin-amd64.tar.gz` | A Mac; what the unified pump simulator bundles. |
+| `faketandem-<tag>-linux-arm64.tar.gz`, `faketandem-<tag>-linux-arm.tar.gz` | A Raspberry Pi, with the real BLE transport. |
+| `faketandem-<tag>-linux-amd64.tar.gz` | A Linux box or CI. |
+
+Each tarball holds `faketandem` and `ui/` at its root, so it unpacks into a directory the binary
+serves the web UI from. `faketandem -version` prints the tag it was built from (`dev` for a
+`go build`). CGO is off: the Linux BLE transport is pure Go, and every other platform builds the
+virtual transport only, so a binary needs nothing installed. `scripts/build-release.sh <goos>
+<goarch> <version> [outdir]` builds the same tarball locally; a manual run of the workflow builds
+them all as workflow artifacts without publishing, to check them before tagging:
+
+```bash
+git tag v0.1.0 && git push origin v0.1.0
+```
+
 ### Web UI smoke test
 
 `scripts/ui-smoke.mjs` loads the web UI in headless Chrome and exercises its
