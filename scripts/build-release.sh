@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
-# Builds one release tarball: a static faketandem binary for GOOS/GOARCH, with the web UI beside
-# it, as .github/workflows/release.yml publishes them.
+# Builds one release tarball: a static faketandem binary for GOOS/GOARCH, as
+# .github/workflows/release.yml publishes them.
 #
 #   scripts/build-release.sh <goos> <goarch> <version> [outdir]
 #
 # The tarball is <outdir>/faketandem-<version>-<goos>-<goarch>.tar.gz (32-bit arm: -armv7 or
-# -armv6, after GOARM, 7 unless set) and holds `faketandem` and `ui/` at its root, so it unpacks
-# straight into a directory the binary serves the UI from (the `ui` directory beside the
-# executable). CGO is off: the Linux BLE transport is pure Go, and every other platform builds the
+# -armv6, after GOARM, 7 unless set) and holds `faketandem` alone: the web UI is built into the
+# binary. CGO is off: the Linux BLE transport is pure Go, and every other platform builds the
 # virtual transport only, so the binary needs nothing installed.
 set -euo pipefail
 
@@ -38,8 +37,7 @@ if [[ "$goos" == "windows" ]]; then
 fi
 
 (cd "$root" && go build -trimpath -ldflags "-s -w -X main.version=${version}" -o "$stage/$binary" .)
-cp -R "$root/ui" "$stage/ui"
 
 mkdir -p "$outdir"
-tar -C "$stage" -czf "$outdir/$name.tar.gz" "$binary" ui
+tar -C "$stage" -czf "$outdir/$name.tar.gz" "$binary"
 echo "$outdir/$name.tar.gz"

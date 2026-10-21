@@ -375,7 +375,7 @@ The pre-push hook will catch any missed issues!
 ## Cursor Cloud specific instructions
 
 ### Project overview
-faketandem is a Tandem insulin pump BLE emulator written in Go. It has a single binary entry point at the repo root (`main.go`), an HTTP/WebSocket API on `:8080`, and a static web UI in `ui/`.
+faketandem is a Tandem insulin pump BLE emulator written in Go. It has a single binary entry point at the repo root (`main.go`), an HTTP/WebSocket API on `:8080`, and a static web UI in `ui/`, built into the binary.
 
 ### pumpX2 is optional
 Messages are parsed and encoded by `pkg/pumpx2/messages`, a Go implementation of the [pumpX2](https://github.com/jwoglom/pumpX2) message library: a Go type per pumpX2 message class, in a package per characteristic. Pairing runs `pkg/jpake`, a Go port of pumpX2's EC-JPAKE. Neither the app nor its tests need pumpX2 or a JVM. pumpX2 is used only by `-message-codec pumpx2`/`compare` and `-jpake-mode pumpx2`, and by the tests that check the Go code against it (`FAKETANDEM_TEST_CLIPARSER_JAR`, below). The update script may still clone pumpX2 to `/workspace/pumpX2` (branch `dev`) for those.

@@ -7,13 +7,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 
 	"github.com/jwoglom/faketandem/pkg/bluetooth"
 	"github.com/jwoglom/faketandem/pkg/settings"
+	"github.com/jwoglom/faketandem/ui"
 
 	"github.com/gorilla/websocket"
 	log "github.com/sirupsen/logrus"
@@ -132,8 +131,7 @@ func (s *Server) removeClient(conn *websocket.Conn) {
 	delete(s.clients, conn)
 }
 
-// SetUIDir sets the directory served at /ui/. When empty, the "ui" directory
-// next to the executable (falling back to ./ui) is used.
+// SetUIDir serves the web UI from dir instead of the copy built into the binary.
 func (s *Server) SetUIDir(dir string) {
 	s.uiDir = dir
 }
@@ -168,20 +166,12 @@ func (s *Server) Start(addr string) {
 	}
 }
 
-// resolveUIDir returns the directory to serve the web UI from: the explicitly
-// configured directory, else a "ui" directory beside the executable, else the
-// "ui" directory relative to the current working directory.
-func (s *Server) resolveUIDir() string {
+// uiFileSystem is the web UI served at /ui/, and where it comes from for the log.
+func (s *Server) uiFileSystem() (http.FileSystem, string) {
 	if s.uiDir != "" {
-		return s.uiDir
+		return http.Dir(s.uiDir), s.uiDir
 	}
-	if exe, err := os.Executable(); err == nil {
-		candidate := filepath.Join(filepath.Dir(exe), "ui")
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			return candidate
-		}
-	}
-	return "ui"
+	return http.FS(ui.Files), "the copy built into the binary"
 }
 
 // SendEvent sends a BLE event to every connected websocket client.
@@ -280,9 +270,9 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 			log.Warnf("Failed to write response: %v", err)
 		}
 	})
-	uiDir := s.resolveUIDir()
-	log.Infof("Serving web UI from %s", uiDir)
-	uiHandler := http.FileServer(http.Dir(uiDir))
+	uiFS, uiSource := s.uiFileSystem()
+	log.Infof("Serving web UI from %s", uiSource)
+	uiHandler := http.FileServer(uiFS)
 	mux.Handle("/ui/", http.StripPrefix("/ui/", uiHandler))
 	mux.HandleFunc("/ui", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/ui/", http.StatusMovedPermanently)

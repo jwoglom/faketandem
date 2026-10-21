@@ -92,12 +92,21 @@ jobs:
         echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
         ls -l dist
 
-    - name: Check the tarball unpacks into a binary and the UI
+    # Run from an empty directory, so the UI can only have come from inside the binary.
+    - name: Check the tarball is one binary that runs on its own
       run: |
         mkdir check && tar -C check -xzf "${{ steps.build.outputs.tarball }}"
-        test -x check/faketandem && test -f check/ui/index.html
+        cd check
+        test "$(ls)" = faketandem && test -x faketandem
         if [ "${{ matrix.goos }}/${{ matrix.goarch }}" = linux/amd64 ]; then
-          test "$(check/faketandem -version)" = "${{ needs.plan.outputs.version }}"
+          test "$(./faketandem -version)" = "${{ needs.plan.outputs.version }}"
+          ./faketandem -transport virtual -q -api-addr 127.0.0.1:18080 -virtual-addr 127.0.0.1:18081 >log 2>&1 &
+          pid=$!
+          for _ in $(seq 50); do curl -fsS -o index.html http://127.0.0.1:18080/ui/ && break; sleep 0.2; done
+          ok=1
+          for f in app.js styles.css; do curl -fsS -o "$f" "http://127.0.0.1:18080/ui/$f" || ok=0; done
+          kill "$pid"
+          if [ "$ok" != 1 ] || ! grep -q '<script src="app.js">' index.html; then cat log; exit 1; fi
         fi
 
     - name: Upload the tarball
@@ -145,7 +154,7 @@ jobs:
     - name: Publish the main build as a prerelease
       if: needs.plan.outputs.publish == 'main'
       run: |
-        notes="Build of main at $GITHUB_SHA. Each tarball holds the faketandem binary and ui/."
+        notes="Build of main at $GITHUB_SHA. Each tarball holds the faketandem binary, with the web UI built in."
         if gh release view "$VERSION" >/dev/null 2>&1; then
           gh release upload "$VERSION" dist/* --clobber
         else

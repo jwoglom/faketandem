@@ -50,7 +50,7 @@ func main() {
 	var virtualMTU = flag.Int("virtual-mtu", bluetooth.DefaultATTMTU, "virtual transport only: ATT MTU to report and fragment responses to. The default 23 is the spec minimum and gives the 20-byte notifications pumpX2 and the cliparser jar produce; a real Mobi over iOS negotiates a much larger one, so most responses arrive in a single notification. Changeable at runtime via PUT /api/transport.")
 	var virtualAckAfterHandling = flag.Bool("virtual-ack-after-handling", false, "virtual transport only: run the write handler synchronously and ack the write afterwards, reproducing the Linux/gatt ordering instead of real-pump ordering")
 	var apiAddr = flag.String("api-addr", api.DefaultAddr, "address the HTTP/WebSocket API server listens on")
-	var uiDir = flag.String("ui-dir", "", "directory to serve the web UI from (default: the 'ui' directory beside the executable, else ./ui)")
+	var uiDir = flag.String("ui-dir", "", "directory to serve the web UI from instead of the copy built into the binary, to edit it without a rebuild")
 	var pumpTimeZone = flag.String("pump-timezone", "", "IANA time zone whose local time the emulated pump's clock is set to at startup, e.g. 'America/New_York' (default: the host's local zone; 'UTC' disables the local-time convention). A Tandem pump holds a date and time with no zone attached and every consumer decodes its wire timestamps as local time; the offset is fixed at startup and does not follow DST. Changeable at runtime via PUT /api/clock, POST /api/state/time and ChangeTimeDateRequest.")
 	var requestLogSize = flag.Int("request-log-size", reqlog.DefaultCapacity, "how many messages the integration-harness request log (GET /api/log) retains")
 

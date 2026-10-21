@@ -59,8 +59,8 @@ tag publishes a release:
 | `faketandem-<version>-linux-arm64.tar.gz`, `faketandem-<version>-linux-armv7.tar.gz`, `faketandem-<version>-linux-armv6.tar.gz` | A Raspberry Pi (64-bit, 32-bit, or a Zero/1), with the real BLE transport. |
 | `faketandem-<version>-linux-amd64.tar.gz` | A Linux box or CI. |
 
-Each tarball holds `faketandem` and `ui/` at its root, so it unpacks into a directory the binary
-serves the web UI from. `faketandem -version` prints the version it was built as, the tag or
+Each tarball holds `faketandem` alone: the web UI is built into the binary, so it runs from any
+directory. `faketandem -version` prints the version it was built as, the tag or
 `main-<date>-<sha>` (`dev` for a `go build`). CGO is off: the Linux BLE transport is pure Go, and
 every other platform builds the virtual transport only, so a binary needs nothing installed.
 `scripts/build-release.sh <goos> <goarch> <version> [outdir]` builds the same tarball locally; a
@@ -93,7 +93,7 @@ Flags:
 | `-virtual-mtu` | `23` | Virtual transport only: the ATT MTU to announce and fragment responses to. 23 is the Bluetooth spec minimum and gives the 20-byte notifications pumpX2's `Packetize` produces; a real Mobi over iOS negotiates a much larger MTU, so most responses arrive in a single notification. Changeable at runtime via `PUT /api/transport`. |
 | `-virtual-ack-after-handling` | `false` | Acknowledge a write only after its handler has run, reproducing the Linux/gatt ordering instead of real-pump ordering (ack first). |
 | `-api-addr` | `:8080` | Address of the HTTP/WebSocket API and web UI. |
-| `-ui-dir` | `ui` beside the executable, else `./ui` | Where the web UI is served from. |
+| `-ui-dir` | the copy built into the binary | Serve the web UI from this directory instead, to edit it without a rebuild. |
 | `-pump-timezone` | the host's local zone | IANA zone the emulated pump keeps its clock in, e.g. `America/New_York`. A Tandem pump holds local time with no zone attached and every consumer decodes its wire timestamps on that assumption, so this is the zone pump-epoch seconds are encoded in. `UTC` turns the convention off. Changeable at runtime via `PUT /api/clock`. |
 | `-request-log-size` | `4096` | How many messages the harness request log (`GET /api/log`) retains. |
 | `-message-codec` | `native` | How messages are parsed and encoded: `native` (the Go message types), `pumpx2` (pumpX2's cliparser) or `compare` (the Go message types, checked against cliparser on every message). |
