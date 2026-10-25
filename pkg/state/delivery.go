@@ -252,3 +252,14 @@ func (ps *PumpState) compareAndSetSuspended(suspended bool, reason string) bool 
 	}
 	return true
 }
+
+// ForgetPast empties the history log and forgets every dose IOB counts and the
+// last bolus, writing nothing: the blank past a scenario replays the pump's
+// recent use onto. Nothing may be running; the caller checks.
+func (ps *PumpState) ForgetPast() {
+	ps.EraseHistory(1)
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+	ps.iob = insulinOnBoard{}
+	ps.LastBolus = &LastBolusRecord{}
+}

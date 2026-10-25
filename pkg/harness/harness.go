@@ -147,6 +147,7 @@ func (h *Harness) Endpoints() []string {
 		"POST   /api/state/suspend            {reason: user|occlusion|alarm}",
 		"POST   /api/state/resume",
 		"POST   /api/state/history/append     {type, type_id, seconds_ago, data}",
+		"POST   /api/state/scenario           {preset} or {hours, state, events}: replay the pump's recent use",
 		"POST   /api/state/qualifyingevent    {bitmask}",
 		"GET    /api/transport",
 		"PUT    /api/transport                (also PATCH) {att_mtu}",

@@ -1,0 +1,6 @@
+{
+  "name": "basal-only",
+  "description": "Six hours of scheduled basal and nothing else: a BasalDelivery record every 5 minutes, no bolus, no IOB.",
+  "hours": 6,
+  "events": []
+}

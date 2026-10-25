@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/jwoglom/faketandem/pkg/api"
@@ -52,6 +53,7 @@ func main() {
 	var apiAddr = flag.String("api-addr", api.DefaultAddr, "address the HTTP/WebSocket API server listens on")
 	var uiDir = flag.String("ui-dir", "", "directory to serve the web UI from instead of the copy built into the binary, to edit it without a rebuild")
 	var pumpTimeZone = flag.String("pump-timezone", "", "IANA time zone whose local time the emulated pump's clock is set to at startup, e.g. 'America/New_York' (default: the host's local zone; 'UTC' disables the local-time convention). A Tandem pump holds a date and time with no zone attached and every consumer decodes its wire timestamps as local time; the offset is fixed at startup and does not follow DST. Changeable at runtime via PUT /api/clock, POST /api/state/time and ChangeTimeDateRequest.")
+	var scenario = flag.String("scenario", "", "replay hours of pump use before the first connection, so a driver pairing finds history, IOB, a last bolus and a running temp rate: a built-in preset ("+strings.Join(harness.ScenarioPresets(), ", ")+") or a scenario JSON file (see POST /api/state/scenario)")
 	var requestLogSize = flag.Int("request-log-size", reqlog.DefaultCapacity, "how many messages the integration-harness request log (GET /api/log) retains")
 
 	flag.Parse()
@@ -201,6 +203,9 @@ func main() {
 		Faults:    faultRegistry,
 	})
 	server.SetExtraRoutes(h.RegisterRoutes, h.Endpoints())
+	if *scenario != "" {
+		applyScenario(h, *scenario)
+	}
 
 	configureConnectionHandlers(ble, server, router, pumpState, requestLog, reassembler)
 
@@ -226,6 +231,21 @@ func main() {
 	for {
 		time.Sleep(time.Hour)
 	}
+}
+
+// applyScenario replays -scenario before the API serves and the transport has a
+// driver to connect.
+func applyScenario(h *harness.Harness, nameOrPath string) {
+	s, err := harness.LoadScenario(nameOrPath)
+	if err != nil {
+		log.Fatalf("-scenario: %s", err)
+	}
+	result, err := h.ApplyScenario(s)
+	if err != nil {
+		log.Fatalf("-scenario %s: %s", nameOrPath, err)
+	}
+	log.Infof("Scenario %s: %d boluses, %d temp rates, %d history records since %s; IOB %.2f U, basal %.3f U/hr",
+		result.Name, len(result.Boluses), len(result.Temps), result.Records, result.Start, result.Final.IOB, result.Final.CurrentRate)
 }
 
 // newMessageBridge says which codec and JPAKE mode the emulator runs and

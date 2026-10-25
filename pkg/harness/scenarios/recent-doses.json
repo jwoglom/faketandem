@@ -1,0 +1,15 @@
+{
+  "name": "recent-doses",
+  "description": "Six hours of use before pairing: boluses from the pump's screen and from another app (one cancelled part-way), a zero temp rate, a suspend and resume, and a 150% temp rate still running with 40 minutes left. With Control-IQ off the pump shows about 3.2 U IOB.",
+  "hours": 6,
+  "events": [
+    {"minutes_ago": 330, "type": "bolus", "units": 2.5, "source": "pump"},
+    {"minutes_ago": 200, "type": "bolus", "units": 3.0, "source": "remote"},
+    {"minutes_ago": 140, "type": "temp_basal", "percent": 0, "duration_minutes": 30},
+    {"minutes_ago": 75, "type": "bolus", "units": 1.5, "source": "pump"},
+    {"minutes_ago": 50, "type": "suspend"},
+    {"minutes_ago": 35, "type": "resume"},
+    {"minutes_ago": 30, "type": "bolus", "units": 2.0, "delivered_units": 1.2, "source": "pump"},
+    {"minutes_ago": 20, "type": "temp_basal", "percent": 150, "duration_minutes": 60}
+  ]
+}
