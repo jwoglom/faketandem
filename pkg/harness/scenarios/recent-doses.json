@@ -1,7 +1,11 @@
 {
   "name": "recent-doses",
-  "description": "Six hours of use before pairing: boluses from the pump's screen and from another app (one cancelled part-way), a zero temp rate, a suspend and resume, and a 150% temp rate still running with 40 minutes left. With Control-IQ off the pump shows about 3.2 U IOB.",
+  "description": "Six hours of use before pairing on a 0.85 U/hr profile: boluses from the pump's screen and from another app (one cancelled part-way), a zero temp rate, a suspend and resume, and a 150% temp rate still running with 40 minutes left. A BasalDelivery record every 5 minutes carries the rate in force: the profile's, a temp rate's, or 0 while suspended. With Control-IQ off the pump shows about 3.2 U IOB.",
   "hours": 6,
+  "basal_cycle": true,
+  "basal_profile": [
+    {"start": "00:00", "rate": 0.85}
+  ],
   "events": [
     {"minutes_ago": 330, "type": "bolus", "units": 2.5, "source": "pump"},
     {"minutes_ago": 200, "type": "bolus", "units": 3.0, "source": "remote"},

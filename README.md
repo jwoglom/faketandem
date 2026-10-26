@@ -102,7 +102,7 @@ Flags:
 | `-ui-dir` | the copy built into the binary | Serve the web UI from this directory instead, to edit it without a rebuild. |
 | `-pump-timezone` | the host's local zone | IANA zone the emulated pump keeps its clock in, e.g. `America/New_York`. A Tandem pump holds local time with no zone attached and every consumer decodes its wire timestamps on that assumption, so this is the zone pump-epoch seconds are encoded in. `UTC` turns the convention off. Changeable at runtime via `PUT /api/clock`. |
 | `-request-log-size` | `4096` | How many messages the harness request log (`GET /api/log`) retains. |
-| `-scenario` | | Replay hours of pump use before the first connection: a preset (`recent-doses`, `basal-only`) or a scenario JSON file. See [A pump already in use](#a-pump-already-in-use-scenarios). |
+| `-scenario` | | Replay hours of pump use before the first connection: a preset (`recent-doses`, `scheduled-basal`) or a scenario JSON file. See [A pump already in use](#a-pump-already-in-use-scenarios). |
 | `-message-codec` | `native` | How messages are parsed and encoded: `native` (the Go message types), `pumpx2` (pumpX2's cliparser) or `compare` (the Go message types, checked against cliparser on every message). |
 | `-jpake-mode` | `go` | Pairing: `go` (native EC-JPAKE) or `pumpx2` (pumpX2's `jpake-server` subprocess). |
 | `-pumpx2-jar-path`, `-pumpx2-path`, `-pumpx2-mode`, `-java-cmd`, `-gradle-cmd` | | Where pumpX2 is, for `-message-codec pumpx2`/`compare` and `-jpake-mode pumpx2` only. |
@@ -466,7 +466,7 @@ to what it was and carries on from there.
 curl -X POST http://127.0.0.1:8080/api/state/scenario -d '{"preset":"recent-doses"}'
 curl -X POST http://127.0.0.1:8080/api/state/scenario -d '{
   "hours": 6,
-  "state": {"basal_rate": 0.85},
+  "basal_profile": [{"start": "00:00", "rate": 0.8}, {"start": "07:00", "rate": 1.1}],
   "events": [
     {"minutes_ago": 200, "type": "bolus", "units": 3.0, "source": "remote"},
     {"minutes_ago": 75,  "type": "bolus", "units": 1.5},
@@ -477,8 +477,8 @@ curl -X POST http://127.0.0.1:8080/api/state/scenario -d '{
 
 | Preset | What the pump holds |
 |---|---|
-| `recent-doses` | Six hours: boluses from the pump's screen and from an app (one stopped at 1.2 of 2 U, the last bolus), a 0% temp rate, a suspend and resume, and a 150% temp rate with 40 minutes left. About 3.2 U IOB with Control-IQ off. |
-| `basal-only` | Six hours of scheduled basal: a 279 every 5 minutes, no bolus, no IOB. |
+| `recent-doses` | Six hours on a 0.85 U/hr profile: boluses from the pump's screen and from an app (one stopped at 1.2 of 2 U, the last bolus), a 0% temp rate, a suspend and resume, and a 150% temp rate with 40 minutes left. A 279 every 5 minutes at the rate in force: 0.85, the temp rates' 0 and 1.275, and 0 while suspended. About 3.2 U IOB with Control-IQ off. |
+| `scheduled-basal` | Six hours of the profile's scheduled basal and nothing else: a 279 every 5 minutes at 0.85 U/hr, no bolus, no IOB. |
 
 - `hours` (default 6) is how far back the replay starts, at least the oldest
   event's age. Event times are `minutes_ago`, before the end of the replay.
@@ -488,20 +488,27 @@ curl -X POST http://127.0.0.1:8080/api/state/scenario -d '{
   `rate` in U/hr, `duration_minutes`; `source` `remote` also writes the
   `SetTempRateResponse` record), `temp_basal_stop`, `suspend` (a user suspend)
   and `resume`. Overlapping boluses and a bolus while suspended are refused.
-- `state` is staged at the start of the window, as `PUT /api/state` stages it:
-  the profile and rates the replay runs on. Reservoir and battery are what the
-  replay leaves of them.
+- `basal_profile` is the active profile's basal schedule, segments from
+  `00:00` on the pump's clock with their `rate` in U/hr. Each 279 carries the
+  rate in force at its cycle: the segment's, a temp rate's percent of it, or 0
+  while suspended. It stays the pump's profile after the replay. Without it the
+  pump's active profile stands (one segment at 0.85 U/hr on a fresh emulator).
+- `state` is staged at the start of the window, as `PUT /api/state` stages it.
+  Reservoir and battery are what the replay leaves of them. With
+  `basal_profile`, leave out `state.basal_rate` and `state.idp_profiles`.
 - `basal_cycle` (default true) turns the [basal cycle](#basal-cycle) on from
-  the window's start, and it stays on.
+  the window's start, and it stays on. Off, basal is delivered continuously and
+  no 279 is written.
 - A scenario replaces the pump's past: the history log restarts at sequence 1,
   and the doses IOB counted and the last bolus are forgotten. It is refused
   (`409`) while a driver is connected, a bolus is in progress, a temp rate is
   running or delivery is suspended. No qualifying events are raised.
 
-The response carries the scenario's `boluses`, `temp_rates`, the window's
-`start` and `end`, how many `records` it wrote, the `final` readings a driver
-will see (IOB, profile and current rate, last bolus id, reservoir), and the
-state snapshot.
+The response carries the scenario's `boluses`, `temp_rates`, every 279 it
+wrote in `basal_deliveries` (sequence, time, `source`: profile, temp, suspended
+or control_iq, and the rate), the window's `start` and `end`, how many
+`records` it wrote, the `final` readings a driver will see (IOB, profile and
+current rate, last bolus id, reservoir), and the state snapshot.
 
 ### History log
 

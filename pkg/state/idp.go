@@ -119,6 +119,15 @@ func (ps *PumpState) ActiveIDPSegmentIndex() int {
 	return segmentInForce(ps.idpProfiles[0].Segments, minutes)
 }
 
+// PutActiveProfileInForce puts the active profile's rate at the pump's time of day in force, as
+// a pump does the moment its active profile is written; SetIDPProfiles alone leaves the rate as it was.
+func (ps *PumpState) PutActiveProfileInForce() {
+	minutes := ps.pumpMinuteOfDay()
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+	ps.followActiveProfileUnlocked(minutes)
+}
+
 func (ps *PumpState) pumpMinuteOfDay() int {
 	now := ps.PumpLocalNow()
 	return now.Hour()*60 + now.Minute()

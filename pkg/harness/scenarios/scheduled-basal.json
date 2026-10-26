@@ -1,0 +1,10 @@
+{
+  "name": "scheduled-basal",
+  "description": "Six hours of the profile's scheduled basal and nothing else: a BasalDelivery record every 5 minutes at 0.85 U/hr, no bolus, no IOB.",
+  "hours": 6,
+  "basal_cycle": true,
+  "basal_profile": [
+    {"start": "00:00", "rate": 0.85}
+  ],
+  "events": []
+}

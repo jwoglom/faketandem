@@ -41,6 +41,9 @@ const defaultScenarioHours = 6
 // simulator ticks.
 const scenarioStep = time.Minute
 
+// maxScenarioBasalRate is the most a Tandem profile segment delivers, in U/hr.
+const maxScenarioBasalRate = 15.0
+
 // Scenario event types.
 const (
 	EventBolus         = "bolus"
@@ -66,12 +69,25 @@ type Scenario struct {
 	// after it, so the log carries a BasalDelivery record every 5 minutes, as a
 	// pump's does. Default true.
 	BasalCycle *bool `json:"basal_cycle,omitempty"`
+	// BasalProfile is the active profile's basal schedule from the window's
+	// start on, and stays the pump's profile after it. Each BasalDelivery record
+	// carries the rate in force: this schedule's, a temp rate's percent of it,
+	// or 0 while suspended. Without it the pump's active profile stands.
+	BasalProfile []ScenarioBasalSegment `json:"basal_profile,omitempty"`
 	// State is staged at the start of the window, as PUT /api/state stages it:
 	// the profile and rates the replay runs on. Reservoir and battery are what
 	// the replay then leaves of them.
 	State stateUpdate `json:"state"`
 	// Events happen in order of age, oldest first.
 	Events []ScenarioEvent `json:"events"`
+}
+
+// ScenarioBasalSegment is one segment of a scenario's basal schedule.
+type ScenarioBasalSegment struct {
+	// Start is when the segment starts each day on the pump's clock, "HH:MM".
+	Start string `json:"start"`
+	// Rate is in U/hr.
+	Rate float64 `json:"rate"`
 }
 
 // ScenarioEvent is one thing the pump did during the window.
@@ -111,7 +127,21 @@ type ScenarioResult struct {
 	Records int              `json:"records"`
 	Boluses []ScenarioBolus  `json:"boluses"`
 	Temps   []ScenarioTemp   `json:"temp_rates"`
-	Final   ScenarioReadings `json:"final"`
+	// BasalDeliveries are the BasalDelivery records the replay wrote, one per
+	// 5-minute cycle.
+	BasalDeliveries []ScenarioBasalDelivery `json:"basal_deliveries"`
+	Final           ScenarioReadings        `json:"final"`
+}
+
+// ScenarioBasalDelivery is one BasalDelivery record: the rate the pump
+// delivered for the 5 minutes from Time.
+type ScenarioBasalDelivery struct {
+	Sequence uint32 `json:"sequence"`
+	Time     string `json:"time"`
+	// Source is what set the rate: profile, temp, suspended or control_iq.
+	Source      string  `json:"source"`
+	Rate        float64 `json:"rate"`
+	ProfileRate float64 `json:"profile_rate"`
 }
 
 // ScenarioBolus is one bolus the replay delivered.
@@ -181,35 +211,76 @@ func LoadScenario(nameOrPath string) (Scenario, error) {
 var errScenarioConflict = errors.New("scenario conflict")
 
 func (s Scenario) validate() error {
+	if _, err := s.basalSegments(state.IDPSegment{}); err != nil {
+		return err
+	}
+	if len(s.BasalProfile) > 0 && (s.State.BasalRate != nil || s.State.IDPProfiles != nil) {
+		return errors.New("basal_profile sets the profile; leave state.basal_rate and state.idp_profiles out")
+	}
 	for i, e := range s.Events {
-		if e.MinutesAgo < 0 {
-			return fmt.Errorf("event %d: minutes_ago must not be negative", i)
-		}
-		switch e.Type {
-		case EventBolus:
-			if e.Units <= 0 {
-				return fmt.Errorf("event %d: a bolus needs positive units", i)
-			}
-			if e.DeliveredUnits != nil && (*e.DeliveredUnits < 0 || *e.DeliveredUnits > e.Units) {
-				return fmt.Errorf("event %d: delivered_units must be between 0 and units", i)
-			}
-			if _, err := resolveBolusSource(bolusStartBody{Source: e.Source, SourceID: e.SourceID}); err != nil {
-				return fmt.Errorf("event %d: %w", i, err)
-			}
-		case EventTempBasal:
-			if (e.Percent == nil) == (e.Rate <= 0) {
-				return fmt.Errorf("event %d: a temp_basal needs one of percent and rate", i)
-			}
-			if e.DurationMinutes <= 0 {
-				return fmt.Errorf("event %d: a temp_basal needs a positive duration_minutes", i)
-			}
-		case EventTempBasalStop, EventSuspend, EventResume:
-		default:
-			return fmt.Errorf("event %d: unknown type %q (expected %s, %s, %s, %s or %s)", i, e.Type,
-				EventBolus, EventTempBasal, EventTempBasalStop, EventSuspend, EventResume)
+		if err := e.validate(); err != nil {
+			return fmt.Errorf("event %d: %w", i, err)
 		}
 	}
 	return nil
+}
+
+func (e ScenarioEvent) validate() error {
+	if e.MinutesAgo < 0 {
+		return errors.New("minutes_ago must not be negative")
+	}
+	switch e.Type {
+	case EventBolus:
+		if e.Units <= 0 {
+			return errors.New("a bolus needs positive units")
+		}
+		if e.DeliveredUnits != nil && (*e.DeliveredUnits < 0 || *e.DeliveredUnits > e.Units) {
+			return errors.New("delivered_units must be between 0 and units")
+		}
+		if _, err := resolveBolusSource(bolusStartBody{Source: e.Source, SourceID: e.SourceID}); err != nil {
+			return err
+		}
+	case EventTempBasal:
+		if (e.Percent == nil) == (e.Rate <= 0) {
+			return errors.New("a temp_basal needs one of percent and rate")
+		}
+		if e.DurationMinutes <= 0 {
+			return errors.New("a temp_basal needs a positive duration_minutes")
+		}
+	case EventTempBasalStop, EventSuspend, EventResume:
+	default:
+		return fmt.Errorf("unknown type %q (expected %s, %s, %s, %s or %s)", e.Type,
+			EventBolus, EventTempBasal, EventTempBasalStop, EventSuspend, EventResume)
+	}
+	return nil
+}
+
+// basalSegments is BasalProfile as the active profile's segments, each with
+// template's carb ratio, target and correction factor.
+func (s Scenario) basalSegments(template state.IDPSegment) ([]state.IDPSegment, error) {
+	if len(s.BasalProfile) > state.MaxIDPSegments {
+		return nil, fmt.Errorf("basal_profile has %d segments; a profile holds at most %d", len(s.BasalProfile), state.MaxIDPSegments)
+	}
+	segments := make([]state.IDPSegment, 0, len(s.BasalProfile))
+	for i, b := range s.BasalProfile {
+		start, err := time.Parse("15:04", b.Start)
+		if err != nil {
+			return nil, fmt.Errorf("basal_profile segment %d: start %q is not HH:MM", i, b.Start)
+		}
+		minutes := start.Hour()*60 + start.Minute()
+		switch {
+		case i == 0 && minutes != 0:
+			return nil, errors.New("basal_profile starts at 00:00")
+		case i > 0 && minutes <= segments[i-1].StartTime:
+			return nil, fmt.Errorf("basal_profile segment %d: starts are in order of time of day", i)
+		case b.Rate < 0 || b.Rate > maxScenarioBasalRate:
+			return nil, fmt.Errorf("basal_profile segment %d: rate must be between 0 and %g U/hr", i, maxScenarioBasalRate)
+		}
+		segment := template
+		segment.StartTime, segment.BasalRate = minutes, int(math.Round(b.Rate*1000))
+		segments = append(segments, segment)
+	}
+	return segments, nil
 }
 
 // window is how far back the replay starts.
@@ -274,8 +345,10 @@ func (h *Harness) ApplyScenario(s Scenario) (ScenarioResult, error) {
 		return ScenarioResult{}, err
 	}
 	result.Records = ps.GetHistoryLogCount()
+	result.BasalDeliveries = basalDeliveries(ps)
 	result.Final = h.scenarioReadings()
-	log.Infof("harness: scenario %q wrote %d history records; IOB %.2f U", s.Name, result.Records, result.Final.IOB)
+	log.Infof("harness: scenario %q wrote %d history records, %d of them BasalDelivery; IOB %.2f U",
+		s.Name, result.Records, len(result.BasalDeliveries), result.Final.IOB)
 	return result, nil
 }
 
@@ -302,6 +375,16 @@ func (h *Harness) replayScenario(s Scenario, events []ScenarioEvent) (ScenarioRe
 	staged := s.State
 	staged.BasalCycleEnabled = nil
 	h.applyStateUpdate(staged)
+	if len(s.BasalProfile) > 0 {
+		profiles := ps.IDPProfiles()
+		if len(profiles) == 0 || len(profiles[0].Segments) == 0 {
+			profiles = state.DefaultIDPProfiles()
+		}
+		// Validated before the replay began.
+		profiles[0].Segments, _ = s.basalSegments(profiles[0].Segments[0])
+		ps.SetIDPProfiles(profiles)
+		ps.PutActiveProfileInForce()
+	}
 	if s.BasalCycle == nil || *s.BasalCycle {
 		ps.SetBasalCycleEnabled(true)
 	}
@@ -327,6 +410,42 @@ func (h *Harness) rebaseSimulator() {
 	if h.simulator != nil {
 		h.simulator.Rebase()
 	}
+}
+
+// basalDeliveries lists the log's BasalDelivery records: after a replay, the
+// log holds only the replay's.
+func basalDeliveries(ps *state.PumpState) []ScenarioBasalDelivery {
+	sources := map[int]string{
+		state.BasalSourceSuspended: "suspended",
+		state.BasalSourceProfile:   "profile",
+		state.BasalSourceTemp:      "temp",
+		state.BasalSourceControlIQ: "control_iq",
+	}
+	deliveries := []ScenarioBasalDelivery{}
+	first, last := ps.GetHistoryLogSequenceRange()
+	for _, e := range ps.GetHistoryLogEntries(first, last) {
+		if e.TypeID != state.HistoryBasalDelivery {
+			continue
+		}
+		deliveries = append(deliveries, ScenarioBasalDelivery{
+			Sequence:    e.Sequence,
+			Time:        formatTime(e.Timestamp),
+			Source:      sources[milliField(e.Data, "commandedRateSource")],
+			Rate:        float64(milliField(e.Data, "commandedRate")) / 1000,
+			ProfileRate: float64(milliField(e.Data, "profileBasalRate")) / 1000,
+		})
+	}
+	return deliveries
+}
+
+func milliField(data map[string]interface{}, key string) int {
+	switch v := data[key].(type) {
+	case int:
+		return v
+	case float64:
+		return int(math.Round(v))
+	}
+	return 0
 }
 
 func (h *Harness) scenarioReadings() ScenarioReadings {

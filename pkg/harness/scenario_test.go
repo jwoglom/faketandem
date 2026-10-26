@@ -1,8 +1,10 @@
 package harness
 
 import (
+	"fmt"
 	"math"
 	"net/http"
+	"reflect"
 	"testing"
 	"time"
 
@@ -55,7 +57,8 @@ func TestScenarioPresetReplaysHoursOfUseIntoHistoryIOBAndLastBolus(t *testing.T)
 func TestScenarioWritesTheHistoryInTimeOrderWithABasalDeliveryEveryFiveMinutes(t *testing.T) {
 	h, ps, _ := scenarioHarness(t)
 
-	if _, err := h.ApplyScenario(Scenario{Preset: "recent-doses"}); err != nil {
+	result, err := h.ApplyScenario(Scenario{Preset: "recent-doses"})
+	if err != nil {
 		t.Fatalf("ApplyScenario: %v", err)
 	}
 
@@ -81,6 +84,78 @@ func TestScenarioWritesTheHistoryInTimeOrderWithABasalDeliveryEveryFiveMinutes(t
 	if final := basal[len(basal)-1].Data; final["commandedRateSource"] != state.BasalSourceTemp {
 		t.Errorf("the latest BasalDelivery runs %v; want the temp rate", final)
 	}
+
+	if len(result.BasalDeliveries) != len(basal) {
+		t.Fatalf("the result lists %d BasalDelivery records; the log has %d", len(result.BasalDeliveries), len(basal))
+	}
+	rates := map[string]map[float64]bool{}
+	for i, d := range result.BasalDeliveries {
+		if d.Sequence != basal[i].Sequence {
+			t.Fatalf("listed BasalDelivery %d is record %d; want %d", i, d.Sequence, basal[i].Sequence)
+		}
+		if rates[d.Source] == nil {
+			rates[d.Source] = map[float64]bool{}
+		}
+		rates[d.Source][d.Rate] = true
+	}
+	want := map[string]map[float64]bool{"profile": {0.85: true}, "temp": {0: true, 1.275: true}, "suspended": {0: true}}
+	if !reflect.DeepEqual(rates, want) {
+		t.Errorf("listed BasalDelivery rates by source = %v; want %v", rates, want)
+	}
+}
+
+func TestScenarioBasalProfileSetsTheRateOfEachBasalDelivery(t *testing.T) {
+	h, ps, _ := scenarioHarness(t)
+	minuteOfDay := func(at time.Time) int { return int(ps.PumpTimeFor(at)%86400) / 60 }
+	start := minuteOfDay(testInstant.Add(-6 * time.Hour))
+	boundary := (start + 3*60) / 30 * 30
+	if boundary >= 24*60 || minuteOfDay(testInstant) < boundary {
+		t.Fatalf("the window from minute %d crosses midnight; the test needs one that does not", start)
+	}
+
+	result, err := h.ApplyScenario(Scenario{Hours: 6, BasalProfile: []ScenarioBasalSegment{
+		{Start: "00:00", Rate: 0.6},
+		{Start: fmt.Sprintf("%02d:%02d", boundary/60, boundary%60), Rate: 1.2},
+	}})
+	if err != nil {
+		t.Fatalf("ApplyScenario: %v", err)
+	}
+
+	counts := map[float64]int{}
+	for _, d := range result.BasalDeliveries {
+		at, _ := time.Parse(time.RFC3339Nano, d.Time)
+		want := 0.6
+		if minuteOfDay(at) >= boundary {
+			want = 1.2
+		}
+		if d.Source != "profile" || d.Rate != want || d.ProfileRate != want {
+			t.Errorf("BasalDelivery %d at minute %d = %+v; want the profile's %.1f U/hr", d.Sequence, minuteOfDay(at), d, want)
+		}
+		counts[d.Rate]++
+	}
+	if counts[0.6] == 0 || counts[1.2] == 0 {
+		t.Errorf("BasalDelivery records by rate = %v; want both segments' rates", counts)
+	}
+	if got := result.Final.ProfileRate; got != 1.2 {
+		t.Errorf("the profile rate after the replay is %.2f; want the later segment's 1.2", got)
+	}
+}
+
+func TestScenarioEndpointRejectsABasalProfileItCannotStage(t *testing.T) {
+	for name, body := range map[string]string{
+		"not from midnight":  `{"basal_profile":[{"start":"01:00","rate":0.8}]}`,
+		"out of order":       `{"basal_profile":[{"start":"00:00","rate":0.8},{"start":"08:00","rate":1},{"start":"06:00","rate":1}]}`,
+		"not a time":         `{"basal_profile":[{"start":"midnight","rate":0.8}]}`,
+		"with a basal_rate":  `{"basal_profile":[{"start":"00:00","rate":0.8}],"state":{"basal_rate":1}}`,
+		"a rate over 15U/hr": `{"basal_profile":[{"start":"00:00","rate":16}]}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, mux := scenarioHarness(t)
+			if status, resp := do(t, mux, http.MethodPost, "/api/state/scenario", body); status != http.StatusBadRequest {
+				t.Errorf("status %d (%v); want 400", status, resp)
+			}
+		})
+	}
 }
 
 func TestScenarioReplacesThePastItReplays(t *testing.T) {
@@ -88,7 +163,7 @@ func TestScenarioReplacesThePastItReplays(t *testing.T) {
 	ps.SetIOB(5)
 	ps.AddHistoryLogEntryAt(state.HistoryBolusCompleted, "BolusCompleted", testInstant, map[string]interface{}{"bolusId": 99})
 
-	if _, err := h.ApplyScenario(Scenario{Preset: "basal-only"}); err != nil {
+	if _, err := h.ApplyScenario(Scenario{Preset: "scheduled-basal"}); err != nil {
 		t.Fatalf("ApplyScenario: %v", err)
 	}
 
