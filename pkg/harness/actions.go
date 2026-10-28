@@ -66,6 +66,7 @@ func (h *Harness) stateActions() map[string]http.HandlerFunc {
 		"history/append":  h.actionHistoryAppend,
 		"history/bulk":    h.actionHistoryBulk,
 		"history/erase":   h.actionHistoryErase,
+		"scenario":        h.actionScenario,
 		"qualifyingevent": h.actionQualifyingEvent,
 		"time":            h.actionSetPumpTime,
 	}
