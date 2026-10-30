@@ -1,0 +1,18 @@
+{
+  "name": "pump-profile-differs",
+  "description": "Six hours on a pump profile that is not the app's: six segments from 0.6 to 1.1 U/hr, each at most 4 hours long, so every window crosses a segment change. The harness seeds the app with a flat 0.85 U/hr schedule, so the driver finds the pump's basal rate off the app's, writes the app's schedule over the pump's, and a setup history load finds basal the app did not count. A 2.0 U pump bolus 150 minutes ago and a 130% temp rate for 30 minutes from 70 minutes ago. About 1.0 U IOB with Control-IQ off.",
+  "hours": 6,
+  "basal_cycle": true,
+  "basal_profile": [
+    {"start": "00:00", "rate": 0.6},
+    {"start": "04:00", "rate": 0.75},
+    {"start": "08:00", "rate": 1.1},
+    {"start": "12:00", "rate": 0.95},
+    {"start": "16:00", "rate": 1.0},
+    {"start": "20:00", "rate": 0.7}
+  ],
+  "events": [
+    {"minutes_ago": 150, "type": "bolus", "units": 2.0, "source": "pump"},
+    {"minutes_ago": 70, "type": "temp_basal", "percent": 130, "duration_minutes": 30}
+  ]
+}

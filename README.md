@@ -102,7 +102,7 @@ Flags:
 | `-ui-dir` | the copy built into the binary | Serve the web UI from this directory instead, to edit it without a rebuild. |
 | `-pump-timezone` | the host's local zone | IANA zone the emulated pump keeps its clock in, e.g. `America/New_York`. A Tandem pump holds local time with no zone attached and every consumer decodes its wire timestamps on that assumption, so this is the zone pump-epoch seconds are encoded in. `UTC` turns the convention off. Changeable at runtime via `PUT /api/clock`. |
 | `-request-log-size` | `4096` | How many messages the harness request log (`GET /api/log`) retains. |
-| `-scenario` | | Replay hours of pump use before the first connection: a preset (`recent-doses`, `scheduled-basal`) or a scenario JSON file. See [A pump already in use](#a-pump-already-in-use-scenarios). |
+| `-scenario` | | Replay hours of pump use before the first connection: a preset (see the table in [A pump already in use](#a-pump-already-in-use-scenarios)) or a scenario JSON file. See [A pump already in use](#a-pump-already-in-use-scenarios). |
 | `-message-codec` | `native` | How messages are parsed and encoded: `native` (the Go message types), `pumpx2` (pumpX2's cliparser) or `compare` (the Go message types, checked against cliparser on every message). |
 | `-jpake-mode` | `go` | Pairing: `go` (native EC-JPAKE) or `pumpx2` (pumpX2's `jpake-server` subprocess). |
 | `-pumpx2-jar-path`, `-pumpx2-path`, `-pumpx2-mode`, `-java-cmd`, `-gradle-cmd` | | Where pumpX2 is, for `-message-codec pumpx2`/`compare` and `-jpake-mode pumpx2` only. |
@@ -479,6 +479,13 @@ curl -X POST http://127.0.0.1:8080/api/state/scenario -d '{
 |---|---|
 | `recent-doses` | Six hours on a 0.85 U/hr profile: boluses from the pump's screen and from an app (one stopped at 1.2 of 2 U, the last bolus), a 0% temp rate, a suspend and resume, and a 150% temp rate with 40 minutes left. A 279 every 5 minutes at the rate in force: 0.85, the temp rates' 0 and 1.275, and 0 while suspended. About 3.2 U IOB with Control-IQ off. |
 | `scheduled-basal` | Six hours of the profile's scheduled basal and nothing else: a 279 every 5 minutes at 0.85 U/hr, no bolus, no IOB. |
+| `pump-boluses` | Six hours on 0.85 U/hr with boluses from the pump's screen only (4.5, 1.0, 5.0 and 0.8 U, the last 15 minutes ago), no temp rate or suspend. About 4.9 U IOB, none of it from an app. |
+| `app-doses` | Six hours on 0.85 U/hr driven by another app over Bluetooth: three app boluses and four app temp rates, each with its `SetTempRateResponse` record, one stopped early and a 50% one still running with 35 minutes left. About 1.5 U IOB. |
+| `suspended-now` | Six hours on 0.85 U/hr, two pump boluses, then a suspend 45 minutes ago that is never resumed: the pump reads suspended at the first connection. About 2.0 U IOB. |
+| `stopped-boluses` | Six hours on 0.85 U/hr with boluses stopped part-way (3.0 U at 1.0, 2.5 U at 1.8) and a last bolus stopped before it delivered anything, so `LastBolusStatus` reads 0 U. About 2.7 U IOB. |
+| `control-iq` | Six hours with Control-IQ on throughout and still on: its rate moves between 0 and 1.4 U/hr, two automatic boluses (source 7) and one from the pump's screen. Every 279 is Control-IQ's. About 3.1 U IOB. |
+| `pump-profile-differs` | Six hours on a six-segment profile (0.6 to 1.1 U/hr, every segment at most 4 hours, so any window crosses a change), a pump bolus and a 130% temp rate: a pump whose profile is not the app's. About 1.0 U IOB. |
+| `day-of-use` | Twenty-four hours on 0.85 U/hr: boluses from the pump and an app (one stopped short), 0%, 120% and 70% temp rates from an app, a 25-minute suspend. About 290 279s, four times the 6-hour window a setup history load reads. About 3.7 U IOB. |
 
 - `hours` (default 6) is how far back the replay starts, at least the oldest
   event's age. Event times are `minutes_ago`, before the end of the replay.
@@ -486,8 +493,10 @@ curl -X POST http://127.0.0.1:8080/api/state/scenario -d '{
   `pump`, the default, or `remote`, or a `source_id`; `bolus_id`;
   `duration_seconds`, else the pump's bolus rate), `temp_basal` (`percent` or
   `rate` in U/hr, `duration_minutes`; `source` `remote` also writes the
-  `SetTempRateResponse` record), `temp_basal_stop`, `suspend` (a user suspend)
-  and `resume`. Overlapping boluses and a bolus while suspended are refused.
+  `SetTempRateResponse` record), `temp_basal_stop`, `suspend` (a user suspend),
+  `resume`, and `control_iq_rate` (`rate` in U/hr Control-IQ runs at from its
+  next cycle, negative for the profile's; needs `state.closed_loop_enabled`).
+  Overlapping boluses and a bolus while suspended are refused.
 - `basal_profile` is the active profile's basal schedule, segments from
   `00:00` on the pump's clock with their `rate` in U/hr. Each 279 carries the
   rate in force at its cycle: the segment's, a temp rate's percent of it, or 0

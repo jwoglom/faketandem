@@ -51,6 +51,7 @@ const (
 	EventTempBasalStop = "temp_basal_stop"
 	EventSuspend       = "suspend"
 	EventResume        = "resume"
+	EventControlIQRate = "control_iq_rate"
 )
 
 // Scenario is the body of POST /api/state/scenario and the file -scenario
@@ -94,7 +95,8 @@ type ScenarioBasalSegment struct {
 type ScenarioEvent struct {
 	// MinutesAgo is how long before the end of the replay (now) it happened.
 	MinutesAgo float64 `json:"minutes_ago"`
-	// Type is bolus, temp_basal, temp_basal_stop, suspend or resume.
+	// Type is bolus, temp_basal, temp_basal_stop, suspend, resume or
+	// control_iq_rate.
 	Type string `json:"type"`
 
 	// Units is a bolus's requested volume, and DeliveredUnits what it put in
@@ -112,7 +114,9 @@ type ScenarioEvent struct {
 	// bolus rate.
 	DurationSeconds float64 `json:"duration_seconds,omitempty"`
 
-	// Percent or Rate (U/hr) and DurationMinutes describe a temp rate.
+	// Percent or Rate (U/hr) and DurationMinutes describe a temp rate. Rate is
+	// also the rate Control-IQ runs at from control_iq_rate's next cycle;
+	// negative runs the profile's.
 	Percent         *int    `json:"percent,omitempty"`
 	Rate            float64 `json:"rate,omitempty"`
 	DurationMinutes int     `json:"duration_minutes,omitempty"`
@@ -247,10 +251,14 @@ func (e ScenarioEvent) validate() error {
 		if e.DurationMinutes <= 0 {
 			return errors.New("a temp_basal needs a positive duration_minutes")
 		}
+	case EventControlIQRate:
+		if e.Rate > maxScenarioBasalRate {
+			return fmt.Errorf("a control_iq_rate rate must be at most %g U/hr", maxScenarioBasalRate)
+		}
 	case EventTempBasalStop, EventSuspend, EventResume:
 	default:
-		return fmt.Errorf("unknown type %q (expected %s, %s, %s, %s or %s)", e.Type,
-			EventBolus, EventTempBasal, EventTempBasalStop, EventSuspend, EventResume)
+		return fmt.Errorf("unknown type %q (expected %s, %s, %s, %s, %s or %s)", e.Type,
+			EventBolus, EventTempBasal, EventTempBasalStop, EventSuspend, EventResume, EventControlIQRate)
 	}
 	return nil
 }
@@ -527,6 +535,11 @@ func (r *replay) apply(e ScenarioEvent) error {
 		if !r.ps.ResumeDelivery() {
 			return fmt.Errorf("resume %.1f minutes ago: delivery is not suspended", e.MinutesAgo)
 		}
+	case EventControlIQRate:
+		if !r.ps.IsClosedLoopEnabled() {
+			return fmt.Errorf("control_iq_rate %.1f minutes ago: Control-IQ is off (state.closed_loop_enabled)", e.MinutesAgo)
+		}
+		r.ps.SetControlIQAlgorithmRate(e.Rate)
 	}
 	return nil
 }

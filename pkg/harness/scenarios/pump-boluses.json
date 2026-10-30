@@ -1,0 +1,15 @@
+{
+  "name": "pump-boluses",
+  "description": "Six hours on a 0.85 U/hr profile with boluses from the pump's own screen only, as on a pump used without an app: 4.5 U 320 minutes ago, a 1.0 U correction 180 minutes ago, 5.0 U 75 minutes ago and a 0.8 U correction 15 minutes ago, the last bolus. No temp rate or suspend. With Control-IQ off the pump shows about 4.9 U IOB, none of it from an app.",
+  "hours": 6,
+  "basal_cycle": true,
+  "basal_profile": [
+    {"start": "00:00", "rate": 0.85}
+  ],
+  "events": [
+    {"minutes_ago": 320, "type": "bolus", "units": 4.5, "source": "pump"},
+    {"minutes_ago": 180, "type": "bolus", "units": 1.0, "source": "pump"},
+    {"minutes_ago": 75, "type": "bolus", "units": 5.0, "source": "pump"},
+    {"minutes_ago": 15, "type": "bolus", "units": 0.8, "source": "pump"}
+  ]
+}

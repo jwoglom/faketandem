@@ -1,0 +1,14 @@
+{
+  "name": "suspended-now",
+  "description": "Six hours on a 0.85 U/hr profile ending suspended: a 3.0 U pump bolus 200 minutes ago, a 1.5 U pump bolus 110 minutes ago, then delivery suspended from the pump's screen 45 minutes ago and not resumed, so the pump reads suspended when the app first connects and every BasalDelivery record since the suspend is at 0. With Control-IQ off the pump shows about 2.0 U IOB.",
+  "hours": 6,
+  "basal_cycle": true,
+  "basal_profile": [
+    {"start": "00:00", "rate": 0.85}
+  ],
+  "events": [
+    {"minutes_ago": 200, "type": "bolus", "units": 3.0, "source": "pump"},
+    {"minutes_ago": 110, "type": "bolus", "units": 1.5, "source": "pump"},
+    {"minutes_ago": 45, "type": "suspend"}
+  ]
+}

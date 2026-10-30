@@ -1,0 +1,15 @@
+{
+  "name": "stopped-boluses",
+  "description": "Six hours on a 0.85 U/hr profile with boluses stopped part-way: 4.0 U delivered in full 240 minutes ago, 3.0 U stopped at 1.0 U 150 minutes ago (from an app), 2.5 U stopped at 1.8 U 60 minutes ago, and 2.0 U stopped 10 minutes ago before it delivered anything, the last bolus, so LastBolusStatus reads 0 U delivered. With Control-IQ off the pump shows about 2.7 U IOB.",
+  "hours": 6,
+  "basal_cycle": true,
+  "basal_profile": [
+    {"start": "00:00", "rate": 0.85}
+  ],
+  "events": [
+    {"minutes_ago": 240, "type": "bolus", "units": 4.0, "source": "pump"},
+    {"minutes_ago": 150, "type": "bolus", "units": 3.0, "delivered_units": 1.0, "source": "remote"},
+    {"minutes_ago": 60, "type": "bolus", "units": 2.5, "delivered_units": 1.8, "source": "pump"},
+    {"minutes_ago": 10, "type": "bolus", "units": 2.0, "delivered_units": 0, "source": "pump"}
+  ]
+}

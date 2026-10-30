@@ -5,6 +5,7 @@ import (
 	"math"
 	"net/http"
 	"reflect"
+	"sort"
 	"testing"
 	"time"
 
@@ -220,5 +221,87 @@ func TestScenarioEndpointReportsWhatTheDriverWillRead(t *testing.T) {
 	bolus := scenario["boluses"].([]interface{})[0].(map[string]interface{})
 	if bolus["source_id"].(float64) != state.BolusSourceBluetoothRemote {
 		t.Errorf("bolus %v; want source 8 (remote)", bolus)
+	}
+}
+
+// presetReadings is what a preset leaves for a driver to read.
+type presetReadings struct {
+	iob, currentRate float64
+	temp, suspended  bool
+	// lastDelivered is the last bolus's volume, negative for none.
+	lastDelivered float64
+	// basalSources are the sources of its BasalDelivery records.
+	basalSources []string
+	basal        int
+}
+
+func TestEveryScenarioPresetReplaysToTheReadingsItDescribes(t *testing.T) {
+	want := map[string]presetReadings{
+		"app-doses":            {1.47, 0.425, true, false, 0.6, []string{"profile", "temp"}, 73},
+		"stopped-boluses":      {2.74, 0.85, false, false, 0, []string{"profile"}, 73},
+		"control-iq":           {3.09, 0.85, false, false, 0.4, []string{"control_iq"}, 73},
+		"day-of-use":           {3.67, 0.85, false, false, 2, []string{"profile", "suspended", "temp"}, 290},
+		"pump-boluses":         {4.91, 0.85, false, false, 0.8, []string{"profile"}, 73},
+		"pump-profile-differs": {1, 0.95, false, false, 2, []string{"profile", "temp"}, 73},
+		"recent-doses":         {3.205, 1.275, true, false, 1.2, []string{"profile", "suspended", "temp"}, 74},
+		"scheduled-basal":      {0, 0.85, false, false, -1, []string{"profile"}, 73},
+		"suspended-now":        {1.95, 0, false, true, 1.5, []string{"profile", "suspended"}, 73},
+	}
+	for _, name := range ScenarioPresets() {
+		t.Run(name, func(t *testing.T) {
+			w, ok := want[name]
+			if !ok {
+				t.Fatalf("no expected readings for preset %q", name)
+			}
+			h, ps, _ := scenarioHarness(t)
+			result, err := h.ApplyScenario(Scenario{Preset: name})
+			if err != nil {
+				t.Fatalf("ApplyScenario: %v", err)
+			}
+			if got := ps.Now(); !got.Equal(testInstant) {
+				t.Errorf("the clock is at %s after the replay; want %s", got, testInstant)
+			}
+			checkPresetReadings(t, ps, result, w)
+		})
+	}
+}
+
+func checkPresetReadings(t *testing.T, ps *state.PumpState, result ScenarioResult, w presetReadings) {
+	t.Helper()
+	f := result.Final
+	if math.Abs(f.IOB-w.iob) > 0.01 || math.Abs(f.CurrentRate-w.currentRate) > 0.001 ||
+		f.TempActive != w.temp || f.Suspended != w.suspended {
+		t.Errorf("final readings %+v; want IOB %.2f, current rate %.3f, temp %v, suspended %v",
+			f, w.iob, w.currentRate, w.temp, w.suspended)
+	}
+	last, ok := ps.GetLastBolus()
+	switch {
+	case w.lastDelivered < 0 && ok:
+		t.Errorf("last bolus %+v; want none", last)
+	case w.lastDelivered >= 0 && (!ok || math.Abs(last.DeliveredUnits-w.lastDelivered) > 0.001):
+		t.Errorf("last bolus %+v (valid %v); want %.2f U delivered", last, ok, w.lastDelivered)
+	}
+
+	sources := map[string]bool{}
+	for _, d := range result.BasalDeliveries {
+		sources[d.Source] = true
+	}
+	got := make([]string, 0, len(sources))
+	for s := range sources {
+		got = append(got, s)
+	}
+	sort.Strings(got)
+	if !reflect.DeepEqual(got, w.basalSources) || len(result.BasalDeliveries) != w.basal {
+		t.Errorf("%d BasalDelivery records from %v; want %d from %v", len(result.BasalDeliveries), got, w.basal, w.basalSources)
+	}
+}
+
+func TestScenarioControlIQRateNeedsControlIQOn(t *testing.T) {
+	_, _, mux := scenarioHarness(t)
+
+	status, body := do(t, mux, http.MethodPost, "/api/state/scenario", `{"events":[
+		{"minutes_ago":30,"type":"control_iq_rate","rate":1.2}]}`)
+	if status != http.StatusBadRequest {
+		t.Fatalf("status %d (%v); want 400", status, body)
 	}
 }

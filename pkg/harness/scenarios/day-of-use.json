@@ -1,0 +1,24 @@
+{
+  "name": "day-of-use",
+  "description": "Twenty-four hours on a 0.85 U/hr profile, four times the window TandemKit's setup history load reads: meals and corrections from the pump's screen and from an app, an overnight 0% temp rate and a 120% one from an app, a 25-minute suspend for a cartridge change, a bolus stopped part-way, and a 2.0 U pump bolus 20 minutes ago. The history log holds about 290 BasalDelivery records, so a driver walks several 255-record slices to its start. With Control-IQ off the pump shows about 3.7 U IOB.",
+  "hours": 24,
+  "basal_cycle": true,
+  "basal_profile": [
+    {"start": "00:00", "rate": 0.85}
+  ],
+  "events": [
+    {"minutes_ago": 1380, "type": "bolus", "units": 5.0, "source": "pump"},
+    {"minutes_ago": 1260, "type": "bolus", "units": 1.0, "source": "remote"},
+    {"minutes_ago": 1140, "type": "temp_basal", "percent": 0, "duration_minutes": 45, "source": "remote"},
+    {"minutes_ago": 960, "type": "temp_basal", "percent": 120, "duration_minutes": 60, "source": "remote"},
+    {"minutes_ago": 900, "type": "bolus", "units": 4.0, "source": "pump"},
+    {"minutes_ago": 780, "type": "suspend"},
+    {"minutes_ago": 755, "type": "resume"},
+    {"minutes_ago": 720, "type": "bolus", "units": 6.0, "source": "remote"},
+    {"minutes_ago": 600, "type": "bolus", "units": 1.5, "delivered_units": 0.7, "source": "pump"},
+    {"minutes_ago": 420, "type": "bolus", "units": 3.5, "source": "remote"},
+    {"minutes_ago": 300, "type": "temp_basal", "percent": 70, "duration_minutes": 90, "source": "remote"},
+    {"minutes_ago": 180, "type": "bolus", "units": 4.5, "source": "pump"},
+    {"minutes_ago": 20, "type": "bolus", "units": 2.0, "source": "pump"}
+  ]
+}
