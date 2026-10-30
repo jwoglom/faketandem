@@ -1,0 +1,24 @@
+{
+  "name": "control-iq",
+  "description": "Six hours on a 0.85 U/hr profile with Control-IQ on throughout, and still on when the app connects: the algorithm's rate moves between 0 and 1.4 U/hr, it gives automatic boluses of 0.6 U 260 minutes ago and 0.4 U 80 minutes ago, and a 4.0 U bolus from the pump's screen 120 minutes ago. Every BasalDelivery record is Control-IQ's. TandemKit's setup asks to turn Control-IQ off, so this is meant for the walk setup. The pump shows about 3.1 U IOB.",
+  "hours": 6,
+  "basal_cycle": true,
+  "basal_profile": [
+    {"start": "00:00", "rate": 0.85}
+  ],
+  "state": {
+    "closed_loop_enabled": true,
+    "cgm_available": true,
+    "controliq_algorithm_rate": 0.85
+  },
+  "events": [
+    {"minutes_ago": 300, "type": "control_iq_rate", "rate": 1.4},
+    {"minutes_ago": 260, "type": "bolus", "units": 0.6, "source_id": 7},
+    {"minutes_ago": 210, "type": "control_iq_rate", "rate": 0},
+    {"minutes_ago": 150, "type": "control_iq_rate", "rate": 0.6},
+    {"minutes_ago": 120, "type": "bolus", "units": 4.0, "source": "pump"},
+    {"minutes_ago": 90, "type": "control_iq_rate", "rate": 1.2},
+    {"minutes_ago": 80, "type": "bolus", "units": 0.4, "source_id": 7},
+    {"minutes_ago": 30, "type": "control_iq_rate", "rate": 0.85}
+  ]
+}
