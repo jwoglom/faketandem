@@ -83,14 +83,18 @@ const (
 	CGMAlertGracePeriodExpires = 32
 )
 
+// cgmAlertNames are pumpX2's CGMAlert names, without its CGM_ALERT suffix.
 var cgmAlertNames = map[uint]string{
-	CGMAlertSensorFailed:       "SENSOR_FAILED",
-	CGMAlertSensorExpiring:     "SENSOR_EXPIRING",
-	CGMAlertSensorExpired:      "SENSOR_EXPIRED",
-	CGMAlertOutOfRange:         "OUT_OF_RANGE",
-	CGMAlertFailedConnection:   "FAILED_CONNECTION",
-	CGMAlertGracePeriodStart:   "GRACE_PERIOD_START",
-	CGMAlertGracePeriodExpires: "GRACE_PERIOD_EXPIRING_SOON",
+	1: "FIXED_LOW", 2: "HIGH", 3: "LOW", 4: "CALIBRATION_REQUEST", 5: "RISE", 6: "RAPID_RISE", 7: "FALL",
+	8: "RAPID_FALL", 9: "LOW_CALIBRATION_ERROR", 10: "HIGH_CALIBRATION_ERROR",
+	CGMAlertSensorFailed: "SENSOR_FAILED", CGMAlertSensorExpiring: "SENSOR_EXPIRING",
+	CGMAlertSensorExpired: "SENSOR_EXPIRED", CGMAlertOutOfRange: "OUT_OF_RANGE",
+	16: "FIRST_START_CALIBRATION", 17: "SECOND_START_CALIBRATION", 18: "CALIBRATION_REQUIRED",
+	19: "LOW_TRANSMITTER", 20: "TRANSMITTER", 22: "SENSOR_EXPIRING_2", 24: "URGENT_LOW_SOON", 25: "SENSOR_REUSE",
+	26: "TEMPERATURE", CGMAlertFailedConnection: "FAILED_CONNECTION", 28: "CHECK_SENSOR", 29: "EGV_UNUSABLE",
+	CGMAlertGracePeriodStart: "GRACE_PERIOD_START", CGMAlertGracePeriodExpires: "GRACE_PERIOD_EXPIRING_SOON",
+	39: "TRANSMITTER_EXPIRED", 40: "PUMP_BLUETOOTH_ERROR", 45: "TRANSMITTER_EXPIRING", 46: "TRANSMITTER_EXPIRING_2",
+	48: "UNAVAILABLE",
 }
 
 const (
