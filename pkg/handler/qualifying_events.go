@@ -125,8 +125,18 @@ func (qe *QualifyingEventsNotifier) NotifyPumpResumed() error {
 	return qe.sendBitmask(qualifyingEventPumpResume)
 }
 
-// sendBitmask sends a raw little-endian uint32 qualifying event bitmask
+// NotifyCGMChange sends CGM_CHANGE.
+func (qe *QualifyingEventsNotifier) NotifyCGMChange() error {
+	return qe.sendBitmask(QECGMChange)
+}
+
+// NotifyCGMAlert sends CGM_ALERT.
+func (qe *QualifyingEventsNotifier) NotifyCGMAlert() error {
+	return qe.sendBitmask(QECGMAlert)
+}
+
 // notification on the QualifyingEvents characteristic
+// sendBitmask sends a raw little-endian uint32 qualifying event bitmask
 func (qe *QualifyingEventsNotifier) sendBitmask(bits uint32) error {
 	buf := make([]byte, 4)
 	binary.LittleEndian.PutUint32(buf, bits)

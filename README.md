@@ -248,7 +248,8 @@ curl -X PUT http://127.0.0.1:8080/api/state \
 Settable fields: `reservoir_units`, `battery_percent`, `battery_charging`,
 `basal_rate`, `suspended`, `iob`, `tdd`, `closed_loop_enabled`,
 `control_iq_mode`, `weight`, `total_daily_insulin`,
-`bolus_rate_units_per_second`, `cgm_egv`, `cgm_session_active`, `pairing_code`,
+`bolus_rate_units_per_second`, `cgm_egv`, `cgm_session_active` (the older
+shorthand for [the CGM session](#cgm-sensor-session)), `pairing_code`,
 `time_since_reset`, `api_version_major`, `api_version_minor`, `clear_alerts`,
 `workflow_mode`, `idp_profiles`, `max_bolus_milliunits`, `max_basal_milliunits`,
 `basal_cycle_enabled`, `controliq_algorithm_rate`, `cgm_available` (see
@@ -380,6 +381,81 @@ more than the bolus, and none of it is left once the duration has passed.
 that many units given now, which then wears off like a bolus. `GET /api/state`
 reports `insulin.iob` (the one shown), `iob_type`, `mudaliar_iob` and
 `swan_iob`.
+
+### CGM sensor session
+
+The pump's CGM is a sensor session with a lifecycle, which the CGM commands
+move and every CGM read reports. It models the session, not a CGM: glucose is
+whatever the harness sets. The lengths follow Dexcom's wear (the G7's from
+[LoopKit/g7sim](https://github.com/LoopKit/g7sim)'s 10-day preset); which
+session state the pump reports in each phase is our reading of pumpX2's enums,
+not confirmed on pump firmware.
+
+| Phase | Session state | Readings | Ends |
+|---|---|---|---|
+| `start_pending` | 1 START_PENDING | none | after `connect_seconds` (30 s): `warmup`, or `stopped`/`not_found` when the code or transmitter is not the sensor worn |
+| `warmup` | 2 ACTIVE | none | after `warmup_seconds` from the session's start (G7 27 min, G6 2 h): `active` |
+| `active` | 2 ACTIVE | `egv`, every 5 min | at `lifetime_seconds` (10 days): `grace` (G7, 12 h), or `stopped`/`expired` (G6) |
+| `grace` | 2 ACTIVE, `gracePeriod` | `egv` | at the end of grace: `stopped`/`expired` |
+| `signal_loss` | 2 ACTIVE | none | the harness moves it back; expires like `active` |
+| `stop_pending` | 3 STOP_PENDING | none | after `stop_seconds` (5 s): `stopped`/`user` |
+| `stopped` | 0 STOPPED | none | a new start |
+
+- `SetSensorTypeRequest` sets the type (1 G6, 2 FSL2, 3 G7) and ends a session
+  of another type. `SetG6TransmitterIdRequest` takes a six-character ID with
+  the type G6. `StartDexcomG6SensorSessionRequest` needs a transmitter and no
+  session running. `SetDexcomG7PairingCodeRequest` takes 0-9999 with the type
+  G7 and starts a new sensor whatever is running. `StopDexcomCGMSensorSession`
+  goes to `stop_pending`, and with no session it is still status 0. Anything
+  else is status 1, which TandemKit and pumpX2 read as a refusal.
+- `CGMStatusRequest`, `CgmStatusV2Request` (duration, time remaining, sensor
+  start on the pump clock, `gracePeriod`, transmitter battery for a G6),
+  `CurrentEGVGuiDataRequest` and its V2, `GetSavedG7PairingCodeRequest`,
+  `CGMHardwareInfoRequest` (the G6 transmitter ID) and `CGMAlertStatusRequest`
+  are answered from it.
+- The alert mask is the lifecycle's: SENSOR_EXPIRING (12) in the last day,
+  GRACE_PERIOD_START (31) and GRACE_PERIOD_EXPIRING_SOON (32, last 2 h),
+  SENSOR_EXPIRED (13), SENSOR_FAILED (11), FAILED_CONNECTION (27) for a sensor
+  never found, OUT_OF_RANGE (14) in `signal_loss`, plus `extra_alerts`. A
+  `DismissNotificationRequest` for a CGM alert clears its bit until the next
+  session.
+- Every new phase raises CGM_CHANGE and every new alert bit CGM_ALERT, within
+  a simulator tick, whatever moved it.
+- The pump starts with a G6 session a day into its 10 days, so a pump clock
+  moved past that expires it.
+
+```bash
+# A pump with no sensor yet, its timers shortened
+curl -X POST http://127.0.0.1:8080/api/cgm/reset -d '{"sensor_type":"g7"}'
+curl -X PUT http://127.0.0.1:8080/api/cgm -d '{"timing":{"connect_seconds":5,"warmup_seconds":60}}'
+
+# The sensor worn has code 4321: the app's pairing with any other code is never found
+curl -X PUT http://127.0.0.1:8080/api/cgm -d '{"body":{"g7_code":"4321"}}'
+
+# The pump refuses the app's next G7 code with status 2 until cleared ({"refuse":{}});
+# aliases: sensor_type, transmitter_id, g6_start, g7_code, stop
+curl -X PUT http://127.0.0.1:8080/api/cgm -d '{"refuse":{"g7_code":2}}'
+
+# Drive it by hand: timers off, then step or jump through the phases
+curl -X PUT http://127.0.0.1:8080/api/cgm -d '{"auto":false}'
+curl -X POST http://127.0.0.1:8080/api/cgm/advance                 # the next phase
+curl -X POST http://127.0.0.1:8080/api/cgm/advance -d '{"to":"active","session_age_seconds":856800}'  # 2 h to go
+curl -X POST http://127.0.0.1:8080/api/cgm/advance -d '{"to":"failed"}'    # also expired, not_found
+
+# Readings and the rest of what the pump reports
+curl -X PUT http://127.0.0.1:8080/api/cgm -d '{"egv":65,"trend_rate":-3,"transmitter_battery":"expired","extra_alerts":[19]}'
+curl http://127.0.0.1:8080/api/cgm
+```
+
+`advance` takes `next`, any phase, or `expired`, `failed` or `not_found` (a
+stopped session with that ending and its alert). A session phase dates the
+session's start where that phase would put it, or `session_age_seconds` back,
+so the timers carry on from there. `PUT /api/cgm` sets fields and moves no
+phase: `sensor_type` (`g6`, `g7`, `fsl2`, `none` or a number),
+`transmitter_id`, `g6_sensor_code`, `g7_pairing_code` (-1 for none), `egv`,
+`trend_rate`, `transmitter_battery`, `auto`, `timing` (seconds; a
+`grace_seconds` of 0 means none) and `reset_timing`, `body`, `refuse`,
+`extra_alerts` and `dismiss` (alert bits). A `PUT` that fails changes nothing.
 
 ### Pump-initiated actions
 

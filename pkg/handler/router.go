@@ -161,9 +161,7 @@ func (r *Router) registerHandlers() {
 	// Dynamic qualifying event status handlers
 	r.RegisterHandler(NewCurrentBasalStatusHandler(r.bridge))
 	r.RegisterHandler(NewCurrentBolusStatusHandler(r.bridge))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CurrentEGVGuiDataRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "HomeScreenMirrorRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMStatusRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "AlertStatusRequest", true))
 	// AlarmStatusRequest gets a dedicated handler rather than a static one:
 	// cliparser cannot construct AlarmStatusResponse at all (see
@@ -178,7 +176,6 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ActiveAamBitsRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "MalfunctionStatusRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ReminderStatusRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMAlertStatusRequest", true))
 
 	// ControlIQ info and sleep schedule handlers
 	r.RegisterHandler(NewControlIQInfoHandler(r.bridge, "ControlIQInfoV1Request"))
@@ -210,7 +207,6 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CommonSoftwareInfoRequest", false))
 
 	// Control handlers
-	r.RegisterHandler(NewSetSensorTypeHandler(r.bridge))
 	r.RegisterHandler(NewStreamDataReadinessHandler(r.bridge))
 	r.RegisterHandler(NewFactoryResetBHandler(r.bridge))
 
@@ -272,11 +268,13 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "DeleteIDPRequest"))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "RenameIDPRequest"))
 
-	// CGM configuration handlers
-	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetDexcomG7PairingCodeRequest"))
-	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "SetG6TransmitterIdRequest"))
-	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "StartDexcomG6SensorSessionRequest"))
-	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "StopDexcomCGMSensorSessionRequest"))
+	// CGM sensor session: commands and reads both go through PumpState's CGM (state/cgm.go).
+	for _, name := range CGMCommands {
+		r.RegisterHandler(NewCGMCommandHandler(r.bridge, name))
+	}
+	for _, name := range CGMReads {
+		r.RegisterHandler(NewCGMStatusHandler(r.bridge, name))
+	}
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "CgmHighLowAlertRequest"))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "CgmRiseFallAlertRequest"))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "CgmOutOfRangeAlertRequest"))
@@ -284,16 +282,12 @@ func (r *Router) registerHandlers() {
 	// Additional status handlers used by controlX2
 	r.RegisterHandler(NewIDPSegmentHandler(r.bridge))
 	r.RegisterHandler(NewIDPSettingsHandler(r.bridge))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "GetSavedG7PairingCodeRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CurrentActiveIdpValuesRequest", true))
 
 	// Phase 5: Missing status query variants
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "PumpFeaturesV1Request", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "PumpVersionBRequest", false))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CgmStatusV2Request", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CurrentEgvGuiDataV2Request", true))
 	r.RegisterHandler(NewLastBolusStatusHandler(r.bridge, "LastBolusStatusRequest"))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMHardwareInfoRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMGlucoseAlertSettingsRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMOORAlertSettingsRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMRateAlertSettingsRequest", true))

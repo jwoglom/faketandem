@@ -32,6 +32,12 @@ type EventNotifier interface {
 
 	// NotifyPumpResumed notifies that the pump was resumed
 	NotifyPumpResumed() error
+
+	// NotifyCGMChange notifies that the CGM sensor session changed phase
+	NotifyCGMChange() error
+
+	// NotifyCGMAlert notifies that a CGM alert was raised
+	NotifyCGMAlert() error
 }
 
 // NoOpEventNotifier is a no-op implementation of EventNotifier
@@ -84,5 +90,15 @@ func (n *NoOpEventNotifier) NotifyPumpSuspended(reason string) error {
 
 // NotifyPumpResumed is a no-op implementation
 func (n *NoOpEventNotifier) NotifyPumpResumed() error {
+	return nil
+}
+
+// NotifyCGMChange is a no-op implementation
+func (n *NoOpEventNotifier) NotifyCGMChange() error {
+	return nil
+}
+
+// NotifyCGMAlert is a no-op implementation
+func (n *NoOpEventNotifier) NotifyCGMAlert() error {
 	return nil
 }

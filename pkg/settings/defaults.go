@@ -114,15 +114,6 @@ func registerQualifyingEventDefaults(manager *Manager) {
 		"bolusTypeBitmask": 0,
 	})
 
-	// CurrentEGVGuiDataResponse(long bgReadingTimestampSeconds, int cgmReading,
-	// int egvStatusId, int trendRate)
-	registerConstant(manager, "CurrentEGVGuiDataRequest", map[string]interface{}{
-		"bgReadingTimestampSeconds": 0,
-		"cgmReading":                120,
-		"egvStatusId":               0,
-		"trendRate":                 0,
-	})
-
 	// HomeScreenMirrorResponse(int cgmTrendIconId, int cgmAlertIconId, int statusIcon0Id,
 	// int statusIcon1Id, int bolusStatusIconId, int basalStatusIconId,
 	// int apControlStateIconId, boolean remainingInsulinPlusIcon, boolean cgmDisplayData)
@@ -136,15 +127,6 @@ func registerQualifyingEventDefaults(manager *Manager) {
 		"apControlStateIconId":     0,
 		"remainingInsulinPlusIcon": false,
 		"cgmDisplayData":           true,
-	})
-
-	// CGMStatusResponse(int sessionStateId, long lastCalibrationTimestamp,
-	// long sensorStartedTimestamp, int transmitterBatteryStatusId)
-	registerConstant(manager, "CGMStatusRequest", map[string]interface{}{
-		"sessionStateId":             1,
-		"lastCalibrationTimestamp":   0,
-		"sensorStartedTimestamp":     0,
-		"transmitterBatteryStatusId": 1,
 	})
 
 	// AlertStatusResponse's real "data" constructor takes a BigInteger, but
@@ -282,10 +264,6 @@ func registerNotificationDefaults(manager *Manager) {
 	// Fall back to the no-arg constructor (empty/zeroed cargo).
 	registerConstant(manager, "ReminderStatusRequest", map[string]interface{}{})
 
-	// CGMAlertStatusResponse(long cgmAlertBitmask)
-	registerConstant(manager, "CGMAlertStatusRequest", map[string]interface{}{
-		"cgmAlertBitmask": 0,
-	})
 }
 
 // NOTE: ControlIQInfoV1Request/V2Request, TempRateRequest,
@@ -479,11 +457,6 @@ func registerGlobalSettingsDefaults(manager *Manager) {
 // registerAdditionalStatusDefaults registers defaults for additional status handlers
 func registerAdditionalStatusDefaults(manager *Manager) {
 
-	// GetSavedG7PairingCodeResponse(int pairingCode)
-	registerConstant(manager, "GetSavedG7PairingCodeRequest", map[string]interface{}{
-		"pairingCode": 0,
-	})
-
 	// CurrentActiveIdpValuesResponse(long currentCarbRatio, int currentTargetBg,
 	// int currentInsulinDuration, int currentIsf)
 	registerConstant(manager, "CurrentActiveIdpValuesRequest", map[string]interface{}{
@@ -516,30 +489,6 @@ func registerAdditionalStatusDefaults(manager *Manager) {
 		"pcbRevisionNumberA": "A",
 	})
 
-	// CgmStatusV2Response(int sessionStateId, long lastCalibrationTimestamp,
-	// long sensorStartedTimestamp, int transmitterBatteryStatusId,
-	// long sessionDurationSeconds, long sessionTimeRemainingSeconds,
-	// int cgmSensorTypeId, boolean gracePeriod)
-	registerConstant(manager, "CgmStatusV2Request", map[string]interface{}{
-		"sessionStateId":              2,
-		"lastCalibrationTimestamp":    0,
-		"sensorStartedTimestamp":      0,
-		"transmitterBatteryStatusId":  3,
-		"sessionDurationSeconds":      0,
-		"sessionTimeRemainingSeconds": 0,
-		"cgmSensorTypeId":             1,
-		"gracePeriod":                 false,
-	})
-
-	// CurrentEgvGuiDataV2Response(long bgReadingTimestampSeconds, int cgmReading,
-	// int egvStatusId, int trendRate)
-	registerConstant(manager, "CurrentEgvGuiDataV2Request", map[string]interface{}{
-		"bgReadingTimestampSeconds": 0,
-		"cgmReading":                120,
-		"egvStatusId":               0,
-		"trendRate":                 0,
-	})
-
 	// LastBolusStatusResponse(int status, int bolusId, long timestamp,
 	// long deliveredVolume, int bolusStatusId, int bolusSourceId,
 	// int bolusTypeBitmask, long extendedBolusDuration, byte[] unknown)
@@ -553,12 +502,6 @@ func registerAdditionalStatusDefaults(manager *Manager) {
 		"bolusTypeBitmask":      0,
 		"extendedBolusDuration": 0,
 		"unknown":               "0000",
-	})
-
-	// CGMHardwareInfoResponse(String hardwareInfoString, int lastByte)
-	registerConstant(manager, "CGMHardwareInfoRequest", map[string]interface{}{
-		"hardwareInfoString": "80AB12",
-		"lastByte":           0,
 	})
 
 	// CGMGlucoseAlertSettingsResponse(int highGlucoseAlertThreshold,

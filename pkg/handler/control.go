@@ -9,60 +9,6 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// SetSensorTypeHandler handles SetSensorTypeRequest messages
-type SetSensorTypeHandler struct {
-	bridge *pumpx2.Bridge
-}
-
-// NewSetSensorTypeHandler creates a new set sensor type handler
-func NewSetSensorTypeHandler(bridge *pumpx2.Bridge) *SetSensorTypeHandler {
-	return &SetSensorTypeHandler{
-		bridge: bridge,
-	}
-}
-
-// MessageType returns the message type this handler processes
-func (h *SetSensorTypeHandler) MessageType() string {
-	return "SetSensorTypeRequest"
-}
-
-// RequiresAuth returns true if this message requires authentication
-func (h *SetSensorTypeHandler) RequiresAuth() bool {
-	return true
-}
-
-// HandleMessage processes a SetSensorTypeRequest
-func (h *SetSensorTypeHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
-	log.Infof("Handling SetSensorTypeRequest: txID=%d", msg.TxID)
-
-	// pumpX2's SetSensorTypeRequest field is "cgmSensorType".
-	sensorType := 0
-	if val, ok := cargoInt(msg, "cgmSensorType", "cgmSensorTypeId"); ok {
-		sensorType = int(val)
-	}
-
-	log.Infof("Setting CGM sensor type to %d", sensorType)
-	pumpState.SetCGMSensorType(sensorType)
-
-	response, err := h.bridge.EncodeMessage(
-		msg.TxID,
-		"SetSensorTypeResponse",
-		map[string]interface{}{
-			"status":                0, // success
-			"statusAcknowledgement": 0,
-		},
-	)
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to encode SetSensorTypeResponse: %w", err)
-	}
-
-	return &Response{
-		ResponseMessage: response,
-		Immediate:       true,
-	}, nil
-}
-
 // StreamDataReadinessHandler handles StreamDataReadinessRequest messages
 type StreamDataReadinessHandler struct {
 	bridge *pumpx2.Bridge

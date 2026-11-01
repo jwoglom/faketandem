@@ -162,8 +162,30 @@ func (s *Simulator) update() {
 	// Update battery
 	s.updateBattery(elapsed)
 
+	s.updateCGM()
+
 	// Check for alerts
 	s.checkAlerts()
+}
+
+// updateCGM moves the CGM session's timed phases on, and raises CGM_CHANGE
+// for a new phase and CGM_ALERT for a new alert bit, whether a timer, a
+// command or the harness moved it.
+func (s *Simulator) updateCGM() {
+	phaseChanged, alertsChanged := s.pumpState.AdvanceCGM()
+	s.mutex.Lock()
+	notifier := s.eventNotifier
+	s.mutex.Unlock()
+	if phaseChanged {
+		if err := notifier.NotifyCGMChange(); err != nil {
+			log.Debugf("CGM_CHANGE not delivered: %v", err)
+		}
+	}
+	if alertsChanged {
+		if err := notifier.NotifyCGMAlert(); err != nil {
+			log.Debugf("CGM_ALERT not delivered: %v", err)
+		}
+	}
 }
 
 // updateBolusDelivery simulates bolus insulin delivery. It returns the record

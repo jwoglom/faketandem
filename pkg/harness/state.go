@@ -30,7 +30,7 @@ type Snapshot struct {
 	Limits     limitsSnapshot     `json:"limits"`
 	Insulin    insulinSnapshot    `json:"insulin"`
 	Battery    batterySnapshot    `json:"battery"`
-	CGM        cgmSnapshot        `json:"cgm"`
+	CGM        cgmView            `json:"cgm"`
 	Alerts     []alertSnapshot    `json:"alerts"`
 	// AlarmsHistory is every alarm that has been raised and cleared, with the
 	// instant it was cleared. Alerts only ever reports what is standing now, so
@@ -156,13 +156,6 @@ type batterySnapshot struct {
 	Charging   bool `json:"charging"`
 }
 
-type cgmSnapshot struct {
-	SensorType    int    `json:"sensor_type"`
-	SessionActive bool   `json:"session_active"`
-	CurrentEGV    int    `json:"current_egv"`
-	TransmitterID string `json:"transmitter_id"`
-}
-
 type alertSnapshot struct {
 	ID       uint32 `json:"id"`
 	Type     int    `json:"type"`
@@ -236,6 +229,7 @@ func (h *Harness) handleState(w http.ResponseWriter, r *http.Request) {
 // Snapshot builds the full pump-state view.
 func (h *Harness) Snapshot() Snapshot {
 	ps := h.pumpState
+	cgm := newCGMView(ps.CGM())
 
 	ps.RLock()
 	identity := identitySnapshot{
@@ -262,12 +256,6 @@ func (h *Harness) Snapshot() Snapshot {
 		TDD:            ps.TDD,
 	}
 	battery := batterySnapshot{Percentage: ps.Battery.Percentage, Charging: ps.Battery.Charging}
-	cgm := cgmSnapshot{
-		SensorType:    ps.CGM.SensorType,
-		SessionActive: ps.CGM.SessionActive,
-		CurrentEGV:    ps.CGM.CurrentEGV,
-		TransmitterID: ps.CGM.TransmitterID,
-	}
 	bolusRate := ps.BolusRateUnitsPerSecond
 	authenticated := ps.IsAuthenticated
 	pairingCode := ps.PairingCode
@@ -556,6 +544,7 @@ func (h *Harness) applyStateUpdate(u stateUpdate) []string {
 		applied = append(applied, "reservoir_units")
 	}
 	applied = append(applied, applyDeliveryLimits(ps, u)...)
+	applied = append(applied, applyCGMFields(ps, u)...)
 	if u.BatteryPercent != nil {
 		ps.SetBatteryLevel(*u.BatteryPercent)
 		applied = append(applied, "battery_percent")
@@ -670,14 +659,6 @@ func (h *Harness) applyDirectFields(u stateUpdate) []string {
 		ps.TotalDailyInsulin = *u.TotalDailyInsulin
 		applied = append(applied, "total_daily_insulin")
 	}
-	if u.CGMEGV != nil {
-		ps.CGM.CurrentEGV = *u.CGMEGV
-		applied = append(applied, "cgm_egv")
-	}
-	if u.CGMSessionActive != nil {
-		ps.CGM.SessionActive = *u.CGMSessionActive
-		applied = append(applied, "cgm_session_active")
-	}
 	if u.TimeSinceReset != nil {
 		ps.TimeSinceReset = *u.TimeSinceReset
 		ps.StartTime = ps.Now().Add(-time.Duration(*u.TimeSinceReset) * time.Second)
@@ -700,4 +681,33 @@ func pumpTimeOrZero(ps *state.PumpState, t time.Time) uint32 {
 		return 0
 	}
 	return ps.PumpTimeFor(t)
+}
+
+// applyCGMFields applies cgm_egv and cgm_session_active, which predate
+// /api/cgm: a session turned on is an active one, as if past its warmup.
+func applyCGMFields(ps *state.PumpState, u stateUpdate) []string {
+	var applied []string
+	if u.CGMEGV == nil && u.CGMSessionActive == nil {
+		return nil
+	}
+	_ = ps.UpdateCGM(func(c *state.CGMState, now time.Time) error {
+		if u.CGMEGV != nil {
+			c.CurrentEGV = *u.CGMEGV
+			applied = append(applied, "cgm_egv")
+		}
+		if u.CGMSessionActive != nil {
+			switch {
+			case *u.CGMSessionActive && !c.Phase.Running():
+				if c.SensorType == state.CGMSensorTypeNone {
+					c.SensorType = state.CGMSensorTypeDexcomG6
+				}
+				_ = c.MoveTo(string(state.CGMPhaseActive), now, nil)
+			case !*u.CGMSessionActive && c.Phase.Running():
+				_ = c.MoveTo(string(state.CGMPhaseStopped), now, nil)
+			}
+			applied = append(applied, "cgm_session_active")
+		}
+		return nil
+	})
+	return applied
 }

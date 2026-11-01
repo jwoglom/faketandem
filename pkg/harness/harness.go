@@ -125,6 +125,8 @@ func (h *Harness) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/log", h.handleLog)
 	mux.HandleFunc("/api/faults", h.handleFaults)
 	mux.HandleFunc("/api/faults/", h.handleFaults)
+	mux.HandleFunc("/api/cgm", h.handleCGM)
+	mux.HandleFunc("/api/cgm/", h.handleCGM)
 }
 
 // Endpoints returns a human-readable list of the routes this harness serves,
@@ -156,6 +158,10 @@ func (h *Harness) Endpoints() []string {
 		"GET    /api/faults",
 		"POST   /api/faults                   {kind, message, opcode, count|every, ...}",
 		"DELETE /api/faults        (or /api/faults/{id})",
+		"GET    /api/cgm",
+		"PUT    /api/cgm                      (also PATCH) {sensor_type, transmitter_id, g7_pairing_code, egv, trend_rate, transmitter_battery, auto, timing, body, refuse, extra_alerts, dismiss}",
+		"POST   /api/cgm/advance              {to: next|start_pending|warmup|active|grace|signal_loss|stop_pending|stopped|expired|failed|not_found, session_age_seconds}",
+		"POST   /api/cgm/reset                {sensor_type}",
 	}
 }
 

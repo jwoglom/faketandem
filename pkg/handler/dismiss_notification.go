@@ -16,8 +16,8 @@ import (
 // DismissNotificationHandler answers DismissNotificationRequest and takes the
 // notification off the pump, as acknowledging it on the pump's screen does: an
 // alarm leaves AlarmStatus, with an AlarmCleared record for each standing alarm
-// it closes, and an alert leaves AlertStatus. Reminders and CGM alerts are
-// identified by an ID the emulator does not model, so they are only logged.
+// it closes, an alert leaves AlertStatus, and a CGM alert leaves CGMAlertStatus
+// until its condition comes back. Reminders are only logged.
 type DismissNotificationHandler struct {
 	bridge          *pumpx2.Bridge
 	settingsManager *settings.Manager
@@ -57,6 +57,10 @@ func (h *DismissNotificationHandler) HandleMessage(msg *pumpx2.ParsedMessage, pu
 	case control.NotificationTypeAlert:
 		if err := h.dismissAlert(id); err != nil {
 			log.Warnf("DismissNotificationRequest: alert %d left standing: %v", id, err)
+		}
+	case control.NotificationTypeCGMAlert:
+		if pumpState != nil && id >= 0 && id <= 63 {
+			pumpState.DismissCGMAlert(uint(id))
 		}
 	default:
 		log.Infof("DismissNotificationRequest: type %d is not modeled; nothing to clear", typeID)

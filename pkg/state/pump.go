@@ -55,8 +55,8 @@ type PumpState struct {
 	Battery   *BatteryState
 	Cartridge *CartridgeState
 
-	// CGM
-	CGM *CGMState
+	// CGMState is the CGM sensor session; see cgm.go.
+	CGMState *CGMState
 
 	// History Log
 	HistoryLog *HistoryLogState
@@ -271,14 +271,6 @@ type CartridgeState struct {
 	LastPrime       time.Time
 }
 
-// CGMState represents CGM sensor state
-type CGMState struct {
-	SensorType    int    // CGM sensor type ordinal
-	SessionActive bool   // Whether a CGM session is active
-	CurrentEGV    int    // Current estimated glucose value (mg/dL)
-	TransmitterID string // CGM transmitter ID
-}
-
 // HistoryLogEntry represents a single history log entry
 type HistoryLogEntry struct {
 	Sequence  uint32
@@ -414,12 +406,7 @@ func newDefaultPumpState(now time.Time) *PumpState {
 			LastPrime:       now,
 		},
 
-		CGM: &CGMState{
-			SensorType:    1, // Dexcom G6
-			SessionActive: true,
-			CurrentEGV:    120,
-			TransmitterID: "80AB12",
-		},
+		CGMState: newCGMState(now),
 
 		basalCycle: newBasalCycle(),
 		HistoryLog: &HistoryLogState{
@@ -661,31 +648,6 @@ func (ps *PumpState) IsBolusActive() bool {
 	defer ps.mutex.RUnlock()
 
 	return ps.Bolus.Active
-}
-
-// GetCGMSensorType returns the CGM sensor type
-func (ps *PumpState) GetCGMSensorType() int {
-	ps.mutex.RLock()
-	defer ps.mutex.RUnlock()
-
-	return ps.CGM.SensorType
-}
-
-// SetCGMSensorType sets the CGM sensor type
-func (ps *PumpState) SetCGMSensorType(sensorType int) {
-	ps.mutex.Lock()
-	defer ps.mutex.Unlock()
-
-	ps.CGM.SensorType = sensorType
-	log.Infof("CGM sensor type set to %d", sensorType)
-}
-
-// GetCurrentEGV returns the current estimated glucose value
-func (ps *PumpState) GetCurrentEGV() int {
-	ps.mutex.RLock()
-	defer ps.mutex.RUnlock()
-
-	return ps.CGM.CurrentEGV
 }
 
 // GetHistoryLogCount returns the number of history log entries
