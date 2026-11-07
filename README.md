@@ -271,6 +271,8 @@ and starts nothing.
 `change_cartridge` or `fill_tubing`), reported in the snapshot too. The pump
 refuses to enter a procedure while one is open, and refuses to exit one it is
 not in; setting it stages a pump that was left part-way through one.
+`fill_tubing_button_down` in the snapshot is whether the pump's button is held
+in fill tubing mode (see `filltubing/button` below).
 
 `idp_profiles` replaces the pump's insulin delivery profiles, in slot order (slot
 0 is the active one); `[]` leaves it with none. Each profile is `{"id", "name",
@@ -436,7 +438,22 @@ curl -X POST http://127.0.0.1:8080/api/state/history/erase -d '{}'
 
 # Raise an arbitrary qualifying-event bitmask (here: remainingInsulin)
 curl -X POST http://127.0.0.1:8080/api/state/qualifyingevent -d '{"bitmask":262144}'
+
+# Press and hold the pump's button in fill tubing mode, as a person does to fill
+# the tubing: down, then up, or a hold that releases itself after hold_seconds
+curl -X POST http://127.0.0.1:8080/api/state/filltubing/button -d '{"down":true}'
+curl -X POST http://127.0.0.1:8080/api/state/filltubing/button -d '{"down":false}'
+curl -X POST http://127.0.0.1:8080/api/state/filltubing/button -d '{"hold_seconds":3}'
 ```
+
+Each press and release is streamed to the app as a signed
+`FillTubingStateStreamResponse` (button state 1 down, 0 up) on CONTROL_STREAM,
+under the transaction ID of the `EnterFillTubingModeRequest` that opened the
+mode, as a pump streams it. The button only fills tubing in that mode, so
+outside it, or before the app has authenticated, the action returns `409`.
+Holding it moves no insulin: the reservoir is unchanged, and the emulator never
+stops a long fill on its own or raises `FILL_TUBING_STILL_IN_PROGRESS`, as a pump
+does once a fill reaches its limit.
 
 Every action returns the full state snapshot, so a test rarely needs a second
 call. An action that cannot apply (a second concurrent bolus, resuming an

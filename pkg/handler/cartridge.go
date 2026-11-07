@@ -82,9 +82,12 @@ func (h *CartridgeModeHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpStat
 	log.Infof("Handling %s: txID=%d", h.msgType, msg.TxID)
 
 	var accepted bool
-	if h.enter {
+	switch {
+	case h.enter && h.mode == state.WorkflowFillTubing:
+		accepted = pumpState.EnterFillTubing(uint8(msg.TxID))
+	case h.enter:
 		accepted = pumpState.EnterWorkflow(h.mode)
-	} else {
+	default:
 		accepted = pumpState.ExitWorkflow(h.mode)
 	}
 	status := 1

@@ -40,6 +40,8 @@ type Snapshot struct {
 	// WorkflowMode is the cartridge procedure the pump has open: none,
 	// change_cartridge or fill_tubing.
 	WorkflowMode string `json:"workflow_mode"`
+	// FillTubingButtonDown is whether the pump's button is held in fill tubing mode.
+	FillTubingButtonDown bool `json:"fill_tubing_button_down"`
 	// IDPProfiles are the insulin delivery profiles in slot order; slot 0 is active.
 	IDPProfiles []state.IDPProfile `json:"idp_profiles"`
 	History     historySnapshot    `json:"history"`
@@ -250,6 +252,7 @@ func (h *Harness) Snapshot() Snapshot {
 	suspended := ps.PumpingSuspended
 	suspendReason := ps.SuspendReason()
 	workflowMode := ps.WorkflowModeUnlocked()
+	fillTubingButtonDown := ps.FillTubingButtonDownUnlocked()
 	idpProfiles := ps.IDPProfilesUnlocked()
 	iob := ps.ReadIOBUnlocked()
 	insulin := insulinSnapshot{
@@ -374,6 +377,7 @@ func (h *Harness) Snapshot() Snapshot {
 		Alerts:        alerts,
 		AlarmsHistory: clearedAlarms,
 		WorkflowMode:  string(workflowMode),
+		FillTubingButtonDown: fillTubingButtonDown,
 		IDPProfiles:   idpProfiles,
 		History:       h.historySnapshot(),
 		RequestLog:    h.requestLogSnapshot(),

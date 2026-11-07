@@ -67,6 +67,9 @@ type PumpState struct {
 	// Pump mode
 	PumpingSuspended bool
 	workflowMode     WorkflowMode
+	// fillTubingTxID and fillTubingButtonDown are fill tubing mode's stream; see workflow.go.
+	fillTubingTxID       uint8
+	fillTubingButtonDown bool
 	// idpProfiles are the insulin delivery profiles in slot order; see idp.go.
 	idpProfiles []IDPProfile
 	// suspendReason records WHY delivery is suspended ("user", "occlusion",

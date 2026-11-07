@@ -69,6 +69,7 @@ func (h *Harness) stateActions() map[string]http.HandlerFunc {
 		"scenario":        h.actionScenario,
 		"qualifyingevent": h.actionQualifyingEvent,
 		"time":            h.actionSetPumpTime,
+		"filltubing/button": h.actionFillTubingButton,
 	}
 }
 
@@ -742,4 +743,79 @@ func (h *Harness) actionSetPumpTime(w http.ResponseWriter, r *http.Request) {
 		"clock":              h.clockSnapshot(),
 		"history":            h.historySnapshot(),
 	})
+}
+
+type fillTubingButtonBody struct {
+	// Down presses (true) or releases (false) the button.
+	Down *bool `json:"down,omitempty"`
+	// HoldSeconds presses the button and releases it that many seconds later,
+	// after the request has returned.
+	HoldSeconds float64 `json:"hold_seconds,omitempty"`
+}
+
+// actionFillTubingButton presses or releases the pump's button in fill tubing
+// mode, where a person holds it to fill the tubing, and streams each change to
+// the app as it would see it from a real pump.
+func (h *Harness) actionFillTubingButton(w http.ResponseWriter, r *http.Request) {
+	var body fillTubingButtonBody
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "%v", err)
+		return
+	}
+	if (body.Down == nil) == (body.HoldSeconds <= 0) {
+		writeError(w, http.StatusBadRequest, "give exactly one of down and a positive hold_seconds")
+		return
+	}
+	if h.router == nil {
+		writeError(w, http.StatusInternalServerError, "no router attached; cannot stream the button's state")
+		return
+	}
+
+	down := body.HoldSeconds > 0 || *body.Down
+	h.stopFillTubingRelease()
+	if err := h.router.SetFillTubingButton(down); err != nil {
+		writeError(w, http.StatusConflict, "%v", err)
+		return
+	}
+	if body.HoldSeconds > 0 {
+		h.releaseFillTubingButtonAfter(secondsToDuration(body.HoldSeconds))
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"button_down":  down,
+		"hold_seconds": body.HoldSeconds,
+		"state":        h.Snapshot(),
+	})
+}
+
+func (h *Harness) releaseFillTubingButtonAfter(hold time.Duration) {
+	h.fillButtonMtx.Lock()
+	defer h.fillButtonMtx.Unlock()
+	var timer *time.Timer
+	timer = time.AfterFunc(hold, func() {
+		h.fillButtonMtx.Lock()
+		current := h.fillButtonRelease == timer
+		if current {
+			h.fillButtonRelease = nil
+		}
+		h.fillButtonMtx.Unlock()
+		if !current {
+			return
+		}
+		if err := h.router.SetFillTubingButton(false); err != nil {
+			log.Warnf("harness: could not release the fill tubing button after %v: %v", hold, err)
+		}
+	})
+	h.fillButtonRelease = timer
+}
+
+// stopFillTubingRelease cancels a pending release, so a press or release asked
+// for after a hold is not undone when the hold runs out.
+func (h *Harness) stopFillTubingRelease() {
+	h.fillButtonMtx.Lock()
+	defer h.fillButtonMtx.Unlock()
+	if h.fillButtonRelease != nil {
+		h.fillButtonRelease.Stop()
+		h.fillButtonRelease = nil
+	}
 }
