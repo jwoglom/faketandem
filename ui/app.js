@@ -31,6 +31,9 @@ const elements = {
   setPairingBtn: $("set-pairing-btn"),
   resetPairingBtn: $("reset-pairing-btn"),
   disconnectPumpBtn: $("disconnect-pump-btn"),
+  fillTubingStatus: $("fill-tubing-status"),
+  fillTubingButton: $("fill-tubing-button"),
+  refreshPumpButtonBtn: $("refresh-pump-button-btn"),
   longTermKeyForm: $("long-term-key-form"),
   longTermKeyInput: $("long-term-key"),
   longTermKeyError: $("long-term-key-error"),
@@ -77,6 +80,7 @@ const state = {
   appConnected: null,
   pairingSignature: "",
   replayUntil: 0,
+  fillTubingDown: false,
   pairingStateRequestId: 0,
   pairingCodeTouched: false,
   hexTouched: false,
@@ -471,6 +475,58 @@ const setPairingState = async (pairingState) => {
     fetchPairingState(); // Snap the selection back to what the server really has.
   } finally {
     elements.pairingStateForm.querySelector(".segmented").classList.remove("busy");
+  }
+};
+
+/* ---------- pump button (harness REST) ---------- */
+
+const updateFillTubingStatus = (snapshot) => {
+  const inFillTubing = snapshot.workflow_mode === "fill_tubing";
+  const down = Boolean(snapshot.fill_tubing_button_down);
+  elements.fillTubingButton.disabled = !inFillTubing;
+  elements.fillTubingButton.classList.toggle("active", down);
+  elements.fillTubingStatus.dataset.state = !inFillTubing ? "idle" : down ? "ok" : "warn";
+  elements.fillTubingStatus.textContent = !inFillTubing
+    ? `Fill tubing: not open (${snapshot.workflow_mode || "none"})`
+    : `Fill tubing: button ${down ? "held" : "up"}`;
+};
+
+const fetchPumpButtonState = async ({ quiet = false } = {}) => {
+  try {
+    const response = await fetch("/api/state");
+    if (!response.ok) {
+      throw new Error(`Failed to load pump state (${response.status}).`);
+    }
+    updateFillTubingStatus(await response.json());
+  } catch (error) {
+    if (!quiet) {
+      logEvent(`Failed to fetch pump state: ${error.message}`, "error");
+    }
+  }
+};
+
+const setFillTubingButton = async (down) => {
+  if (state.fillTubingDown === down) {
+    return;
+  }
+  state.fillTubingDown = down;
+  try {
+    const response = await fetch("/api/state/filltubing/button", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ down }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || `Failed to ${down ? "press" : "release"} the button (${response.status}).`);
+    }
+    updateFillTubingStatus(data.state);
+    logEvent(`Fill tubing button ${down ? "pressed" : "released"}.`);
+  } catch (error) {
+    state.fillTubingDown = false;
+    showToast(error.message, "error");
+    logEvent(error.message, "error");
+    fetchPumpButtonState();
   }
 };
 
@@ -898,6 +954,16 @@ const init = () => {
   });
   elements.resetPairingBtn.addEventListener("click", () => sendCommand({ command: "resetPairing" }));
   elements.disconnectPumpBtn.addEventListener("click", () => sendCommand({ command: "disconnectPump" }));
+  elements.refreshPumpButtonBtn.addEventListener("click", () => fetchPumpButtonState());
+  elements.fillTubingButton.addEventListener("pointerdown", (event) => {
+    elements.fillTubingButton.setPointerCapture(event.pointerId);
+    setFillTubingButton(true);
+  });
+  for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
+    elements.fillTubingButton.addEventListener(type, () => setFillTubingButton(false));
+  }
+  setInterval(() => fetchPumpButtonState({ quiet: true }), 3000);
+  fetchPumpButtonState();
   elements.longTermKeyForm.addEventListener("submit", (event) => {
     event.preventDefault();
     submitLongTermKey();

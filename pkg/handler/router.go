@@ -709,8 +709,15 @@ func (r *Router) sendMessage(charType bluetooth.CharacteristicType, msg *pumpx2.
 // messages cliparser cannot encode and for fault injection that needs to put
 // specific bytes on a characteristic.
 func (r *Router) SendNative(msg *protocol.NativeMessage) error {
+	_, _, err := r.sendNative(msg)
+	return err
+}
+
+// sendNative is SendNative reporting how many fragments went out and whether
+// a drop_response fault suppressed the message, which it records itself.
+func (r *Router) sendNative(msg *protocol.NativeMessage) (sent int, dropped bool, err error) {
 	if msg == nil {
-		return nil
+		return 0, false, nil
 	}
 
 	if fault := r.matchNativeDrop(msg); fault != nil {
@@ -718,7 +725,7 @@ func (r *Router) SendNative(msg *protocol.NativeMessage) error {
 		r.recordSuppressed(msg.Characteristic, &pumpx2.EncodedMessage{
 			MessageType: msg.MessageType, TxID: int(msg.TxID), Opcode: int(msg.Opcode), Packets: msg.PacketsHex(),
 		}, fault.Kind, "native message suppressed")
-		return nil
+		return 0, true, nil
 	}
 
 	fragments := r.refragmentNative(msg)
@@ -729,11 +736,12 @@ func (r *Router) SendNative(msg *protocol.NativeMessage) error {
 	for i, fragment := range fragments {
 		protocol.LogPacket("TX", msg.Characteristic, fragment)
 		if err := r.ble.Notify(msg.Characteristic, fragment); err != nil {
-			return fmt.Errorf("failed to send %s fragment %d: %w", msg.MessageType, i, err)
+			return sent, false, fmt.Errorf("failed to send %s fragment %d: %w", msg.MessageType, i, err)
 		}
+		sent++
 	}
 
-	return nil
+	return sent, false, nil
 }
 
 // matchNativeDrop consumes a drop_response fault that names msg, which is how a

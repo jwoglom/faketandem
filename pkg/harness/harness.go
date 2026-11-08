@@ -57,6 +57,10 @@ type Harness struct {
 	// or nil while the pump runs on the real clock.
 	manual   *state.ManualClock
 	clockMtx sync.Mutex
+
+	// fillButtonRelease is the pending release of a fill tubing button hold.
+	fillButtonRelease *time.Timer
+	fillButtonMtx     sync.Mutex
 }
 
 // Options configures a Harness. Every field except PumpState is optional; a
@@ -149,6 +153,7 @@ func (h *Harness) Endpoints() []string {
 		"POST   /api/state/history/append     {type, type_id, seconds_ago, data}",
 		"POST   /api/state/scenario           {preset} or {hours, state, events}: replay the pump's recent use",
 		"POST   /api/state/qualifyingevent    {bitmask}",
+		"POST   /api/state/filltubing/button  {down} or {hold_seconds}: the pump's button in fill tubing mode",
 		"GET    /api/transport",
 		"PUT    /api/transport                (also PATCH) {att_mtu}",
 		"GET    /api/log?since=N",

@@ -15,7 +15,9 @@ import (
 	"github.com/jwoglom/faketandem/pkg/bluetooth"
 	"github.com/jwoglom/faketandem/pkg/bluetooth/virtualtest"
 	"github.com/jwoglom/faketandem/pkg/jpake"
+	"github.com/jwoglom/faketandem/pkg/protocol"
 	"github.com/jwoglom/faketandem/pkg/pumpx2"
+	"github.com/jwoglom/faketandem/pkg/pumpx2/messages/controlstream"
 )
 
 // The test binary doubles as faketandem: with FAKETANDEM_E2E_ARGS set it runs
@@ -46,6 +48,7 @@ type e2ePump struct {
 	client *virtualtest.Client
 	codec  *pumpx2.Bridge
 	txID   int
+	apiURL string
 }
 
 // startWithoutPumpX2 runs the emulator in its default configuration with an
@@ -96,7 +99,7 @@ func startWithoutPumpX2(t *testing.T) *e2ePump {
 	for _, uuid := range []string{bluetooth.AuthorizationCharUUID, bluetooth.CurrentStatusCharUUID, bluetooth.ControlCharUUID} {
 		client.Subscribe(uuid, true)
 	}
-	return &e2ePump{t: t, client: client, codec: pumpx2.NewNativeBridge()}
+	return &e2ePump{t: t, client: client, codec: pumpx2.NewNativeBridge(), apiURL: apiURL}
 }
 
 // exchange writes one request as a phone would and reads the reply.
@@ -128,23 +131,11 @@ func (p *e2ePump) exchange(char bluetooth.CharacteristicType, uuid, name string,
 	return reply
 }
 
-func cargoBytes(t *testing.T, m *pumpx2.ParsedMessage, key string) []byte {
+// pair runs EC-JPAKE with the pairing code 123456 and returns the derived
+// secret.
+func (p *e2ePump) pair() []byte {
+	t := p.t
 	t.Helper()
-	s, _ := m.Cargo[key].(string)
-	b, err := hex.DecodeString(s)
-	if err != nil {
-		t.Fatalf("%s.%s is not hex: %v", m.MessageType, key, err)
-	}
-	return b
-}
-
-// TestDefaultConfigurationPairsAndAnswersWithoutPumpX2 pairs over EC-JPAKE
-// and reads the pump with no pumpX2 checkout, jar or JVM anywhere.
-func TestDefaultConfigurationPairsAndAnswersWithoutPumpX2(t *testing.T) {
-	if testing.Short() {
-		t.Skip("starts the emulator as a separate process")
-	}
-	p := startWithoutPumpX2(t)
 	auth := bluetooth.CharAuthorization
 	authUUID := bluetooth.AuthorizationCharUUID
 
@@ -184,6 +175,28 @@ func TestDefaultConfigurationPairsAndAnswersWithoutPumpX2(t *testing.T) {
 		t.Fatal("the pump's key confirmation does not verify")
 	}
 
+	return secret
+}
+
+func cargoBytes(t *testing.T, m *pumpx2.ParsedMessage, key string) []byte {
+	t.Helper()
+	s, _ := m.Cargo[key].(string)
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		t.Fatalf("%s.%s is not hex: %v", m.MessageType, key, err)
+	}
+	return b
+}
+
+// TestDefaultConfigurationPairsAndAnswersWithoutPumpX2 pairs over EC-JPAKE
+// and reads the pump with no pumpX2 checkout, jar or JVM anywhere.
+func TestDefaultConfigurationPairsAndAnswersWithoutPumpX2(t *testing.T) {
+	if testing.Short() {
+		t.Skip("starts the emulator as a separate process")
+	}
+	p := startWithoutPumpX2(t)
+	p.pair()
+
 	status := bluetooth.CharCurrentStatus
 	statusUUID := bluetooth.CurrentStatusCharUUID
 	if reply := p.exchange(status, statusUUID, "ApiVersionRequest", nil); reply.MessageType != "ApiVersionResponse" {
@@ -199,4 +212,78 @@ func TestDefaultConfigurationPairsAndAnswersWithoutPumpX2(t *testing.T) {
 	if reply := p.exchange(status, statusUUID, "TimeSinceResetRequest", nil); reply.MessageType != "TimeSinceResetResponse" {
 		t.Errorf("TimeSinceResetRequest answered with %s", reply.MessageType)
 	}
+}
+
+// TestFillTubingButtonStreamsToTheApp holds the pump's button through the HTTP
+// API in fill tubing mode and reads the press and the release off
+// CONTROL_STREAM, signed with the session key.
+func TestFillTubingButtonStreamsToTheApp(t *testing.T) {
+	if testing.Short() {
+		t.Skip("starts the emulator as a separate process")
+	}
+	p := startWithoutPumpX2(t)
+	secret := p.pair()
+	// The session key is the derived secret's hex, as ASCII, which is how pumpX2 and TandemKit key the HMAC.
+	sessionKey := []byte(hex.EncodeToString(secret))
+	p.client.Subscribe(bluetooth.ControlStreamCharUUID, true)
+
+	if code := p.post("/api/state/filltubing/button", `{"down":true}`); code != http.StatusConflict {
+		t.Fatalf("pressing before fill tubing mode answered %d, want 409", code)
+	}
+
+	enter := p.exchange(bluetooth.CharControl, bluetooth.ControlCharUUID, "EnterFillTubingModeRequest", nil)
+	if status, _ := enter.Cargo["status"].(int); status != 0 {
+		t.Fatalf("EnterFillTubingModeRequest answered %v", enter.Cargo)
+	}
+	enterTxID := byte(p.txID)
+
+	if code := p.post("/api/state/filltubing/button", `{"hold_seconds":0.3}`); code != http.StatusOK {
+		t.Fatalf("holding the button answered %d", code)
+	}
+
+	states := []int32{p.readFillTubingButtonState(sessionKey, enterTxID), p.readFillTubingButtonState(sessionKey, enterTxID)}
+	if states[0] != 1 || states[1] != 0 {
+		t.Errorf("button states %v, want a press then a release", states)
+	}
+}
+
+// readFillTubingButtonState reads the next CONTROL_STREAM message, which must be
+// a FillTubingStateStreamResponse under txID signed with sessionKey.
+func (p *e2ePump) readFillTubingButtonState(sessionKey []byte, txID byte) int32 {
+	t := p.t
+	t.Helper()
+	var body []byte
+	for {
+		got := p.client.CollectNotifications(1, 5*time.Second)
+		if len(got) == 0 {
+			t.Fatal("no FillTubingStateStreamResponse arrived")
+		}
+		fragment, _ := hex.DecodeString(got[0])
+		body = append(body, fragment[2:]...)
+		if fragment[0] == 0 {
+			break
+		}
+	}
+	if _, ok, err := protocol.VerifySignedMessage(body, sessionKey); err != nil || !ok {
+		t.Errorf("stream message %x is not signed with the session key (%v)", body, err)
+	}
+	parsed, err := protocol.ParseMessageBody(body)
+	if err != nil || parsed.Opcode != protocol.OpcodeFillTubingStateStreamResponse || parsed.TxID != txID {
+		t.Fatalf("stream message %x (%v), want a FillTubingStateStreamResponse under txID %d", body, err, txID)
+	}
+	response, err := controlstream.NewFillTubingStateStreamResponseFromCargo(parsed.Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return response.ButtonState
+}
+
+func (p *e2ePump) post(path, body string) int {
+	p.t.Helper()
+	resp, err := http.Post(p.apiURL+path, "application/json", strings.NewReader(body))
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	_ = resp.Body.Close() // Safe to ignore: the status is all that is read.
+	return resp.StatusCode
 }

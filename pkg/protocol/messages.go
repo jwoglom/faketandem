@@ -20,6 +20,9 @@ const (
 	// OpcodeHistoryLogStreamResponse is HistoryLogStreamResponse
 	// (HISTORY_LOG). pumpX2 spells it as the signed byte -127, which is 0x81.
 	OpcodeHistoryLogStreamResponse uint8 = 0x81
+	// OpcodeFillTubingStateStreamResponse is FillTubingStateStreamResponse
+	// (CONTROL_STREAM), the signed byte -27.
+	OpcodeFillTubingStateStreamResponse uint8 = 0xE5
 )
 
 // HistoryLogRecordLength is the fixed size of one history log record inside a
@@ -125,5 +128,25 @@ func BuildHistoryLogStreamResponse(txID, streamID uint8, records [][]byte) (*Nat
 		Opcode: OpcodeHistoryLogStreamResponse,
 		TxID:   txID,
 		Cargo:  cargo,
+	})
+}
+
+// BuildFillTubingStateStreamResponse builds the signed message the pump
+// streams on CONTROL_STREAM while fill tubing mode is open, each time its
+// button goes down or comes back up. txID is the EnterFillTubingModeRequest's,
+// which the pump streams every one under; the cargo is the button state, 1
+// down and 0 up.
+func BuildFillTubingStateStreamResponse(txID uint8, buttonDown bool, authKey []byte, timeSinceReset uint32) (*NativeMessage, error) {
+	var buttonState byte
+	if buttonDown {
+		buttonState = 1
+	}
+	return NewNativeMessage("FillTubingStateStreamResponse", bluetooth.CharControlStream, MessageSpec{
+		Opcode:         OpcodeFillTubingStateStreamResponse,
+		TxID:           txID,
+		Cargo:          []byte{buttonState},
+		Signed:         true,
+		AuthKey:        authKey,
+		TimeSinceReset: timeSinceReset,
 	})
 }

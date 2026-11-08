@@ -98,6 +98,20 @@
         </details>
       </div>
 
+      <div class="card" id="pump-button-card">
+        <div class="card-header">
+          <h2>Pump button</h2>
+          <button type="button" id="refresh-pump-button-btn">Refresh</button>
+        </div>
+        <div class="indicators">
+          <div class="indicator" id="fill-tubing-status" data-state="idle">Fill tubing: Unknown</div>
+        </div>
+        <div class="button-row">
+          <button type="button" id="fill-tubing-button" class="primary" disabled>Press and hold to fill tubing</button>
+        </div>
+        <p class="note">In fill tubing mode the pump fills its tubing while this button is held, and streams each press and release to the app.</p>
+      </div>
+
       <div class="card">
         <div class="card-header">
           <h2>Live event log</h2>
