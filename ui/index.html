@@ -112,6 +112,27 @@
         <p class="note">In fill tubing mode the pump fills its tubing while this button is held, and streams each press and release to the app.</p>
       </div>
 
+      <div class="card" id="cartridge-card">
+        <div class="card-header">
+          <h2>Cartridge</h2>
+        </div>
+        <div class="indicators">
+          <div class="indicator" id="cartridge-status" data-state="idle">Load state: Unknown</div>
+        </div>
+        <div class="button-row">
+          <button type="button" id="cartridge-ready-btn" disabled title="Finish retracting now and stream readyToChange">Ready to change</button>
+        </div>
+        <div class="field-row">
+          <input id="cartridge-units" type="number" min="1" step="1" value="300" aria-label="Units in the new cartridge" />
+          <button type="button" id="cartridge-insert-btn" class="primary" disabled>Insert cartridge</button>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="fill-cannula-stream-lost" />
+          Lose the cannula fill stream
+        </label>
+        <p class="note">In change cartridge mode the pump retracts, streams readyToChange, and checks the new cartridge when the app exits the mode. Losing the cannula fill stream lets the app's fill time out.</p>
+      </div>
+
       <div class="card">
         <div class="card-header">
           <h2>Live event log</h2>

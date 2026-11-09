@@ -34,6 +34,11 @@ const elements = {
   fillTubingStatus: $("fill-tubing-status"),
   fillTubingButton: $("fill-tubing-button"),
   refreshPumpButtonBtn: $("refresh-pump-button-btn"),
+  cartridgeStatus: $("cartridge-status"),
+  cartridgeReadyBtn: $("cartridge-ready-btn"),
+  cartridgeUnits: $("cartridge-units"),
+  cartridgeInsertBtn: $("cartridge-insert-btn"),
+  fillCannulaStreamLost: $("fill-cannula-stream-lost"),
   longTermKeyForm: $("long-term-key-form"),
   longTermKeyInput: $("long-term-key"),
   longTermKeyError: $("long-term-key-error"),
@@ -497,7 +502,9 @@ const fetchPumpButtonState = async ({ quiet = false } = {}) => {
     if (!response.ok) {
       throw new Error(`Failed to load pump state (${response.status}).`);
     }
-    updateFillTubingStatus(await response.json());
+    const snapshot = await response.json();
+    updateFillTubingStatus(snapshot);
+    updateCartridgeStatus(snapshot);
   } catch (error) {
     if (!quiet) {
       logEvent(`Failed to fetch pump state: ${error.message}`, "error");
@@ -524,6 +531,48 @@ const setFillTubingButton = async (down) => {
     logEvent(`Fill tubing button ${down ? "pressed" : "released"}.`);
   } catch (error) {
     state.fillTubingDown = false;
+    showToast(error.message, "error");
+    logEvent(error.message, "error");
+    fetchPumpButtonState();
+  }
+};
+
+/* ---------- cartridge (harness REST) ---------- */
+
+const updateCartridgeStatus = (snapshot) => {
+  const cartridge = snapshot.cartridge || {};
+  const inChange = snapshot.workflow_mode === "change_cartridge";
+  const ready = Boolean(cartridge.ready_to_change);
+  elements.cartridgeReadyBtn.disabled = !inChange || ready;
+  elements.cartridgeInsertBtn.disabled = !inChange || !ready || cartridge.inserted_units > 0 || cartridge.loaded || cartridge.detecting;
+  elements.fillCannulaStreamLost.checked = Boolean(cartridge.settings && cartridge.settings.fill_cannula_stream_lost);
+  let detail = cartridge.load_state || "unknown";
+  if (cartridge.detecting) {
+    detail += ", checking the cartridge";
+  } else if (inChange && cartridge.inserted_units > 0) {
+    detail += `, ${cartridge.inserted_units} U cartridge in`;
+  } else if (inChange) {
+    detail += ready ? ", ready to change" : ", retracting";
+  }
+  elements.cartridgeStatus.dataset.state = cartridge.loading_active ? "warn" : "idle";
+  elements.cartridgeStatus.textContent = `Load state: ${detail}`;
+};
+
+const cartridgeRequest = async (url, method, body, done) => {
+  try {
+    const response = await fetch(url, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || `Request failed (${response.status}).`);
+    }
+    updateCartridgeStatus(data.state);
+    updateFillTubingStatus(data.state);
+    logEvent(done);
+  } catch (error) {
     showToast(error.message, "error");
     logEvent(error.message, "error");
     fetchPumpButtonState();
@@ -962,6 +1011,17 @@ const init = () => {
   for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
     elements.fillTubingButton.addEventListener(type, () => setFillTubingButton(false));
   }
+  elements.cartridgeReadyBtn.addEventListener("click", () =>
+    cartridgeRequest("/api/state/cartridge/ready", "POST", {}, "Pump ready to change the cartridge."));
+  elements.cartridgeInsertBtn.addEventListener("click", () => {
+    const units = Number(elements.cartridgeUnits.value);
+    cartridgeRequest("/api/state/cartridge/insert", "POST", { units }, `Inserted a ${units} U cartridge.`);
+  });
+  elements.fillCannulaStreamLost.addEventListener("change", () => {
+    const lost = elements.fillCannulaStreamLost.checked;
+    cartridgeRequest("/api/state", "PUT", { fill_cannula_stream_lost: lost },
+      lost ? "Cannula fill stream will be lost." : "Cannula fill stream restored.");
+  });
   setInterval(() => fetchPumpButtonState({ quiet: true }), 3000);
   fetchPumpButtonState();
   elements.longTermKeyForm.addEventListener("submit", (event) => {

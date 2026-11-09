@@ -252,7 +252,11 @@ Settable fields: `reservoir_units`, `battery_percent`, `battery_charging`,
 `time_since_reset`, `api_version_major`, `api_version_minor`, `clear_alerts`,
 `workflow_mode`, `idp_profiles`, `max_bolus_milliunits`, `max_basal_milliunits`,
 `basal_cycle_enabled`, `controliq_algorithm_rate`, `cgm_available` (see
-[Basal cycle](#basal-cycle)).
+[Basal cycle](#basal-cycle)), and the cartridge procedure's `cartridge_ready_seconds`,
+`cartridge_detect_seconds`, `cartridge_detect_on_insert`,
+`fill_tubing_units_per_second`, `max_fill_seconds`, `fill_cannula_stream_lost` and
+`cartridge_loaded` (see [Cartridge change, tubing and cannula
+fills](#cartridge-change-tubing-and-cannula-fills)).
 
 `SetPumpSoundsRequest` sets the sounds it flags in its change bitmask, and the
 next `PumpGlobalsResponse` reports them (`bolusAnnun` is pumpX2's name for the
@@ -272,7 +276,9 @@ and starts nothing.
 refuses to enter a procedure while one is open, and refuses to exit one it is
 not in; setting it stages a pump that was left part-way through one.
 `fill_tubing_button_down` in the snapshot is whether the pump's button is held
-in fill tubing mode (see `filltubing/button` below).
+in fill tubing mode (see `filltubing/button` below), and `cartridge` is the rest
+of a cartridge change (see [Cartridge change, tubing and cannula
+fills](#cartridge-change-tubing-and-cannula-fills)).
 
 `idp_profiles` replaces the pump's insulin delivery profiles, in slot order (slot
 0 is the active one); `[]` leaves it with none. Each profile is `{"id", "name",
@@ -451,13 +457,98 @@ Each press and release is streamed to the app as a signed
 under the transaction ID of the `EnterFillTubingModeRequest` that opened the
 mode, as a pump streams it. The button only fills tubing in that mode, so
 outside it, or before the app has authenticated, the action returns `409`.
-Holding it moves no insulin: the reservoir is unchanged, and the emulator never
-stops a long fill on its own or raises `FILL_TUBING_STILL_IN_PROGRESS`, as a pump
-does once a fill reaches its limit.
+What a hold fills, and the pump stopping a long one, are under [Cartridge change,
+tubing and cannula fills](#cartridge-change-tubing-and-cannula-fills).
 
 Every action returns the full state snapshot, so a test rarely needs a second
 call. An action that cannot apply (a second concurrent bolus, resuming an
 unsuspended pump) returns `409`.
+
+### Cartridge change, tubing and cannula fills
+
+The pump runs the three procedures a cartridge change takes, streaming each one's
+progress to the app as signed messages on CONTROL_STREAM, so a driver's
+cartridge, tubing and cannula wizards can run end to end. Delivery has to be
+suspended first.
+
+```bash
+# Short timings for a test (the defaults are 5 s to retract, 3 s to check the
+# cartridge, 0.5 U/s of tubing fill and 60 s the longest one press fills)
+curl -X PUT http://127.0.0.1:8080/api/state \
+  -d '{"suspended":true,"cartridge_ready_seconds":0.5,"cartridge_detect_seconds":1,"max_fill_seconds":30}'
+
+# After the app's EnterChangeCartridgeModeRequest: finish retracting now
+# instead of after cartridge_ready_seconds
+curl -X POST http://127.0.0.1:8080/api/state/cartridge/ready -d '{}'
+
+# The person puts in a new cartridge holding 300 U (at most the reservoir's
+# capacity, 300 U)
+curl -X POST http://127.0.0.1:8080/api/state/cartridge/insert -d '{"units":300}'
+
+# Lose the FillCannulaStateStreamResponse, so the app's fill times out
+curl -X PUT http://127.0.0.1:8080/api/state -d '{"fill_cannula_stream_lost":true}'
+
+# Stage a cartridge already checked and waiting for its tubing fill
+curl -X PUT http://127.0.0.1:8080/api/state -d '{"cartridge_loaded":true}'
+```
+
+- **Change cartridge.** An accepted `EnterChangeCartridgeModeRequest` is followed
+  by `EnterChangeCartridgeModeStateStreamResponse` state 0 (retracting) and,
+  `cartridge_ready_seconds` later or at `cartridge/ready`, state 2
+  (`READY_TO_CHANGE`), both under the request's transaction ID. Only then does
+  `cartridge/insert` take a cartridge (`409` before, or outside the mode).
+- **Cartridge check.** The pump takes `ExitChangeCartridgeModeRequest` as the new
+  cartridge being in and checks it: `DetectingCartridgeStateStreamResponse`
+  0, 20, 40, 60, 80 and 100% over `cartridge_detect_seconds`, under the exit's
+  transaction ID. Before the 100% it sets the reservoir to the inserted units
+  (with nothing inserted, to what the cartridge already held), writes a
+  `CartridgeFilled` record (`insulinDisplay` whole units, `insulinActual`) and
+  raises the `remainingInsulin` qualifying event. With
+  `cartridge_detect_on_insert` the check runs at `cartridge/insert` instead,
+  under the `EnterChangeCartridgeModeRequest`'s transaction ID, and the exit
+  streams nothing; that is for exercising a driver that listens for the check
+  before it exits, which TandemKit's wizard does.
+- **Fill tubing.** While the button is held the tubing fills at
+  `fill_tubing_units_per_second` of the pump's clock, taken from the reservoir at
+  each release. A press held for `max_fill_seconds` is released by the pump
+  itself, streaming the button's release. `ExitFillTubingModeRequest` is followed
+  by `ExitFillTubingModeStateStreamResponse` under its transaction ID: state 1
+  (`TUBING_FILLED`) when the tubing took insulin, with a `TubingFilled` record
+  (`primeSize` the units, `completionStatus` 3) and the `remainingInsulin`
+  event, or state 0 (`NOT_COMPLETE`) when it took none.
+- **Fill cannula.** `FillCannulaRequest` is accepted (status 0) with delivery
+  suspended, no procedure open and a nonzero `primeSizeMilliUnits`, and refused
+  (status 1) otherwise. `FillCannulaStateStreamResponse` state 0 (filling)
+  follows at once, and state 2 (`CANNULA_FILLED`) once the prime has gone in at
+  `bolus_rate_units_per_second`, when the reservoir gives it up, a
+  `CannulaFilled` record is written (`primeSize`, `completionStatus` 3,
+  `infusionSetType` 0) and `remainingInsulin` is raised. With
+  `fill_cannula_stream_lost` the fill happens but state 2 is never streamed; a
+  `drop_response` fault naming `FillCannulaStateStreamResponse` does the same
+  once.
+- **Load status.** `LoadStatusResponse` follows the procedure: `CHANGE_CARTRIDGE`
+  in change cartridge mode; `LOAD_CARTRIDGE` from the exit until a tubing fill
+  takes insulin; `PRIME_TUBING` in fill tubing mode, with prime status `START`
+  while the button is held and `ENTERED_CAN_EXIT` otherwise; `PRIME_CANNULA`
+  while a cannula fill runs; and not loading otherwise. While a new cartridge
+  waits for its tubing fill the pump refuses `EnterChangeCartridgeModeRequest`,
+  as a Mobi did after an exit it took as the new cartridge being in, so a
+  driver's resume-at-swap and finish-at-tubing-fill paths can both be reached.
+
+The snapshot's `cartridge` object reports `load_state`, `loading_active`,
+`ready_to_change`, `inserted_units`, `detecting`, `loaded`, `fill_tubing_units`
+(filled since fill tubing mode opened), `fill_cannula_active` and the
+`settings` above.
+
+Much of this is modelled, not confirmed on firmware: the timings, the retracting
+and filling state IDs (pumpX2 names only `READY_TO_CHANGE` and
+`CANNULA_FILLED`), the check's progress steps, the load and prime status values,
+the fill rate, a fill tubing exit's state, the refusals of a cannula fill, and
+whether a Mobi checks a cartridge with nothing swapped. That the check runs under
+the `ExitChangeCartridgeModeRequest`'s transaction ID follows pumpX2's capture.
+The pump also raises `FILL_TUBING_STILL_IN_PROGRESS` when it stops a long fill;
+the emulator does not yet, so a driver's prompt to confirm a paused fill cannot
+be reached.
 
 ### A pump already in use (scenarios)
 
