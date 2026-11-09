@@ -3,6 +3,7 @@ package harness
 import (
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/jwoglom/faketandem/pkg/bluetooth"
@@ -32,7 +33,14 @@ type Snapshot struct {
 	Insulin    insulinSnapshot    `json:"insulin"`
 	Battery    batterySnapshot    `json:"battery"`
 	CGM        cgmSnapshot        `json:"cgm"`
-	Alerts     []alertSnapshot    `json:"alerts"`
+	// Alerts is every standing notification: alerts, alarms, malfunctions,
+	// reminders and CGM alerts, each with the bit it sets.
+	Alerts []alertSnapshot `json:"alerts"`
+	// Notifications is the live bitmask of each category, as its status
+	// response carries it, and the names of the bits it sets.
+	Notifications notificationsSnapshot `json:"notifications"`
+	// Refusals are the pump refusals that are on (see state.Refusals).
+	Refusals state.Refusals `json:"refusals"`
 	// AlarmsHistory is every alarm that has been raised and cleared, with the
 	// instant it was cleared. Alerts only ever reports what is standing now, so
 	// without this an alarm that came and went left nothing a timeline could
@@ -185,6 +193,65 @@ type alertSnapshot struct {
 	Time         string `json:"time"`
 	PumpSeconds  uint32 `json:"pump_seconds"`
 	Acknowledged bool   `json:"acknowledged"`
+	// Category, Bit and Name are the status bitmask the alert sets and
+	// pumpX2's name for its bit; category "none" sets none.
+	Category string `json:"category"`
+	Bit      uint   `json:"bit"`
+	Name     string `json:"name"`
+	FaultID  uint32 `json:"fault_id,omitempty"`
+}
+
+// notificationsSnapshot is each category's live bitmask.
+type notificationsSnapshot struct {
+	Alert       notificationMaskSnapshot `json:"alert"`
+	Alarm       notificationMaskSnapshot `json:"alarm"`
+	Malfunction notificationMaskSnapshot `json:"malfunction"`
+	Reminder    notificationMaskSnapshot `json:"reminder"`
+	CGMAlert    notificationMaskSnapshot `json:"cgm_alert"`
+}
+
+type notificationMaskSnapshot struct {
+	// Bitmask is the 64-bit mask, as a decimal string so JSON keeps every bit.
+	Bitmask string   `json:"bitmask"`
+	Names   []string `json:"names"`
+}
+
+func notificationMask(ps *state.PumpState, c state.NotificationCategory) notificationMaskSnapshot {
+	mask := ps.NotificationBitmask(c)
+	names := make([]string, 0)
+	for bit := uint(0); bit < 64; bit++ {
+		if mask&(uint64(1)<<bit) != 0 {
+			names = append(names, state.NotificationName(c, bit))
+		}
+	}
+	return notificationMaskSnapshot{Bitmask: strconv.FormatUint(mask, 10), Names: names}
+}
+
+func notificationsOf(ps *state.PumpState) notificationsSnapshot {
+	return notificationsSnapshot{
+		Alert:       notificationMask(ps, state.NotificationAlert),
+		Alarm:       notificationMask(ps, state.NotificationAlarm),
+		Malfunction: notificationMask(ps, state.NotificationMalfunction),
+		Reminder:    notificationMask(ps, state.NotificationReminder),
+		CGMAlert:    notificationMask(ps, state.NotificationCGMAlert),
+	}
+}
+
+func alertSnapshotOf(ps *state.PumpState, a state.Alert) alertSnapshot {
+	return alertSnapshot{
+		ID:           a.ID,
+		Type:         int(a.Type),
+		TypeName:     a.TypeName(),
+		Priority:     int(a.Priority),
+		Message:      a.Message,
+		Time:         formatTime(a.Timestamp),
+		PumpSeconds:  pumpTimeOrZero(ps, a.Timestamp),
+		Acknowledged: a.Acknowledged,
+		Category:     a.Category.String(),
+		Bit:          a.Bit,
+		Name:         a.Name(),
+		FaultID:      a.FaultID,
+	}
 }
 
 // clearedAlarmSnapshot is an alarm that stood and has since been cleared, with
@@ -199,6 +266,9 @@ type clearedAlarmSnapshot struct {
 	PumpSeconds        uint32 `json:"pump_seconds"`
 	ClearedTime        string `json:"cleared_time"`
 	ClearedPumpSeconds uint32 `json:"cleared_pump_seconds"`
+	Category           string `json:"category"`
+	Bit                uint   `json:"bit"`
+	Name               string `json:"name"`
 }
 
 type requestLogSnapshot struct {
@@ -295,16 +365,7 @@ func (h *Harness) Snapshot() Snapshot {
 
 	alerts := make([]alertSnapshot, 0, len(activeAlerts))
 	for _, a := range activeAlerts {
-		alerts = append(alerts, alertSnapshot{
-			ID:           a.ID,
-			Type:         int(a.Type),
-			TypeName:     a.Type.String(),
-			Priority:     int(a.Priority),
-			Message:      a.Message,
-			Time:         formatTime(a.Timestamp),
-			PumpSeconds:  pumpTimeOrZero(ps, a.Timestamp),
-			Acknowledged: a.Acknowledged,
-		})
+		alerts = append(alerts, alertSnapshotOf(ps, a))
 	}
 
 	clearedAlarms := make([]clearedAlarmSnapshot, 0)
@@ -312,13 +373,16 @@ func (h *Harness) Snapshot() Snapshot {
 		clearedAlarms = append(clearedAlarms, clearedAlarmSnapshot{
 			ID:                 c.ID,
 			Type:               int(c.Type),
-			TypeName:           c.Type.String(),
+			TypeName:           c.TypeName(),
 			Priority:           int(c.Priority),
 			Message:            c.Message,
 			Time:               formatTime(c.Timestamp),
 			PumpSeconds:        pumpTimeOrZero(ps, c.Timestamp),
 			ClearedTime:        formatTime(c.ClearedAt),
 			ClearedPumpSeconds: pumpTimeOrZero(ps, c.ClearedAt),
+			Category:           c.Category.String(),
+			Bit:                c.Bit,
+			Name:               c.Name(),
 		})
 	}
 
@@ -393,6 +457,8 @@ func (h *Harness) Snapshot() Snapshot {
 		WorkflowMode:         string(workflowMode),
 		FillTubingButtonDown: fillTubingButtonDown,
 		Cartridge:            cartridge,
+		Notifications:        notificationsOf(ps),
+		Refusals:             ps.GetRefusals(),
 		IDPProfiles:          idpProfiles,
 		History:              h.historySnapshot(),
 		RequestLog:           h.requestLogSnapshot(),
@@ -507,8 +573,11 @@ type stateUpdate struct {
 	TimeSinceReset    *uint32  `json:"time_since_reset,omitempty"`
 	APIVersionMajor   *int     `json:"api_version_major,omitempty"`
 	APIVersionMinor   *int     `json:"api_version_minor,omitempty"`
-	ClearAlerts       *bool    `json:"clear_alerts,omitempty"`
-	WorkflowMode      *string  `json:"workflow_mode,omitempty"`
+	// ClearAlerts drops every standing notification, malfunctions included.
+	ClearAlerts *bool `json:"clear_alerts,omitempty"`
+	// Refusals switches individual pump refusals; fields left out keep their value.
+	Refusals     *refusalsUpdate `json:"refusals,omitempty"`
+	WorkflowMode *string         `json:"workflow_mode,omitempty"`
 	// IDPProfiles replaces every profile; an empty list leaves the pump with none.
 	IDPProfiles *[]state.IDPProfile `json:"idp_profiles,omitempty"`
 	// MaxBolusMilliunits and MaxBasalMilliunits stage the pump's delivery limits
@@ -592,6 +661,38 @@ func applyBasalCycle(ps *state.PumpState, u stateUpdate) []string {
 		applied = append(applied, "basal_cycle_enabled")
 	}
 	return applied
+}
+
+// refusalsUpdate is state.Refusals with every field optional.
+type refusalsUpdate struct {
+	TempRateUnderControlIQ *bool `json:"temp_rate_under_control_iq,omitempty"`
+	TempRateWhileRunning   *bool `json:"temp_rate_while_running,omitempty"`
+	TempRateBelowMinimum   *bool `json:"temp_rate_below_minimum,omitempty"`
+	TempRateAboveMaxBasal  *bool `json:"temp_rate_above_max_basal,omitempty"`
+	BolusWhileBusy         *bool `json:"bolus_while_busy,omitempty"`
+}
+
+func applyRefusals(ps *state.PumpState, u stateUpdate) []string {
+	if u.Refusals == nil {
+		return nil
+	}
+	r := ps.GetRefusals()
+	for _, f := range []struct {
+		set *bool
+		to  *bool
+	}{
+		{u.Refusals.TempRateUnderControlIQ, &r.TempRateUnderControlIQ},
+		{u.Refusals.TempRateWhileRunning, &r.TempRateWhileRunning},
+		{u.Refusals.TempRateBelowMinimum, &r.TempRateBelowMinimum},
+		{u.Refusals.TempRateAboveMaxBasal, &r.TempRateAboveMaxBasal},
+		{u.Refusals.BolusWhileBusy, &r.BolusWhileBusy},
+	} {
+		if f.set != nil {
+			*f.to = *f.set
+		}
+	}
+	ps.SetRefusals(r)
+	return []string{"refusals"}
 }
 
 func applyIOB(ps *state.PumpState, u stateUpdate) []string {
@@ -687,9 +788,10 @@ func (h *Harness) applyStateUpdate(u stateUpdate) []string {
 		// Staged, not enacted: PUT /api/state writes no history, so the alarms
 		// move into the cleared-alarm log without an AlarmCleared record.
 		// POST /api/state/resume is the path that records the clearing.
-		ps.ClearAlerts(ps.Now())
+		ps.ClearAllNotifications(ps.Now())
 		applied = append(applied, "clear_alerts")
 	}
+	applied = append(applied, applyRefusals(ps, u)...)
 
 	applied = append(applied, h.applyWorkflowMode(u)...)
 	applied = append(applied, applyCartridge(ps, u.cartridgeUpdate)...)

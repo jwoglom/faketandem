@@ -36,10 +36,17 @@ func (h *BolusPermissionHandler) RequiresAuth() bool {
 func (h *BolusPermissionHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling BolusPermissionRequest: txID=%d", msg.TxID)
 
-	// Check if pump is in a state where bolus is allowed
-	if pumpState.Bolus.Active {
-		log.Warn("Bolus permission denied: bolus already active")
-		// TODO: Return proper denial response
+	if reason := bolusRefusal(pumpState); reason != "" {
+		log.Warnf("Bolus permission denied: %s", reason)
+		response, err := h.bridge.EncodeMessage(msg.TxID, "BolusPermissionResponse", map[string]interface{}{
+			"status":       1,
+			"bolusId":      0,
+			"nackReasonId": nackInvalidPumpingState,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode BolusPermissionResponse: %w", err)
+		}
+		return &Response{ResponseMessage: response, Immediate: true}, nil
 	}
 
 	// Grant bolus permission
@@ -63,6 +70,27 @@ func (h *BolusPermissionHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpSt
 		ResponseMessage: response,
 		Immediate:       true,
 	}, nil
+}
+
+// nackInvalidPumpingState is BolusPermissionResponse's INVALID_PUMPING_STATE
+// nack reason, which a refusal for a running bolus or a suspended pump gives.
+// Which reason a pump gives for each is not confirmed.
+const nackInvalidPumpingState = 1
+
+// bolusRefusal is why the pump refuses a bolus now, or "": a bolus already
+// runs (#504) or delivery is suspended. state.Refusals.BolusWhileBusy off
+// grants it anyway, as the emulator used to.
+func bolusRefusal(ps *state.PumpState) string {
+	if !ps.GetRefusals().BolusWhileBusy {
+		return ""
+	}
+	switch {
+	case ps.IsBolusActive():
+		return "a bolus is already running"
+	case ps.IsPumpingSuspended():
+		return "delivery is suspended"
+	}
+	return ""
 }
 
 // BolusCalcDataSnapshotHandler handles BolusCalcDataSnapshotRequest messages
@@ -97,11 +125,11 @@ func (h *BolusCalcDataSnapshotHandler) HandleMessage(msg *pumpx2.ParsedMessage, 
 	iob := pumpState.GetIOB()
 	calcData := map[string]interface{}{
 		"isUnacked":                 false,
-		"correctionFactor":          50,                          // mg/dL/U - placeholder
+		"correctionFactor":          50,                            // mg/dL/U - placeholder
 		"iob":                       int64(math.Round(iob * 1000)), // milli-units
-		"cartridgeRemainingInsulin": 20000,                       // milli-units - placeholder
-		"targetBg":                  100,                         // mg/dL - placeholder
-		"isf":                       50,                          // mg/dL/U - placeholder
+		"cartridgeRemainingInsulin": 20000,                         // milli-units - placeholder
+		"targetBg":                  100,                           // mg/dL - placeholder
+		"isf":                       50,                            // mg/dL/U - placeholder
 		"carbEntryEnabled":          true,
 		"carbRatio":                 int64(12000), // g/U * 1000 - placeholder
 		"maxBolusAmount":            25000,        // milli-units - placeholder
@@ -179,7 +207,12 @@ func (h *InitiateBolusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpStat
 	}
 
 	if maxBolus := pumpState.GetDeliveryLimits().MaxBolusMilliunits; int(totalVolumeMilliunits) > maxBolus {
-		return h.refuseAboveMaxBolus(msg, bolusID, totalVolumeMilliunits, maxBolus)
+		log.Warnf("Refusing bolus %d: %d mU is above the max bolus of %d mU", bolusID, totalVolumeMilliunits, maxBolus)
+		return h.refuseBolus(msg, bolusID)
+	}
+	if reason := bolusRefusal(pumpState); reason != "" {
+		log.Warnf("Refusing bolus %d: %s", bolusID, reason)
+		return h.refuseBolus(msg, bolusID)
 	}
 
 	log.Infof("Initiating bolus: %.2f units (%d mU), bolusID=%d, typeBitmask=%d, food=%d mU, correction=%d mU, carbs=%dg, bg=%d",
@@ -432,10 +465,9 @@ func (h *CancelBolusHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState 
 	}, nil
 }
 
-// refuseAboveMaxBolus answers a bolus over the pump's max bolus without starting it. pumpX2 names
-// no status for this refusal; any nonzero status is a refusal to a driver, and 1 is assumed.
-func (h *InitiateBolusHandler) refuseAboveMaxBolus(msg *pumpx2.ParsedMessage, bolusID uint32, requested int64, maxBolus int) (*Response, error) {
-	log.Warnf("Refusing bolus %d: %d mU is above the max bolus of %d mU", bolusID, requested, maxBolus)
+// refuseBolus answers InitiateBolus without starting the bolus. pumpX2 names no status for a
+// refusal; any nonzero status is a refusal to a driver, and 1 is assumed.
+func (h *InitiateBolusHandler) refuseBolus(msg *pumpx2.ParsedMessage, bolusID uint32) (*Response, error) {
 	response, err := h.bridge.EncodeMessage(msg.TxID, "InitiateBolusResponse", map[string]interface{}{
 		"status":       1,
 		"bolusId":      bolusID,

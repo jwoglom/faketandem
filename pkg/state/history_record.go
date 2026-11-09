@@ -176,7 +176,7 @@ func (e HistoryLogEntry) EncodeRecord() []byte {
 // real pumps agree with the parse offsets, so those are what we emit.
 func encodeHistoryPayload(payload []byte, typeID int, fields map[string]interface{}) {
 	for _, encode := range []func([]byte, int, map[string]interface{}) bool{
-		encodeClockChangePayload, encodeBasalStatePayload, encodeLoadingPayload,
+		encodeClockChangePayload, encodeBasalStatePayload, encodeLoadingPayload, encodeNotificationPayload,
 	} {
 		if encode(payload, typeID, fields) {
 			return
@@ -249,17 +249,6 @@ func encodeHistoryPayload(payload []byte, typeID int, fields map[string]interfac
 		binary.LittleEndian.PutUint16(payload[2:4], uint16(fieldInt(fields, "tempRateId")))
 		binary.LittleEndian.PutUint32(payload[4:8], uint32(fieldInt(fields, "timeLeft")))
 
-	case HistoryAlarmActivated:
-		// alarmId u32 @0, faultLocatorData u32 @4, param1 u32 @8, param2 f32 @12
-		binary.LittleEndian.PutUint32(payload[0:4], uint32(fieldInt(fields, "alarmId")))
-		binary.LittleEndian.PutUint32(payload[4:8], uint32(fieldInt(fields, "faultLocatorData")))
-		binary.LittleEndian.PutUint32(payload[8:12], uint32(fieldInt(fields, "param1")))
-		putFloat32(payload[12:16], fieldFloat(fields, "param2"))
-
-	case HistoryAlarmCleared:
-		// alarmId u32 @0 -- the same id the matching AlarmActivated carried.
-		binary.LittleEndian.PutUint32(payload[0:4], uint32(fieldInt(fields, "alarmId")))
-
 	case HistoryPumpingSuspended:
 		// preSuspendState u32 @0, insulinAmount u16 @4, reasonId u8 @6,
 		// rpaTimeout u8 @7. 106 / reason 0 / 15-minute resume-pump alert are
@@ -315,6 +304,31 @@ func encodeLoadingPayload(payload []byte, typeID int, fields map[string]interfac
 		putFloat32(payload[0:4], fieldFloat(fields, "primeSize"))
 		binary.LittleEndian.PutUint32(payload[4:8], uint32(fieldInt(fields, "completionStatus")))
 		payload[8] = uint8(fieldInt(fields, "infusionSetType"))
+	default:
+		return false
+	}
+	return true
+}
+
+// encodeNotificationPayload writes the records a pump writes when it raises or
+// clears an alert, alarm, CGM alert or malfunction, and reports whether typeID
+// was one of them. Each names the notification by its bit in the matching
+// status bitmask.
+func encodeNotificationPayload(payload []byte, typeID int, fields map[string]interface{}) bool {
+	switch typeID {
+	case HistoryAlarmActivated, HistoryAlertActivated, HistoryCGMAlertActivated, HistoryMalfunction:
+		// alarmId/alertId/malfId u32 @0, faultLocatorData u32 @4, param1 u32 @8, param2 f32 @12
+		binary.LittleEndian.PutUint32(payload[0:4], uint32(fieldInt(fields, "alarmId", "alertId", "malfId")))
+		binary.LittleEndian.PutUint32(payload[4:8], uint32(fieldInt(fields, "faultLocatorData")))
+		binary.LittleEndian.PutUint32(payload[8:12], uint32(fieldInt(fields, "param1")))
+		putFloat32(payload[12:16], fieldFloat(fields, "param2"))
+	case HistoryAlarmCleared, HistoryCGMAlertCleared:
+		// alarmId/alertId u32 @0 -- the same id the matching activation carried.
+		binary.LittleEndian.PutUint32(payload[0:4], uint32(fieldInt(fields, "alarmId", "alertId")))
+	case HistoryAlertCleared:
+		// alertId u32 @0, faultLocatorData u32 @4
+		binary.LittleEndian.PutUint32(payload[0:4], uint32(fieldInt(fields, "alertId")))
+		binary.LittleEndian.PutUint32(payload[4:8], uint32(fieldInt(fields, "faultLocatorData")))
 	default:
 		return false
 	}
@@ -433,6 +447,8 @@ func fieldIntDefault(fields map[string]interface{}, fallback int, keys ...string
 		case int32:
 			return int(v)
 		case int64:
+			return int(v)
+		case uint:
 			return int(v)
 		case uint8:
 			return int(v)

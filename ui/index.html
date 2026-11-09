@@ -131,6 +131,35 @@
           Lose the cannula fill stream
         </label>
         <p class="note">In change cartridge mode the pump retracts, streams readyToChange, and checks the new cartridge when the app exits the mode. Losing the cannula fill stream lets the app's fill time out.</p>
+      <div class="card" id="notifications-card">
+        <div class="card-header">
+          <h2>Alerts &amp; alarms</h2>
+          <button type="button" id="refresh-notifications-btn">Refresh</button>
+        </div>
+        <form class="form" id="notification-form" novalidate>
+          <label for="notification-category">Kind</label>
+          <select id="notification-category" name="notification-category">
+            <option value="alert">Alert</option>
+            <option value="alarm">Alarm</option>
+            <option value="malfunction">Malfunction</option>
+            <option value="reminder">Reminder</option>
+            <option value="cgmalert">CGM alert</option>
+          </select>
+
+          <label for="notification-type">Name or bit</label>
+          <input id="notification-type" name="notification-type" type="text" list="notification-names" placeholder="e.g. LOW_INSULIN_ALERT or 0" autocomplete="off" spellcheck="false" aria-describedby="notification-error" />
+          <datalist id="notification-names"></datalist>
+          <p class="help" id="notification-error" role="alert"></p>
+
+          <div class="button-row">
+            <button type="submit" id="raise-notification-btn" class="primary">Raise</button>
+            <button type="button" id="clear-notification-btn">Clear</button>
+          </div>
+        </form>
+        <div class="settings-list" id="notification-list" role="list" aria-label="Standing notifications">
+          <p class="empty">Nothing standing.</p>
+        </div>
+        <p class="note">Raising sets the bit the pump reports in its status message, writes the activation record and sends the qualifying event. Clearing is acknowledging it on the pump's screen. A RESUME_PUMP_ALARM makes the pump refuse ResumePumping until it is dismissed; a malfunction can be cleared only here.</p>
       </div>
 
       <div class="card">

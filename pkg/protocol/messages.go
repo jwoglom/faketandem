@@ -14,6 +14,8 @@ import (
 const (
 	// OpcodeAlarmStatusResponse is AlarmStatusResponse (CURRENT_STATUS).
 	OpcodeAlarmStatusResponse uint8 = 71
+	// OpcodeReminderStatusResponse is ReminderStatusResponse (CURRENT_STATUS).
+	OpcodeReminderStatusResponse uint8 = 73
 	// OpcodeErrorResponse is ErrorResponse (CURRENT_STATUS). pumpX2 and
 	// TandemKit declare it unsigned and variable-size: 2 bytes, or 26 with a
 	// signature trailer.
@@ -60,6 +62,21 @@ func BuildAlarmStatusResponse(txID uint8, alarmBitmask uint64) (*NativeMessage, 
 
 	return NewNativeMessage("AlarmStatusResponse", bluetooth.CharCurrentStatus, MessageSpec{
 		Opcode: OpcodeAlarmStatusResponse,
+		TxID:   txID,
+		Cargo:  cargo,
+	})
+}
+
+// BuildReminderStatusResponse builds a ReminderStatusResponse carrying the
+// pump's active-reminder bitmask, little-endian, bit N being ReminderType N.
+// Its only data constructor takes a BigInteger, which neither cliparser nor
+// the Go codec builds from a JSON number below 2^63.
+func BuildReminderStatusResponse(txID uint8, reminderBitmask uint64) (*NativeMessage, error) {
+	cargo := make([]byte, 8)
+	binary.LittleEndian.PutUint64(cargo, reminderBitmask)
+
+	return NewNativeMessage("ReminderStatusResponse", bluetooth.CharCurrentStatus, MessageSpec{
+		Opcode: OpcodeReminderStatusResponse,
 		TxID:   txID,
 		Cargo:  cargo,
 	})

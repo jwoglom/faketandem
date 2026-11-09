@@ -61,7 +61,11 @@ func TestDriverTempRateCommandsCloseTheirRecords(t *testing.T) {
 
 	firstID := setTempRate(150, 30)
 
-	// A second temp rate replaces the first, which ends here.
+	// A second temp rate replaces the first, which ends here. A pump refuses
+	// that; with the refusal off the emulator still replaces it.
+	refusals := ps.GetRefusals()
+	refusals.TempRateWhileRunning = false
+	ps.SetRefusals(refusals)
 	clock.Advance(5 * time.Minute)
 	replacedAt := ps.Now()
 	secondID := setTempRate(50, 60)

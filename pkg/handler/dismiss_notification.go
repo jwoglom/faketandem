@@ -1,31 +1,30 @@
 package handler
 
 import (
-	"encoding/hex"
 	"fmt"
 	"time"
 
 	"github.com/jwoglom/faketandem/pkg/pumpx2"
-	"github.com/jwoglom/faketandem/pkg/pumpx2/messages/control"
-	"github.com/jwoglom/faketandem/pkg/settings"
 	"github.com/jwoglom/faketandem/pkg/state"
 
 	log "github.com/sirupsen/logrus"
 )
 
 // DismissNotificationHandler answers DismissNotificationRequest and takes the
-// notification off the pump, as acknowledging it on the pump's screen does: an
-// alarm leaves AlarmStatus, with an AlarmCleared record for each standing alarm
-// it closes, and an alert leaves AlertStatus. Reminders and CGM alerts are
-// identified by an ID the emulator does not model, so they are only logged.
+// notification off the pump, as acknowledging it on the pump's screen does:
+// its bit leaves the status bitmask of its type (alert, alarm, reminder, CGM
+// alert), with a cleared record for each standing one it closes
+// (AlertCleared, AlarmCleared, CgmAlertCleared). A malfunction cannot be
+// dismissed: a request naming one (type 4, its ActiveAamBits AamType) is
+// answered with a nonzero status and the malfunction stays, as does a request
+// for a type the pump has none of.
 type DismissNotificationHandler struct {
-	bridge          *pumpx2.Bridge
-	settingsManager *settings.Manager
+	bridge *pumpx2.Bridge
 }
 
 // NewDismissNotificationHandler creates a dismiss notification handler.
-func NewDismissNotificationHandler(bridge *pumpx2.Bridge, settingsManager *settings.Manager) *DismissNotificationHandler {
-	return &DismissNotificationHandler{bridge: bridge, settingsManager: settingsManager}
+func NewDismissNotificationHandler(bridge *pumpx2.Bridge) *DismissNotificationHandler {
+	return &DismissNotificationHandler{bridge: bridge}
 }
 
 // MessageType returns the message type this handler processes.
@@ -38,6 +37,10 @@ func (h *DismissNotificationHandler) RequiresAuth() bool {
 	return true
 }
 
+// dismissRefusedStatus is the status a refused dismissal answers with. pumpX2
+// names no value; any nonzero one is a failure to TandemKit, and 1 is assumed.
+const dismissRefusedStatus = 1
+
 // HandleMessage processes a DismissNotificationRequest.
 func (h *DismissNotificationHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	id, okID := cargoInt(msg, "notificationId")
@@ -47,46 +50,24 @@ func (h *DismissNotificationHandler) HandleMessage(msg *pumpx2.ParsedMessage, pu
 	}
 	log.Infof("Handling DismissNotificationRequest: txID=%d type=%d id=%d", msg.TxID, typeID, id)
 
-	switch control.NotificationType(typeID) {
-	case control.NotificationTypeAlarm:
-		if pumpState != nil && id >= 0 && id <= 63 {
-			for _, cleared := range pumpState.DismissAlarm(uint(id), time.Time{}) {
-				pumpState.RecordAlarmCleared(cleared.Alert, cleared.ClearedAt)
-			}
+	status := 0
+	category, known := state.NotificationCategoryFromAamType(int(typeID))
+	switch {
+	case !known || id < 0 || id > 63:
+		log.Warnf("DismissNotificationRequest: no notification type %d id %d to dismiss", typeID, id)
+		status = dismissRefusedStatus
+	case category == state.NotificationMalfunction:
+		log.Warnf("DismissNotificationRequest: malfunction %d cannot be dismissed", id)
+		status = dismissRefusedStatus
+	case pumpState != nil:
+		for _, cleared := range pumpState.ClearNotification(category, uint(id), time.Time{}) {
+			pumpState.RecordNotificationCleared(cleared.Alert, cleared.ClearedAt)
 		}
-	case control.NotificationTypeAlert:
-		if err := h.dismissAlert(id); err != nil {
-			log.Warnf("DismissNotificationRequest: alert %d left standing: %v", id, err)
-		}
-	default:
-		log.Infof("DismissNotificationRequest: type %d is not modeled; nothing to clear", typeID)
 	}
 
-	response, err := h.bridge.EncodeMessage(msg.TxID, "DismissNotificationResponse", map[string]interface{}{"status": 0})
+	response, err := h.bridge.EncodeMessage(msg.TxID, "DismissNotificationResponse", map[string]interface{}{"status": status})
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode DismissNotificationResponse: %w", err)
 	}
 	return &Response{ResponseMessage: response, Immediate: true}, nil
-}
-
-// dismissAlert clears bit id of AlertStatusRequest's constant raw cargo, an
-// eight-byte little-endian bitmask (see settings.RegisterDefaults).
-func (h *DismissNotificationHandler) dismissAlert(id int64) error {
-	if h.settingsManager == nil || id < 0 || id > 63 {
-		return fmt.Errorf("no alert bit %d", id)
-	}
-	config, err := h.settingsManager.GetConfig("AlertStatusRequest")
-	if err != nil {
-		return err
-	}
-	if config.Mode != settings.ModeConstant {
-		return fmt.Errorf("AlertStatusRequest is in %s mode", config.Mode)
-	}
-	rawHex, _ := config.Value["raw"].(string)
-	raw, err := hex.DecodeString(rawHex)
-	if err != nil || len(raw) != 8 {
-		return fmt.Errorf("AlertStatusRequest raw %q is not an eight-byte bitmask", rawHex)
-	}
-	raw[id/8] &^= 1 << uint(id%8)
-	return h.settingsManager.UpdateConstant("AlertStatusRequest", map[string]interface{}{"raw": hex.EncodeToString(raw)})
 }

@@ -78,6 +78,40 @@ func TestAnAlarmSuspendCanKeepTheTemp(t *testing.T) {
 	}
 }
 
+func TestAnOcclusionSuspendCanKeepTheTemp(t *testing.T) {
+	_, ps, _, mux := testHarness(t)
+	mustDo(t, mux, http.MethodPut, "/api/clock", `{"mode":"manual","frozen":true,"now":"2024-03-05T12:00:00Z"}`)
+	mustDo(t, mux, http.MethodPost, "/api/state/tempbasal/start", `{"percent":150,"duration_minutes":30}`)
+	end := ps.GetTempRate().EndTime
+
+	mustDo(t, mux, http.MethodPost, "/api/state/suspend", `{"reason":"occlusion","keep_temp":true}`)
+
+	if !ps.IsPumpingSuspended() || !ps.GetTempRate().Active {
+		t.Fatal("want the pump suspended with its temp rate still in force")
+	}
+	if n := countEntries(ps, "TempRateCompleted"); n != 0 {
+		t.Errorf("%d TempRateCompleted records, want none", n)
+	}
+	if !ps.IsNotificationStanding(state.NotificationAlarm, 2) {
+		t.Error("no OCCLUSION_ALARM standing")
+	}
+	mustDo(t, mux, http.MethodPost, "/api/state/resume", `{}`)
+	if temp := ps.GetTempRate(); !temp.Active || !temp.EndTime.Equal(end) {
+		t.Errorf("temp after the resume = %+v, want it running to its programmed end %v", temp, end)
+	}
+}
+
+func TestAnOcclusionSuspendEndsTheTempByDefault(t *testing.T) {
+	_, ps, _, mux := testHarness(t)
+	mustDo(t, mux, http.MethodPost, "/api/state/tempbasal/start", `{"percent":150,"duration_minutes":30}`)
+
+	mustDo(t, mux, http.MethodPost, "/api/state/suspend", `{"reason":"occlusion"}`)
+
+	if ps.GetTempRate().Active {
+		t.Error("the temp survived an occlusion suspend without keep_temp")
+	}
+}
+
 func TestKeepTempIsOnlyForAnAlarmSuspend(t *testing.T) {
 	_, _, _, mux := testHarness(t)
 

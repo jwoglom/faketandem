@@ -35,6 +35,12 @@ func (h *Harness) handleStateAction(w http.ResponseWriter, r *http.Request) {
 		h.handleState(w, r)
 		return
 	}
+	if r.Method == http.MethodDelete {
+		if clear, ok := h.notificationClearActions()[action]; ok {
+			clear(w, r)
+			return
+		}
+	}
 	if r.Method != http.MethodPost {
 		writeError(w, http.StatusMethodNotAllowed, "method %s not allowed on /api/state/%s (use POST)", r.Method, action)
 		return
@@ -59,19 +65,24 @@ func (h *Harness) stateActions() map[string]http.HandlerFunc {
 		"bolus/complete": func(w http.ResponseWriter, r *http.Request) {
 			h.actionBolusEnd(w, r, state.BolusEndReasonCompleted)
 		},
-		"tempbasal/start": h.actionTempBasalStart,
-		"tempbasal/stop":  h.actionTempBasalStop,
-		"suspend":         h.actionSuspend,
-		"resume":          h.actionResume,
-		"history/append":  h.actionHistoryAppend,
-		"history/bulk":    h.actionHistoryBulk,
-		"history/erase":   h.actionHistoryErase,
-		"scenario":        h.actionScenario,
-		"qualifyingevent": h.actionQualifyingEvent,
-		"time":            h.actionSetPumpTime,
+		"tempbasal/start":   h.actionTempBasalStart,
+		"tempbasal/stop":    h.actionTempBasalStop,
+		"suspend":           h.actionSuspend,
+		"resume":            h.actionResume,
+		"history/append":    h.actionHistoryAppend,
+		"history/bulk":      h.actionHistoryBulk,
+		"history/erase":     h.actionHistoryErase,
+		"scenario":          h.actionScenario,
+		"qualifyingevent":   h.actionQualifyingEvent,
+		"time":              h.actionSetPumpTime,
 		"filltubing/button": h.actionFillTubingButton,
 		"cartridge/ready":   h.actionCartridgeReady,
 		"cartridge/insert":  h.actionCartridgeInsert,
+		"alert":             h.notificationRaiseAction(state.NotificationAlert),
+		"alarm":             h.notificationRaiseAction(state.NotificationAlarm),
+		"malfunction":       h.notificationRaiseAction(state.NotificationMalfunction),
+		"reminder":          h.notificationRaiseAction(state.NotificationReminder),
+		"cgmalert":          h.notificationRaiseAction(state.NotificationCGMAlert),
 	}
 }
 
@@ -392,8 +403,9 @@ type suspendBody struct {
 	Reason string `json:"reason,omitempty"`
 	// Message overrides the alarm text recorded for an alarm-driven stop.
 	Message string `json:"message,omitempty"`
-	// KeepTemp leaves a running temp rate in force across an alarm suspend: no
-	// TempRateCompleted, and the temp rate runs again after the resume.
+	// KeepTemp leaves a running temp rate in force across an alarm or occlusion
+	// suspend: no TempRateCompleted, and the temp rate runs again after the
+	// resume, to its programmed end. A Mobi was seen doing this on an occlusion.
 	KeepTemp bool `json:"keep_temp,omitempty"`
 }
 
@@ -421,8 +433,8 @@ func (h *Harness) actionSuspend(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "unknown suspend reason %q (expected user, occlusion or alarm)", reason)
 		return
 	}
-	if body.KeepTemp && reason != SuspendReasonAlarm {
-		writeError(w, http.StatusBadRequest, "keep_temp is for an alarm suspend, not %q", reason)
+	if body.KeepTemp && reason == SuspendReasonUser {
+		writeError(w, http.StatusBadRequest, "keep_temp is for an alarm or occlusion suspend, not %q", reason)
 		return
 	}
 
@@ -473,8 +485,10 @@ func (h *Harness) actionSuspend(w http.ResponseWriter, r *http.Request) {
 }
 
 // raiseSuspendAlarm records the alarm behind an alarm-driven stop, so
-// AlarmStatus and the alert-status responses have something to report and the
-// alert qualifying event has a cause.
+// AlarmStatus has something to report and the alarm qualifying event has a
+// cause: OCCLUSION_ALARM for an occlusion, RESUME_PUMP_ALARM for any other
+// alarm (modeled on a pump that asks to be resumed after its alarm, not
+// confirmed on firmware).
 func (h *Harness) raiseSuspendAlarm(reason, message string) {
 	alertType := state.AlertBasalSuspended
 	if reason == SuspendReasonOcclusion {
@@ -487,33 +501,17 @@ func (h *Harness) raiseSuspendAlarm(reason, message string) {
 		}[reason]
 	}
 
-	alert := state.Alert{
-		ID:        h.nextAlertID(),
-		Type:      alertType,
-		Priority:  state.PriorityCritical,
-		Message:   message,
-		Timestamp: h.pumpState.Now(),
+	alert, raised := h.pumpState.RaiseNotification(state.Alert{
+		Type:     alertType,
+		Priority: state.PriorityCritical,
+		Message:  message,
+	}, reason)
+	if !raised {
+		return
 	}
-	h.pumpState.AddAlert(alert)
-	h.pumpState.RecordAlarmActivated(alert, reason)
-
 	if n := h.notifier(); n != nil {
 		h.emit("alert", func() error { return n.NotifyAlert(alert) })
 	}
-}
-
-// nextAlertID allocates a monotonic alert id.
-func (h *Harness) nextAlertID() uint32 {
-	h.pumpState.RLock()
-	defer h.pumpState.RUnlock()
-
-	var max uint32
-	for _, a := range h.pumpState.ActiveAlerts {
-		if a.ID > max {
-			max = a.ID
-		}
-	}
-	return max + 1
 }
 
 type resumeBody struct {
@@ -565,7 +563,7 @@ func (h *Harness) actionResume(w http.ResponseWriter, r *http.Request) {
 func (h *Harness) clearAlerts() {
 	when := h.pumpState.Now()
 	for _, cleared := range h.pumpState.ClearAlerts(when) {
-		h.pumpState.RecordAlarmCleared(cleared.Alert, cleared.ClearedAt)
+		h.pumpState.RecordNotificationCleared(cleared.Alert, cleared.ClearedAt)
 	}
 }
 

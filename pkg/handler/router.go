@@ -172,7 +172,7 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CurrentEGVGuiDataRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "HomeScreenMirrorRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMStatusRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "AlertStatusRequest", true))
+	r.RegisterHandler(NewNotificationStatusHandler(r.bridge, "AlertStatusRequest"))
 	// AlarmStatusRequest gets a dedicated handler rather than a static one:
 	// cliparser cannot construct AlarmStatusResponse at all (see
 	// alarm_status.go), so this one is built natively from PumpState.
@@ -182,11 +182,11 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewLastBolusStatusHandler(r.bridge, "LastBolusStatusV2Request"))
 
 	// Notification/alarm/malfunction handlers
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "HighestAamRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ActiveAamBitsRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "MalfunctionStatusRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ReminderStatusRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMAlertStatusRequest", true))
+	r.RegisterHandler(NewNotificationStatusHandler(r.bridge, "HighestAamRequest"))
+	r.RegisterHandler(NewNotificationStatusHandler(r.bridge, "ActiveAamBitsRequest"))
+	r.RegisterHandler(NewNotificationStatusHandler(r.bridge, "MalfunctionStatusRequest"))
+	r.RegisterHandler(NewNotificationStatusHandler(r.bridge, "ReminderStatusRequest"))
+	r.RegisterHandler(NewNotificationStatusHandler(r.bridge, "CGMAlertStatusRequest"))
 
 	// ControlIQ info and sleep schedule handlers
 	r.RegisterHandler(NewControlIQInfoHandler(r.bridge, "ControlIQInfoV1Request"))
@@ -243,7 +243,7 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewChangeTimeDateHandler(r.bridge))
 
 	// Simple control handlers (log and return success)
-	r.RegisterHandler(NewDismissNotificationHandler(r.bridge, r.settingsManager))
+	r.RegisterHandler(NewDismissNotificationHandler(r.bridge))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "PlaySoundRequest"))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "DisconnectPumpRequest"))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "UserInteractionRequest"))
