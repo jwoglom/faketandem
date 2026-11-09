@@ -175,8 +175,12 @@ func (e HistoryLogEntry) EncodeRecord() []byte {
 // where buildCargo writes tempRateId two bytes early). Captured records from
 // real pumps agree with the parse offsets, so those are what we emit.
 func encodeHistoryPayload(payload []byte, typeID int, fields map[string]interface{}) {
-	if encodeClockChangePayload(payload, typeID, fields) || encodeBasalStatePayload(payload, typeID, fields) {
-		return
+	for _, encode := range []func([]byte, int, map[string]interface{}) bool{
+		encodeClockChangePayload, encodeBasalStatePayload, encodeLoadingPayload,
+	} {
+		if encode(payload, typeID, fields) {
+			return
+		}
 	}
 	switch typeID {
 	case HistoryBolusActivated:
@@ -291,6 +295,30 @@ func encodeHistoryPayload(payload []byte, typeID int, fields map[string]interfac
 		// decodes as this event type at this time and sequence.
 		writeRawPayload(payload, fields)
 	}
+}
+
+// encodeLoadingPayload writes the records of a cartridge change, tubing fill and cannula fill, and
+// reports whether typeID was one of them.
+func encodeLoadingPayload(payload []byte, typeID int, fields map[string]interface{}) bool {
+	switch typeID {
+	case HistoryCartridgeFilled:
+		// insulinDisplay u32 @0 (whole units), insulinActual f32 @4
+		binary.LittleEndian.PutUint32(payload[0:4], uint32(fieldInt(fields, "insulinDisplay")))
+		putFloat32(payload[4:8], fieldFloat(fields, "insulinActual"))
+	case HistoryTubingFilled:
+		// primeSize f32 @0 (units), completionStatus u32 @4, position u32 @8
+		putFloat32(payload[0:4], fieldFloat(fields, "primeSize"))
+		binary.LittleEndian.PutUint32(payload[4:8], uint32(fieldInt(fields, "completionStatus")))
+		binary.LittleEndian.PutUint32(payload[8:12], uint32(fieldInt(fields, "position")))
+	case HistoryCannulaFilled:
+		// primeSize f32 @0 (units), completionStatus u32 @4, infusionSetType u8 @8
+		putFloat32(payload[0:4], fieldFloat(fields, "primeSize"))
+		binary.LittleEndian.PutUint32(payload[4:8], uint32(fieldInt(fields, "completionStatus")))
+		payload[8] = uint8(fieldInt(fields, "infusionSetType"))
+	default:
+		return false
+	}
+	return true
 }
 
 // encodeClockChangePayload writes the records a pump writes when its clock is

@@ -169,7 +169,9 @@ func registerQualifyingEventDefaults(manager *Manager) {
 	// LoadStatusResponse has two real "data" constructors with the same 3-param
 	// shape (one takes a LoadState enum cliparser can't build), plus one
 	// deprecated 2-int constructor -- the deprecated one is the only one
-	// reachable through this tool.
+	// reachable through this tool. LoadStatusRequest is served by
+	// LoadStatusHandler from the open cartridge procedure; this entry is kept
+	// only so the settings API still knows the message name.
 	registerConstant(manager, "LoadStatusRequest", map[string]interface{}{
 		"status":  0,
 		"unknown": 0,

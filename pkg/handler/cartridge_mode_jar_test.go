@@ -67,7 +67,8 @@ func TestCartridgeModeRequestsAnswerWithTheModeTheyFind(t *testing.T) {
 		{"ExitChangeCartridgeModeRequest", 1, state.WorkflowFillTubing},
 		{"ExitFillTubingModeRequest", 0, state.WorkflowNone},
 		{"ExitFillTubingModeRequest", 1, state.WorkflowNone},
-		{"EnterChangeCartridgeModeRequest", 0, state.WorkflowChangeCartridge},
+		// The change cartridge exit put a new cartridge in, and no tubing fill has taken insulin since.
+		{"EnterChangeCartridgeModeRequest", 1, state.WorkflowNone},
 	}
 	for i, step := range steps {
 		if got := cartridgeModeStatus(t, bridge, ps, step.request); got != step.status {

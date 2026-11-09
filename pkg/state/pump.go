@@ -70,6 +70,8 @@ type PumpState struct {
 	// fillTubingTxID and fillTubingButtonDown are fill tubing mode's stream; see workflow.go.
 	fillTubingTxID       uint8
 	fillTubingButtonDown bool
+	// cartridge is the rest of a cartridge change; see cartridge.go.
+	cartridge cartridgeProcedure
 	// idpProfiles are the insulin delivery profiles in slot order; see idp.go.
 	idpProfiles []IDPProfile
 	// suspendReason records WHY delivery is suspended ("user", "occlusion",
