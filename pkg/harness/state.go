@@ -1,6 +1,7 @@
 package harness
 
 import (
+	"fmt"
 	"net/http"
 	"time"
 
@@ -42,6 +43,9 @@ type Snapshot struct {
 	WorkflowMode string `json:"workflow_mode"`
 	// FillTubingButtonDown is whether the pump's button is held in fill tubing mode.
 	FillTubingButtonDown bool `json:"fill_tubing_button_down"`
+	// Cartridge is the rest of a cartridge change, tubing fill and cannula fill: the load state
+	// LoadStatusResponse reports, and the procedures' timings.
+	Cartridge state.CartridgeSnapshot `json:"cartridge"`
 	// IDPProfiles are the insulin delivery profiles in slot order; slot 0 is active.
 	IDPProfiles []state.IDPProfile `json:"idp_profiles"`
 	History     historySnapshot    `json:"history"`
@@ -219,6 +223,10 @@ func (h *Harness) handleState(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if err := body.validate(); err != nil {
+			writeError(w, http.StatusBadRequest, "%v", err)
+			return
+		}
 		if body.IDPProfiles != nil && len(*body.IDPProfiles) > state.MaxIDPProfiles {
 			writeError(w, http.StatusBadRequest, "%d idp_profiles; a pump holds at most %d", len(*body.IDPProfiles), state.MaxIDPProfiles)
 			return
@@ -253,6 +261,7 @@ func (h *Harness) Snapshot() Snapshot {
 	suspendReason := ps.SuspendReason()
 	workflowMode := ps.WorkflowModeUnlocked()
 	fillTubingButtonDown := ps.FillTubingButtonDownUnlocked()
+	cartridge := ps.CartridgeSnapshotUnlocked()
 	idpProfiles := ps.IDPProfilesUnlocked()
 	iob := ps.ReadIOBUnlocked()
 	insulin := insulinSnapshot{
@@ -370,17 +379,18 @@ func (h *Harness) Snapshot() Snapshot {
 			Weight:            controlIQ.Weight,
 			TotalDailyInsulin: controlIQ.TotalDailyInsulin,
 		},
-		Limits:        limitsSnapshot(ps.GetDeliveryLimits()),
-		Insulin:       insulin,
-		Battery:       battery,
-		CGM:           cgm,
-		Alerts:        alerts,
-		AlarmsHistory: clearedAlarms,
-		WorkflowMode:  string(workflowMode),
+		Limits:               limitsSnapshot(ps.GetDeliveryLimits()),
+		Insulin:              insulin,
+		Battery:              battery,
+		CGM:                  cgm,
+		Alerts:               alerts,
+		AlarmsHistory:        clearedAlarms,
+		WorkflowMode:         string(workflowMode),
 		FillTubingButtonDown: fillTubingButtonDown,
-		IDPProfiles:   idpProfiles,
-		History:       h.historySnapshot(),
-		RequestLog:    h.requestLogSnapshot(),
+		Cartridge:            cartridge,
+		IDPProfiles:          idpProfiles,
+		History:              h.historySnapshot(),
+		RequestLog:           h.requestLogSnapshot(),
 	}
 }
 
@@ -467,11 +477,11 @@ func (h *Harness) pairingState() string {
 // present are applied. Pointers rather than values, so "set the battery to 0"
 // is distinguishable from "do not touch the battery".
 type stateUpdate struct {
-	ReservoirUnits    *float64 `json:"reservoir_units,omitempty"`
-	BatteryPercent    *int     `json:"battery_percent,omitempty"`
-	BatteryCharging   *bool    `json:"battery_charging,omitempty"`
-	BasalRate         *float64 `json:"basal_rate,omitempty"`
-	Suspended         *bool    `json:"suspended,omitempty"`
+	ReservoirUnits  *float64 `json:"reservoir_units,omitempty"`
+	BatteryPercent  *int     `json:"battery_percent,omitempty"`
+	BatteryCharging *bool    `json:"battery_charging,omitempty"`
+	BasalRate       *float64 `json:"basal_rate,omitempty"`
+	Suspended       *bool    `json:"suspended,omitempty"`
 	// IOB stages insulin on board as one dose given now, in place of every
 	// dose the pump has counted; it then wears off like a bolus.
 	IOB               *float64 `json:"iob,omitempty"`
@@ -505,6 +515,56 @@ type stateUpdate struct {
 	// CGMAvailable is whether Control-IQ has a CGM. Without one it runs the
 	// profile from the next cycle.
 	CGMAvailable *bool `json:"cgm_available,omitempty"`
+	cartridgeUpdate
+}
+
+// cartridgeUpdate stages the cartridge procedures: their timings, and a new cartridge waiting for
+// its tubing fill.
+type cartridgeUpdate struct {
+	CartridgeReadySeconds    *float64 `json:"cartridge_ready_seconds,omitempty"`
+	CartridgeDetectSeconds   *float64 `json:"cartridge_detect_seconds,omitempty"`
+	CartridgeDetectOnInsert  *bool    `json:"cartridge_detect_on_insert,omitempty"`
+	FillTubingUnitsPerSecond *float64 `json:"fill_tubing_units_per_second,omitempty"`
+	MaxFillSeconds           *float64 `json:"max_fill_seconds,omitempty"`
+	FillCannulaStreamLost    *bool    `json:"fill_cannula_stream_lost,omitempty"`
+	CartridgeLoaded          *bool    `json:"cartridge_loaded,omitempty"`
+}
+
+func (u cartridgeUpdate) validate() error {
+	for name, v := range map[string]*float64{
+		"cartridge_ready_seconds":      u.CartridgeReadySeconds,
+		"cartridge_detect_seconds":     u.CartridgeDetectSeconds,
+		"fill_tubing_units_per_second": u.FillTubingUnitsPerSecond,
+	} {
+		if v != nil && *v < 0 {
+			return fmt.Errorf("%s must not be negative", name)
+		}
+	}
+	if u.MaxFillSeconds != nil && *u.MaxFillSeconds <= 0 {
+		return fmt.Errorf("max_fill_seconds must be positive")
+	}
+	return nil
+}
+
+func applyCartridge(ps *state.PumpState, u cartridgeUpdate) []string {
+	var applied []string
+	set := func(name string, present bool, apply func(*state.CartridgeSettings)) {
+		if present {
+			ps.UpdateCartridgeSettings(apply)
+			applied = append(applied, name)
+		}
+	}
+	set("cartridge_ready_seconds", u.CartridgeReadySeconds != nil, func(s *state.CartridgeSettings) { s.ReadySeconds = *u.CartridgeReadySeconds })
+	set("cartridge_detect_seconds", u.CartridgeDetectSeconds != nil, func(s *state.CartridgeSettings) { s.DetectSeconds = *u.CartridgeDetectSeconds })
+	set("cartridge_detect_on_insert", u.CartridgeDetectOnInsert != nil, func(s *state.CartridgeSettings) { s.DetectOnInsert = *u.CartridgeDetectOnInsert })
+	set("fill_tubing_units_per_second", u.FillTubingUnitsPerSecond != nil, func(s *state.CartridgeSettings) { s.FillTubingUnitsPerSecond = *u.FillTubingUnitsPerSecond })
+	set("max_fill_seconds", u.MaxFillSeconds != nil, func(s *state.CartridgeSettings) { s.MaxFillSeconds = *u.MaxFillSeconds })
+	set("fill_cannula_stream_lost", u.FillCannulaStreamLost != nil, func(s *state.CartridgeSettings) { s.FillCannulaStreamLost = *u.FillCannulaStreamLost })
+	if u.CartridgeLoaded != nil {
+		ps.SetCartridgeLoaded(*u.CartridgeLoaded)
+		applied = append(applied, "cartridge_loaded")
+	}
+	return applied
 }
 
 func applyBasalCycle(ps *state.PumpState, u stateUpdate) []string {
@@ -622,6 +682,7 @@ func (h *Harness) applyStateUpdate(u stateUpdate) []string {
 	}
 
 	applied = append(applied, h.applyWorkflowMode(u)...)
+	applied = append(applied, applyCartridge(ps, u.cartridgeUpdate)...)
 	applied = append(applied, h.applyIDPProfiles(u)...)
 	applied = append(applied, h.applyDirectFields(u)...)
 	// Last, so the first 279 sees everything else this update staged.

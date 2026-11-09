@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ var testInstant = time.Date(2024, time.March, 5, 12, 0, 0, 0, time.UTC)
 // putting them on a wire, so a test can assert which qualifying events an
 // action raised without standing up a link.
 type recordingTransport struct {
+	mu            sync.Mutex
 	notifications []notification
 	connected     bool
 	shutdowns     int
@@ -42,6 +44,8 @@ func (r *recordingTransport) SetCharacteristicData(bluetooth.CharacteristicType,
 }
 
 func (r *recordingTransport) Notify(charType bluetooth.CharacteristicType, data []byte) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.notifications = append(r.notifications, notification{char: charType, data: append([]byte(nil), data...)})
 	return nil
 }

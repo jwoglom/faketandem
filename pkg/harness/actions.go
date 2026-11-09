@@ -70,6 +70,8 @@ func (h *Harness) stateActions() map[string]http.HandlerFunc {
 		"qualifyingevent": h.actionQualifyingEvent,
 		"time":            h.actionSetPumpTime,
 		"filltubing/button": h.actionFillTubingButton,
+		"cartridge/ready":   h.actionCartridgeReady,
+		"cartridge/insert":  h.actionCartridgeInsert,
 	}
 }
 
@@ -799,7 +801,7 @@ func (h *Harness) releaseFillTubingButtonAfter(hold time.Duration) {
 			h.fillButtonRelease = nil
 		}
 		h.fillButtonMtx.Unlock()
-		if !current {
+		if !current || !h.pumpState.FillTubingButtonDown() {
 			return
 		}
 		if err := h.router.SetFillTubingButton(false); err != nil {
@@ -818,4 +820,50 @@ func (h *Harness) stopFillTubingRelease() {
 		h.fillButtonRelease.Stop()
 		h.fillButtonRelease = nil
 	}
+}
+
+// actionCartridgeReady ends the retraction of change cartridge mode now: the pump streams
+// readyToChange, as it does on its own cartridge_ready_seconds after the mode opens.
+func (h *Harness) actionCartridgeReady(w http.ResponseWriter, r *http.Request) {
+	if err := decodeBody(r, &struct{}{}); err != nil {
+		writeError(w, http.StatusBadRequest, "%v", err)
+		return
+	}
+	if h.router == nil {
+		writeError(w, http.StatusInternalServerError, "no router attached; cannot stream readyToChange")
+		return
+	}
+	if err := h.router.CartridgeReady(); err != nil {
+		writeError(w, http.StatusConflict, "%v", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"state": h.Snapshot()})
+}
+
+type cartridgeInsertBody struct {
+	// Units is what the new cartridge holds.
+	Units float64 `json:"units"`
+}
+
+// actionCartridgeInsert puts a new cartridge into a pump that has retracted for it. The pump
+// checks it at the ExitChangeCartridgeModeRequest, or at once with cartridge_detect_on_insert.
+func (h *Harness) actionCartridgeInsert(w http.ResponseWriter, r *http.Request) {
+	var body cartridgeInsertBody
+	if err := decodeBody(r, &body); err != nil {
+		writeError(w, http.StatusBadRequest, "%v", err)
+		return
+	}
+	if capacity := h.pumpState.ReservoirCapacity(); body.Units <= 0 || body.Units > capacity {
+		writeError(w, http.StatusBadRequest, "units must be positive and at most the reservoir's %g", capacity)
+		return
+	}
+	if h.router == nil {
+		writeError(w, http.StatusInternalServerError, "no router attached; cannot stream the cartridge check")
+		return
+	}
+	if err := h.router.InsertCartridge(body.Units); err != nil {
+		writeError(w, http.StatusConflict, "%v", err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"units": body.Units, "state": h.Snapshot()})
 }

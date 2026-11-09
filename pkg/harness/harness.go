@@ -154,6 +154,8 @@ func (h *Harness) Endpoints() []string {
 		"POST   /api/state/scenario           {preset} or {hours, state, events}: replay the pump's recent use",
 		"POST   /api/state/qualifyingevent    {bitmask}",
 		"POST   /api/state/filltubing/button  {down} or {hold_seconds}: the pump's button in fill tubing mode",
+		"POST   /api/state/cartridge/ready    {}: the pump finishes retracting and streams readyToChange now",
+		"POST   /api/state/cartridge/insert   {units}: put a new cartridge into a pump ready for it",
 		"GET    /api/transport",
 		"PUT    /api/transport                (also PATCH) {att_mtu}",
 		"GET    /api/log?since=N",
