@@ -72,6 +72,11 @@ type connectionSnapshot struct {
 	// RadioEnabled is reported only for transports that can switch their radio
 	// (the virtual link); it reads true for the real BLE transport.
 	RadioEnabled bool `json:"radio_enabled"`
+	// Subscribed lists the characteristics the attached central has
+	// subscribed to (CURRENT_STATUS, QUALIFYING_EVENTS, ...). A central is
+	// connected before it has re-subscribed, and a notification sent in
+	// between is dropped. Absent for a transport that cannot tell.
+	Subscribed *[]string `json:"subscribed,omitempty"`
 }
 
 type basalSnapshot struct {
@@ -463,7 +468,12 @@ func (h *Harness) connectionSnapshot() connectionSnapshot {
 	if rc, ok := h.transport.(bluetooth.RadioController); ok {
 		radio = rc.RadioEnabled()
 	}
-	return connectionSnapshot{Connected: h.transport.IsConnected(), RadioEnabled: radio}
+	snap := connectionSnapshot{Connected: h.transport.IsConnected(), RadioEnabled: radio}
+	if sr, ok := h.transport.(bluetooth.SubscriptionReporter); ok {
+		subs := sr.Subscriptions()
+		snap.Subscribed = &subs
+	}
+	return snap
 }
 
 func (h *Harness) pairingState() string {
