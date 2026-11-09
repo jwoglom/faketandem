@@ -34,6 +34,14 @@ const elements = {
   fillTubingStatus: $("fill-tubing-status"),
   fillTubingButton: $("fill-tubing-button"),
   refreshPumpButtonBtn: $("refresh-pump-button-btn"),
+  refreshNotificationsBtn: $("refresh-notifications-btn"),
+  notificationForm: $("notification-form"),
+  notificationCategory: $("notification-category"),
+  notificationType: $("notification-type"),
+  notificationNames: $("notification-names"),
+  notificationError: $("notification-error"),
+  clearNotificationBtn: $("clear-notification-btn"),
+  notificationList: $("notification-list"),
   longTermKeyForm: $("long-term-key-form"),
   longTermKeyInput: $("long-term-key"),
   longTermKeyError: $("long-term-key-error"),
@@ -497,7 +505,9 @@ const fetchPumpButtonState = async ({ quiet = false } = {}) => {
     if (!response.ok) {
       throw new Error(`Failed to load pump state (${response.status}).`);
     }
-    updateFillTubingStatus(await response.json());
+    const snapshot = await response.json();
+    updateFillTubingStatus(snapshot);
+    updateNotifications(snapshot);
   } catch (error) {
     if (!quiet) {
       logEvent(`Failed to fetch pump state: ${error.message}`, "error");
@@ -528,6 +538,85 @@ const setFillTubingButton = async (down) => {
     logEvent(error.message, "error");
     fetchPumpButtonState();
   }
+};
+
+/* ---------- alerts & alarms (harness REST) ---------- */
+
+// Common names per kind, offered as suggestions; any pumpX2 name or bit works.
+const notificationSuggestions = {
+  alert: ["LOW_INSULIN_ALERT", "LOW_POWER_ALERT", "INCOMPLETE_BOLUS_ALERT", "MAX_BASAL_ALERT", "MIN_BASAL_ALERT", "CGM_UNAVAILABLE"],
+  alarm: ["RESUME_PUMP_ALARM", "RESUME_PUMP_ALARM2", "OCCLUSION_ALARM", "EMPTY_CARTRIDGE_ALARM", "AUTO_OFF_ALARM", "BATTERY_SHUTDOWN_ALARM"],
+  malfunction: ["0", "9", "19"],
+  reminder: ["LOW_BG_REMINDER", "HIGH_BG_REMINDER", "SITE_CHANGE_REMINDER", "MISSED_MEAL_REMINDER"],
+  cgmalert: ["FIXED_LOW_CGM_ALERT", "HIGH_CGM_ALERT", "LOW_CGM_ALERT", "SENSOR_EXPIRED_CGM_ALERT"],
+};
+
+const categoryActions = { alert: "alert", alarm: "alarm", malfunction: "malfunction", reminder: "reminder", cgm_alert: "cgmalert" };
+
+const fillNotificationSuggestions = () => {
+  const names = notificationSuggestions[elements.notificationCategory.value] || [];
+  elements.notificationNames.replaceChildren(...names.map((name) => {
+    const option = document.createElement("option");
+    option.value = name;
+    return option;
+  }));
+};
+
+// A bare number is a bit (code); anything else a name.
+const notificationBody = (value) => (/^\d+$/.test(value) ? { code: Number(value) } : { type: value });
+
+const changeNotification = async (action, method, value) => {
+  elements.notificationError.textContent = "";
+  if (!value) {
+    elements.notificationError.textContent = "Give a name or a bit.";
+    return;
+  }
+  try {
+    const response = await fetch(`/api/state/${action}`, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(notificationBody(value)),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || `Failed (${response.status}).`);
+    }
+    updateNotifications(data.state);
+    const verb = method === "POST" ? "Raised" : "Cleared";
+    showToast(`${verb} ${action} ${value}`, "success");
+    logEvent(`${verb} ${action} ${value}.`);
+  } catch (error) {
+    elements.notificationError.textContent = error.message;
+    logEvent(`Failed to change ${action} ${value}: ${error.message}`, "error");
+  }
+};
+
+const updateNotifications = (snapshot) => {
+  if (!snapshot) {
+    return;
+  }
+  const standing = (snapshot.alerts || []).filter((a) => a.category && a.category !== "none");
+  if (standing.length === 0) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = "Nothing standing.";
+    elements.notificationList.replaceChildren(empty);
+    return;
+  }
+  elements.notificationList.replaceChildren(...standing.map((a) => {
+    const row = document.createElement("div");
+    row.className = "settings-item";
+    row.setAttribute("role", "listitem");
+    const label = document.createElement("span");
+    const fault = a.category === "malfunction" && a.fault_id ? ` fault 0x${a.fault_id.toString(16)}` : "";
+    label.textContent = `${a.category} ${a.name} (bit ${a.bit})${fault}`;
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.textContent = "Clear";
+    clear.addEventListener("click", () => changeNotification(categoryActions[a.category], "DELETE", String(a.bit)));
+    row.append(label, clear);
+    return row;
+  }));
 };
 
 /* ---------- settings editor ---------- */
@@ -962,6 +1051,15 @@ const init = () => {
   for (const type of ["pointerup", "pointercancel", "lostpointercapture"]) {
     elements.fillTubingButton.addEventListener(type, () => setFillTubingButton(false));
   }
+  elements.refreshNotificationsBtn.addEventListener("click", () => fetchPumpButtonState());
+  elements.notificationCategory.addEventListener("change", fillNotificationSuggestions);
+  fillNotificationSuggestions();
+  elements.notificationForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    changeNotification(elements.notificationCategory.value, "POST", elements.notificationType.value.trim());
+  });
+  elements.clearNotificationBtn.addEventListener("click", () =>
+    changeNotification(elements.notificationCategory.value, "DELETE", elements.notificationType.value.trim()));
   setInterval(() => fetchPumpButtonState({ quiet: true }), 3000);
   fetchPumpButtonState();
   elements.longTermKeyForm.addEventListener("submit", (event) => {
