@@ -175,7 +175,6 @@ func registerQualifyingEventDefaults(manager *Manager) {
 		"unknown": 0,
 	})
 
-
 	// LastBolusStatusV2Response(int status, int bolusId, long timestamp,
 	// long deliveredVolume, int bolusStatusId, int bolusSourceId,
 	// int bolusTypeBitmask, long extendedBolusDuration, long requestedVolume)
@@ -247,7 +246,13 @@ func registerPumpInfoDefaults(manager *Manager) {
 	})
 }
 
-// registerNotificationDefaults registers defaults for notification bundle / alarm / malfunction handlers
+// registerNotificationDefaults registers defaults for notification bundle / alarm / malfunction handlers.
+//
+// NOTE: none of these, nor AlertStatusRequest and AlarmStatusRequest above, is
+// served from this table any more: NotificationStatusHandler and
+// AlarmStatusHandler answer from the pump's live notification state (see
+// pkg/state/notifications.go). The entries stay so the settings API still
+// knows the message names.
 func registerNotificationDefaults(manager *Manager) {
 	// HighestAamRequest (opcode 120) — from ALARM qualifying event
 	// HighestAamResponse(long aamId, long faultId, byte[] remaining)

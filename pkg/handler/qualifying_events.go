@@ -22,7 +22,6 @@ import (
 // qualifyingEventAlert), which are already served by the handlers
 // registered elsewhere in this package.
 const (
-	qualifyingEventAlert            uint32 = 1
 	qualifyingEventPumpSuspend      uint32 = 64
 	qualifyingEventPumpResume       uint32 = 128
 	qualifyingEventBasalChange      uint32 = 512
@@ -80,18 +79,40 @@ func (qe *QualifyingEventsNotifier) NotifyBolusCanceled(bolusID uint32, delivere
 	return qe.sendBitmask(qualifyingEventBolusChange)
 }
 
-// NotifyAlert sends the ALERT qualifying event
+// NotifyAlert sends the qualifying event of the alert's category: ALERT,
+// ALARM, MALFUNCTION, REMINDER or CGM_ALERT, which is the bit a driver keys
+// its follow-up status read on.
 func (qe *QualifyingEventsNotifier) NotifyAlert(alert state.Alert) error {
-	log.Infof("Sending ALERT qualifying event: type=%d, priority=%d, message=%s",
-		alert.Type, alert.Priority, alert.Message)
-	return qe.sendBitmask(qualifyingEventAlert)
+	bits := NotificationQualifyingEvent(alert.Category)
+	log.Infof("Sending qualifying event 0x%x for %s %s (id=%d): %s",
+		bits, alert.Category, alert.Name(), alert.ID, alert.Message)
+	return qe.sendBitmask(bits)
 }
 
-// NotifyAlertCleared sends the ALERT qualifying event to prompt the client
-// to re-poll alert status and observe it has cleared
-func (qe *QualifyingEventsNotifier) NotifyAlertCleared(alertID uint32) error {
-	log.Infof("Sending ALERT qualifying event (alert cleared): alertID=%d", alertID)
-	return qe.sendBitmask(qualifyingEventAlert)
+// NotifyAlertCleared sends the alert's category qualifying event again, so the
+// client re-reads that status and sees it has cleared.
+func (qe *QualifyingEventsNotifier) NotifyAlertCleared(alert state.Alert) error {
+	bits := NotificationQualifyingEvent(alert.Category)
+	log.Infof("Sending qualifying event 0x%x (%s %s cleared)", bits, alert.Category, alert.Name())
+	return qe.sendBitmask(bits)
+}
+
+// NotificationQualifyingEvent is the qualifying event a change in category c
+// raises. An alert with no bit raises ALERT, as every alert did before
+// categories existed.
+func NotificationQualifyingEvent(c state.NotificationCategory) uint32 {
+	switch c {
+	case state.NotificationAlarm:
+		return QEAlarm
+	case state.NotificationMalfunction:
+		return QEMalfunction
+	case state.NotificationReminder:
+		return QEReminder
+	case state.NotificationCGMAlert:
+		return QECGMAlert
+	default:
+		return QEAlert
+	}
 }
 
 // NotifyBasalRateChange sends the BASAL_CHANGE qualifying event

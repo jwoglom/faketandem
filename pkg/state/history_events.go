@@ -114,9 +114,9 @@ func (ps *PumpState) RecordTempRateActivated(basal *BasalState, profileRate floa
 			"tempRateId":           basal.TempRateID,
 		},
 		map[string]interface{}{
-			"tempRate":        basal.TempBasalRate,
-			"normalRate":      profileRate,
-			"durationSeconds": duration.Seconds(),
+			"tempRate":                basal.TempBasalRate,
+			"normalRate":              profileRate,
+			"durationSeconds":         duration.Seconds(),
 			"scheduledEndPumpSeconds": ps.PumpTimeFor(basal.TempBasalEnd),
 		})
 }
@@ -201,45 +201,68 @@ func (ps *PumpState) RecordPumpingResumed() uint32 {
 		nil)
 }
 
-// RecordAlarmActivated writes the AlarmActivated record for an alarm the pump
-// has just raised.
-//
-// Wire fields (AlarmActivatedHistoryLog): alarmId, faultLocatorData, param1,
-// param2. alarmId is the alarm's own id, which the matching AlarmCleared
-// repeats -- that pairing is what lets a timeline close an alarm. The alert
-// *type* behind it is this emulator's own classification, so it is reported as
-// context (alertTypeId / alertTypeName) rather than squeezed into a wire field
-// that means something else.
-func (ps *PumpState) RecordAlarmActivated(alert Alert, reason string) uint32 {
-	return ps.AddHistoryLogEntryAtWithExtra(HistoryAlarmActivated, "AlarmActivated", alert.Timestamp,
-		map[string]interface{}{
-			"alarmId": alert.ID,
-		},
-		map[string]interface{}{
-			"alertTypeId":   int(alert.Type),
-			"alertTypeName": alert.Type.String(),
-			"priority":      int(alert.Priority),
-			"reason":        reason,
-			"message":       alert.Message,
-		})
+// notificationRecords are the records a category's activation and clearing
+// write, and the wire field that names the notification in both. A reminder
+// writes none; a malfunction is never cleared.
+var notificationRecords = map[NotificationCategory]struct {
+	activatedID int
+	activated   string
+	clearedID   int
+	cleared     string
+	idField     string
+}{
+	NotificationAlert:       {HistoryAlertActivated, "AlertActivated", HistoryAlertCleared, "AlertCleared", "alertId"},
+	NotificationAlarm:       {HistoryAlarmActivated, "AlarmActivated", HistoryAlarmCleared, "AlarmCleared", "alarmId"},
+	NotificationCGMAlert:    {HistoryCGMAlertActivated, "CgmAlertActivated", HistoryCGMAlertCleared, "CgmAlertCleared", "alertId"},
+	NotificationMalfunction: {HistoryMalfunction, "Malfunction", 0, "", "malfId"},
 }
 
-// RecordAlarmCleared writes the AlarmCleared record for one alarm that has
-// stopped standing, at the instant `when`.
-//
-// Wire fields (AlarmClearedHistoryLog): alarmId, matching the AlarmActivated it
-// closes. One record per alarm: a single record saying "3 alarms went away"
-// (which is what the harness used to write) is not a record format a pump has.
-func (ps *PumpState) RecordAlarmCleared(alert Alert, when time.Time) uint32 {
-	return ps.AddHistoryLogEntryAtWithExtra(HistoryAlarmCleared, "AlarmCleared", when,
-		map[string]interface{}{
-			"alarmId": alert.ID,
-		},
-		map[string]interface{}{
-			"alertTypeId":   int(alert.Type),
-			"alertTypeName": alert.Type.String(),
-			"message":       alert.Message,
-		})
+// notificationExtra is the JSON-only context on a notification record.
+func notificationExtra(alert Alert) map[string]interface{} {
+	return map[string]interface{}{
+		"alertTypeId":   int(alert.Type),
+		"alertTypeName": alert.TypeName(),
+		"category":      alert.Category.String(),
+		"name":          alert.Name(),
+		"message":       alert.Message,
+	}
+}
+
+// RecordNotificationActivated writes the record a pump writes when it raises
+// the notification: AlertActivated, AlarmActivated, CgmAlertActivated or
+// Malfunction, at the alert's timestamp, naming it by its bit -- the
+// AlertResponseType / AlarmResponseType / MalfunctionType value pumpX2 and
+// TandemKit read the id field as. A malfunction carries its fault code as
+// faultLocatorData. Returns the sequence, 0 when the category writes none.
+func (ps *PumpState) RecordNotificationActivated(alert Alert, reason string) uint32 {
+	records, ok := notificationRecords[alert.Category]
+	if !ok {
+		return 0
+	}
+	data := map[string]interface{}{records.idField: alert.Bit}
+	if alert.Category == NotificationMalfunction {
+		data["faultLocatorData"] = alert.FaultID
+	}
+	extra := notificationExtra(alert)
+	extra["alertId"] = alert.ID
+	extra["priority"] = int(alert.Priority)
+	extra["reason"] = reason
+	return ps.AddHistoryLogEntryAtWithExtra(records.activatedID, records.activated, alert.Timestamp, data, extra)
+}
+
+// RecordNotificationCleared writes the record a pump writes when the
+// notification stops standing, at the instant `when`: AlertCleared,
+// AlarmCleared or CgmAlertCleared, naming it as its activation did. One record
+// per notification. Returns the sequence, 0 when the category writes none.
+func (ps *PumpState) RecordNotificationCleared(alert Alert, when time.Time) uint32 {
+	records, ok := notificationRecords[alert.Category]
+	if !ok || records.cleared == "" {
+		return 0
+	}
+	extra := notificationExtra(alert)
+	extra["alertId"] = alert.ID
+	return ps.AddHistoryLogEntryAtWithExtra(records.clearedID, records.cleared, when,
+		map[string]interface{}{records.idField: alert.Bit}, extra)
 }
 
 // String names the alert type, for the JSON context on alarm records.
@@ -255,6 +278,8 @@ func (t AlertType) String() string {
 		return "Occlusion"
 	case AlertBasalSuspended:
 		return "BasalSuspended"
+	case AlertNotification:
+		return "Notification"
 	default:
 		return "Unknown"
 	}

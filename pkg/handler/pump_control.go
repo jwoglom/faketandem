@@ -79,6 +79,17 @@ func (h *ResumePumpingHandler) RequiresAuth() bool {
 func (h *ResumePumpingHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling ResumePumpingRequest: txID=%d", msg.TxID)
 
+	if alarms := pumpState.ResumeBlockingAlarms(); len(alarms) > 0 && pumpState.IsPumpingSuspended() {
+		log.Warnf("Refusing ResumePumpingRequest: resume-pump alarm(s) %v stand until dismissed", alarms)
+		response, err := h.bridge.EncodeMessage(msg.TxID, "ResumePumpingResponse", map[string]interface{}{
+			"status": resumeRefusedStatus,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode ResumePumpingResponse: %w", err)
+		}
+		return &Response{ResponseMessage: response, Immediate: true}, nil
+	}
+
 	response, err := h.bridge.EncodeMessage(
 		msg.TxID,
 		"ResumePumpingResponse",
@@ -98,6 +109,11 @@ func (h *ResumePumpingHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpStat
 		},
 	}, nil
 }
+
+// resumeRefusedStatus is the status a refused ResumePumping answers with
+// while RESUME_PUMP_ALARM or RESUME_PUMP_ALARM2 stands. pumpX2 names no value;
+// TandemKit takes any nonzero one as a refusal. Modeled, not confirmed.
+const resumeRefusedStatus = 1
 
 // SetTempRateHandler handles SetTempRateRequest messages
 type SetTempRateHandler struct {

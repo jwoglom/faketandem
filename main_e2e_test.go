@@ -49,6 +49,9 @@ type e2ePump struct {
 	codec  *pumpx2.Bridge
 	txID   int
 	apiURL string
+	// events are the qualifying-event bitmasks notified so far, set aside by
+	// exchange while it waits for a reply.
+	events []uint32
 }
 
 // startWithoutPumpX2 runs the emulator in its default configuration with an
@@ -115,12 +118,12 @@ func (p *e2ePump) exchange(char bluetooth.CharacteristicType, uuid, name string,
 	}
 	var fragments []string
 	for {
-		got := p.client.CollectNotifications(1, 5*time.Second)
-		if len(got) == 0 {
+		got, ok := p.nextNotification(uuid, 5*time.Second)
+		if !ok {
 			p.t.Fatalf("no reply to %s (have %v)", name, fragments)
 		}
-		fragments = append(fragments, got[0])
-		if b, _ := hex.DecodeString(got[0]); len(b) > 0 && b[0]&0x0f == 0 {
+		fragments = append(fragments, got)
+		if b, _ := hex.DecodeString(got); len(b) > 0 && b[0]&0x0f == 0 {
 			break
 		}
 	}
@@ -129,6 +132,33 @@ func (p *e2ePump) exchange(char bluetooth.CharacteristicType, uuid, name string,
 		p.t.Fatalf("reply to %s does not parse: %v %v", name, fragments, err)
 	}
 	return reply
+}
+
+// nextNotification reads the next notification on uuid, setting qualifying
+// events aside in p.events.
+func (p *e2ePump) nextNotification(uuid string, wait time.Duration) (string, bool) {
+	deadline := time.Now().Add(wait)
+	for time.Now().Before(deadline) {
+		p.client.SetTimeout(time.Until(deadline))
+		msg, err := p.client.TryRecv()
+		p.client.SetTimeout(virtualtest.DefaultTimeout)
+		if err != nil {
+			return "", false
+		}
+		if msg.Type != "notify" {
+			continue
+		}
+		if strings.EqualFold(msg.Characteristic, bluetooth.QualifyingEventsCharUUID) {
+			if b, err := hex.DecodeString(msg.Value); err == nil && len(b) == 4 {
+				p.events = append(p.events, uint32(b[0])|uint32(b[1])<<8|uint32(b[2])<<16|uint32(b[3])<<24)
+			}
+			continue
+		}
+		if strings.EqualFold(msg.Characteristic, uuid) {
+			return msg.Value, true
+		}
+	}
+	return "", false
 }
 
 // pair runs EC-JPAKE with the pairing code 123456 and returns the derived

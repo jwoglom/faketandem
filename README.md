@@ -227,10 +227,14 @@ clock with a `PUT` is not: the next tick counts from the new reading.
 `GET /api/state` returns everything a driver could observe plus the pump-side
 truth behind it: identity, clock, auth and pairing, connection and radio, basal
 (profile, current, suspend reason, temp rate), the bolus in progress, the last
-bolus record, Control-IQ, the delivery `limits`, reservoir, battery, CGM, standing alerts,
-`alarms_history` (every alarm that has been raised *and cleared*, with both
-ends of the interval, which `alerts` cannot show), the tail of the history log,
-and the request log's current sequence number.
+bolus record, Control-IQ, the delivery `limits`, reservoir, battery, CGM,
+`alerts` (every standing notification, each with its `category`, `bit` and
+pumpX2 `name`), `notifications` (each category's live bitmask, as a decimal
+string, and the names of its bits), `refusals` (see
+[Refusals](#refusals)), `alarms_history` (every notification that has been
+raised *and cleared*, with both ends of the interval, which `alerts` cannot
+show), the tail of the history log, and the request log's current sequence
+number.
 
 `PUT` (or `PATCH`) sets named fields and nothing else. It is deliberately dumb:
 it raises no qualifying events and writes no history, because setting a field is
@@ -249,8 +253,9 @@ Settable fields: `reservoir_units`, `battery_percent`, `battery_charging`,
 `basal_rate`, `suspended`, `iob`, `tdd`, `closed_loop_enabled`,
 `control_iq_mode`, `weight`, `total_daily_insulin`,
 `bolus_rate_units_per_second`, `cgm_egv`, `cgm_session_active`, `pairing_code`,
-`time_since_reset`, `api_version_major`, `api_version_minor`, `clear_alerts`,
-`workflow_mode`, `idp_profiles`, `max_bolus_milliunits`, `max_basal_milliunits`,
+`time_since_reset`, `api_version_major`, `api_version_minor`, `clear_alerts`
+(drops every standing notification, malfunctions included, with no history),
+`refusals` (see [Refusals](#refusals)), `workflow_mode`, `idp_profiles`, `max_bolus_milliunits`, `max_basal_milliunits`,
 `basal_cycle_enabled`, `controliq_algorithm_rate`, `cgm_available` (see
 [Basal cycle](#basal-cycle)).
 
@@ -263,9 +268,36 @@ The delivery limits are pump state in milliunits (per hour for basal), as
 `SetMaxBolusLimitRequest` and `SetMaxBasalLimitRequest` change them, and
 `InitiateBolusRequest` above the max bolus is answered with status 1 and starts
 nothing. The status a real pump refuses with has not been confirmed. A temp rate
-above the max basal is not refused. `SetTempRateRequest` outside pumpX2's bounds,
+above the max basal is refused, as are the other temp rates and boluses a pump
+refuses (see [Refusals](#refusals)). `SetTempRateRequest` outside pumpX2's bounds,
 0-250% for 15 minutes to 72 hours, is answered with status 1 (also unconfirmed)
 and starts nothing.
+
+### Refusals
+
+faketandem refuses what a pump refuses, each answered with status 1 and
+nothing started. Which status a pump answers with is unconfirmed on firmware
+for all of them; any nonzero status is a refusal to pumpX2 and TandemKit.
+
+| Request | Refused when | Switch | Source |
+|---|---|---|---|
+| `SetTempRateRequest` | Control-IQ is on (`closed_loop_enabled`) | `temp_rate_under_control_iq` | TandemKit's driver notes: a pump running Control-IQ refuses the host's automatic doses |
+| `SetTempRateRequest` | a temp rate already runs; the pump wants `StopTempRateRequest` first | `temp_rate_while_running` | TandemKit's driver notes, observed |
+| `SetTempRateRequest` | a non-zero percent whose share of the profile rate is under 0.1 U/hr (0% is always taken) | `temp_rate_below_minimum` | observed: a Mobi refused 17% of 0.58 U/hr |
+| `SetTempRateRequest` | the rate is above the max basal (`max_basal_milliunits`) | `temp_rate_above_max_basal` | modelled on the pump's max basal limit; the refusal is unconfirmed |
+| `BolusPermissionRequest`, `InitiateBolusRequest` | a bolus runs or delivery is suspended. Permission answers nack reason 1, `INVALID_PUMPING_STATE` (which reason a pump gives is unconfirmed), and grants no bolus id | `bolus_while_busy` | TandemKit #504: the pump's permission nack stopped a second bolus |
+| `ResumePumpingRequest` | `RESUME_PUMP_ALARM` or `RESUME_PUMP_ALARM2` stands, until it is dismissed | none | modelled on TandemKit's `ResumeWithAlarmAcknowledgement`, which dismisses those alarms and retries |
+| `DismissNotificationRequest` | it names a malfunction (type 4), or a type the pump has none of | none | a pump cannot dismiss a malfunction |
+
+Every switch defaults to on. A test written against the earlier, lenient
+emulator turns one off; fields left out keep their value:
+
+```bash
+curl -X PUT http://127.0.0.1:8080/api/state -d '{"refusals":{"temp_rate_while_running":false}}'
+```
+
+With `temp_rate_while_running` off, a second `SetTempRateRequest` replaces the
+running temp rate, ending it with its `TempRateCompleted` record.
 
 `workflow_mode` is the cartridge procedure the pump has open (`none`,
 `change_cartridge` or `fill_tubing`), reported in the snapshot too. The pump
@@ -391,7 +423,10 @@ in-progress bolus and any running temp rate, records each ending in the history
 log, raises an alarm when the reason is one, and emits a qualifying event for
 each — the pile-up a driver's reconciliation actually has to survive. An
 occlusion stands in `AlarmStatusResponse` as `OCCLUSION_ALARM` until the alarm
-is cleared.
+is cleared. Any other alarm suspend raises `RESUME_PUMP_ALARM`, modelled on a
+pump that asks to be resumed after its alarm (not confirmed on firmware), so
+the app's `ResumePumpingRequest` is refused until it is dismissed (see
+[Alerts, alarms and malfunctions](#alerts-alarms-and-malfunctions)).
 
 ```bash
 # A bolus the pump started itself (source id 0, not the app's 8), taking 50 s
@@ -458,6 +493,56 @@ does once a fill reaches its limit.
 Every action returns the full state snapshot, so a test rarely needs a second
 call. An action that cannot apply (a second concurrent bolus, resuming an
 unsuspended pump) returns `409`.
+
+### Alerts, alarms and malfunctions
+
+The pump's notifications are live state: five 64-bit masks, one per category,
+which `AlertStatusResponse`, `AlarmStatusResponse`,
+`MalfunctionBitmaskStatusResponse`, `ReminderStatusResponse` and
+`CGMAlertStatusResponse` report. `HighestAamResponse` reports the standing
+notification of the highest category (malfunction, alarm, alert, CGM alert,
+reminder; lowest bit first) as `aamId` and, for a malfunction, its fault as
+`faultId`; `ActiveAamBitsResponse` reports the masks of the category its
+request byte names (2 alarm, 4 malfunction, as TandemKit asks), or of the
+highest standing one, with every standing bit unacknowledged.
+
+Each is raised and cleared by name, pumpX2's and TandemKit's enum name
+(`LOW_INSULIN_ALERT`, the category suffix optional: `LOW_INSULIN`), or by bit
+(`code`):
+
+```bash
+curl -X POST http://127.0.0.1:8080/api/state/alert -d '{"type":"LOW_INSULIN"}'
+curl -X POST http://127.0.0.1:8080/api/state/alarm -d '{"type":"RESUME_PUMP_ALARM"}'
+curl -X POST http://127.0.0.1:8080/api/state/alarm -d '{"type":"OCCLUSION_ALARM","message":"Occlusion"}'
+# A malfunction by bit (9 is MOTOR), with the fault HighestAam reports beside it
+curl -X POST http://127.0.0.1:8080/api/state/malfunction -d '{"code":9,"fault_id":8305}'
+curl -X POST http://127.0.0.1:8080/api/state/reminder -d '{"type":"SITE_CHANGE"}'
+curl -X POST http://127.0.0.1:8080/api/state/cgmalert -d '{"type":"LOW_CGM_ALERT"}'
+
+# Acknowledged on the pump's screen (by body or query)
+curl -X DELETE http://127.0.0.1:8080/api/state/alert -d '{"type":"LOW_INSULIN"}'
+curl -X DELETE 'http://127.0.0.1:8080/api/state/alarm?code=18'
+```
+
+Raising sets the bit, writes the activation record (`AlertActivated`,
+`AlarmActivated`, `CgmAlertActivated` or `Malfunction`, naming it by its bit as
+`alertId`/`alarmId`/`malfId`; a malfunction's `faultLocatorData` is its fault;
+a reminder writes none) and sends the category's qualifying event: `ALERT` (1),
+`ALARM` (2), `REMINDER` (4), `MALFUNCTION` (8) or `CGM_ALERT` (16). Clearing
+writes `AlertCleared`, `AlarmCleared` or `CgmAlertCleared` and sends the event
+again. A notification already standing answers `409`, as does clearing one that
+is not; an unknown name `400`. `malfunction` defaults its `fault_id` to `0x2071`
+(8305), pumpX2's documented example.
+
+The app clears them with `DismissNotificationRequest`, which writes the same
+cleared record, and is answered with status 1 for a malfunction, which stays:
+a malfunction is cleared only by `DELETE /api/state/malfunction` or
+`clear_alerts`. The emulator's own conditions use the same masks: an occlusion
+stop raises `OCCLUSION_ALARM`, another alarm stop `RESUME_PUMP_ALARM`, a
+reservoir under 20 U `LOW_INSULIN_ALERT` and a battery under 20%
+`LOW_POWER_ALERT`, each once until the level recovers. Only the bits and
+records are modelled: a malfunction does not stop delivery, and no alarm but
+the two resume-pump alarms refuses a command.
 
 ### A pump already in use (scenarios)
 

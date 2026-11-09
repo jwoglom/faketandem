@@ -597,7 +597,7 @@ func TestSuspendStopsBolusAndTempRateAndRaisesEverything(t *testing.T) {
 	assertHasBit(t, bits, 1024, "bolusChange")
 	assertHasBit(t, bits, 512, "basalChange")
 	assertHasBit(t, bits, 64, "pumpSuspend")
-	assertHasBit(t, bits, 1, "alert")
+	assertHasBit(t, bits, 2, "alarm")
 
 	if code, _ := do(t, mux, http.MethodPost, "/api/state/suspend", ""); code != http.StatusConflict {
 		t.Errorf("suspending twice = %d, want 409", code)

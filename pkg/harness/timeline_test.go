@@ -370,8 +370,8 @@ func TestAlarmsAreReportedWithBothEnds(t *testing.T) {
 		t.Fatalf("expected one AlarmActivated, got %d", len(activated))
 	}
 	requireFields(t, activated[0], "alarmId")
-	if got, want := fieldsOf(activated[0], "data")["alarmId"], raised["id"]; got != want {
-		t.Errorf("AlarmActivated alarmId = %v, want the alarm's own id %v", got, want)
+	if got, want := fieldsOf(activated[0], "data")["alarmId"], raised["bit"]; got != want || want != float64(2) {
+		t.Errorf("AlarmActivated alarmId = %v, want OCCLUSION_ALARM's bit %v", got, want)
 	}
 	if got := fieldsOf(activated[0], "extra")["alertTypeId"]; got != float64(state.AlertOcclusion) {
 		t.Errorf("AlarmActivated extra alertTypeId = %v, want %d", got, state.AlertOcclusion)
@@ -405,7 +405,7 @@ func TestAlarmsAreReportedWithBothEnds(t *testing.T) {
 	if len(clearedRecords) != 1 {
 		t.Fatalf("expected one AlarmCleared record, got %d", len(clearedRecords))
 	}
-	if got, want := fieldsOf(clearedRecords[0], "data")["alarmId"], raised["id"]; got != want {
+	if got, want := fieldsOf(clearedRecords[0], "data")["alarmId"], raised["bit"]; got != want {
 		t.Errorf("AlarmCleared alarmId = %v, want %v", got, want)
 	}
 }
