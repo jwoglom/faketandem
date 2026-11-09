@@ -401,8 +401,9 @@ type suspendBody struct {
 	Reason string `json:"reason,omitempty"`
 	// Message overrides the alarm text recorded for an alarm-driven stop.
 	Message string `json:"message,omitempty"`
-	// KeepTemp leaves a running temp rate in force across an alarm suspend: no
-	// TempRateCompleted, and the temp rate runs again after the resume.
+	// KeepTemp leaves a running temp rate in force across an alarm or occlusion
+	// suspend: no TempRateCompleted, and the temp rate runs again after the
+	// resume, to its programmed end. A Mobi was seen doing this on an occlusion.
 	KeepTemp bool `json:"keep_temp,omitempty"`
 }
 
@@ -430,8 +431,8 @@ func (h *Harness) actionSuspend(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "unknown suspend reason %q (expected user, occlusion or alarm)", reason)
 		return
 	}
-	if body.KeepTemp && reason != SuspendReasonAlarm {
-		writeError(w, http.StatusBadRequest, "keep_temp is for an alarm suspend, not %q", reason)
+	if body.KeepTemp && reason == SuspendReasonUser {
+		writeError(w, http.StatusBadRequest, "keep_temp is for an alarm or occlusion suspend, not %q", reason)
 		return
 	}
 

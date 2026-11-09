@@ -454,10 +454,16 @@ curl -X POST http://127.0.0.1:8080/api/state/tempbasal/stop
 
 # Stop and restart delivery. reason: user | occlusion | alarm
 curl -X POST http://127.0.0.1:8080/api/state/suspend -d '{"reason":"occlusion"}'
-# An alarm that stops delivery but leaves the temp rate in force: no
-# TempRateCompleted, and the temp rate runs again after the resume
+# An alarm or occlusion that stops delivery but leaves the temp rate in force:
+# no TempRateCompleted, and the temp rate runs again after the resume, to its
+# programmed end. Observed on a Mobi for an occlusion stop. Without keep_temp
+# the stop ends the temp; a user suspend cannot keep it.
 curl -X POST http://127.0.0.1:8080/api/state/suspend -d '{"reason":"alarm","keep_temp":true}'
+curl -X POST http://127.0.0.1:8080/api/state/suspend -d '{"reason":"occlusion","keep_temp":true}'
+# Resume on the pump's screen, acknowledging every standing notification but a
+# malfunction (each with its cleared record) ...
 curl -X POST http://127.0.0.1:8080/api/state/resume
+# ... or leaving them standing
 curl -X POST http://127.0.0.1:8080/api/state/resume -d '{"clear_alarms":false}'
 
 # Stage history that predates the connection
