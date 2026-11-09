@@ -1,6 +1,7 @@
 package bluetooth
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
@@ -210,3 +211,43 @@ type MTUNegotiator interface {
 
 // Compile-time assertion that the virtual transport can set its ATT MTU.
 var _ MTUNegotiator = (*VirtualTransport)(nil)
+
+// ErrNoCentral is returned by Notify when no central is attached.
+var ErrNoCentral = errors.New("no central attached")
+
+// ErrNotSubscribed is returned by Notify when a central is attached but has not
+// subscribed to the characteristic, as after a reconnect until it re-subscribes.
+var ErrNotSubscribed = errors.New("central attached but not subscribed")
+
+var allCharacteristicTypes = []CharacteristicType{
+	CharCurrentStatus, CharQualifyingEvents, CharHistoryLog, CharAuthorization, CharControl, CharControlStream,
+}
+
+// SubscriptionName is a characteristic's name in GET /api/state's
+// connection.subscribed: CURRENT_STATUS, QUALIFYING_EVENTS, HISTORY_LOG,
+// AUTHORIZATION, CONTROL, CONTROL_STREAM.
+func SubscriptionName(charType CharacteristicType) string {
+	switch charType {
+	case CharCurrentStatus:
+		return "CURRENT_STATUS"
+	case CharQualifyingEvents:
+		return "QUALIFYING_EVENTS"
+	case CharHistoryLog:
+		return "HISTORY_LOG"
+	case CharAuthorization:
+		return "AUTHORIZATION"
+	case CharControl:
+		return "CONTROL"
+	case CharControlStream:
+		return "CONTROL_STREAM"
+	}
+	return ""
+}
+
+// SubscriptionReporter is implemented by transports that know which
+// characteristics the attached central has subscribed to.
+type SubscriptionReporter interface {
+	Subscriptions() []string
+}
+
+var _ SubscriptionReporter = (*VirtualTransport)(nil)

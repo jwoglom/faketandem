@@ -232,6 +232,16 @@ bolus record, Control-IQ, the delivery `limits`, reservoir, battery, CGM, standi
 ends of the interval, which `alerts` cannot show), the tail of the history log,
 and the request log's current sequence number.
 
+`connection.subscribed` lists the characteristics the attached central has
+subscribed to (`CURRENT_STATUS`, `QUALIFYING_EVENTS`, `HISTORY_LOG`,
+`AUTHORIZATION`, `CONTROL`, `CONTROL_STREAM`); it is empty with no central
+attached, and absent on a transport that cannot tell (real Bluetooth). A central
+is connected before it has re-subscribed after a reconnect, and a notification
+sent in between is dropped, so a script that raises a qualifying event should
+wait for `QUALIFYING_EVENTS` here. `POST /api/state/qualifyingevent` answers
+`409` either way, with `no central attached` or `central attached but not
+subscribed to QualifyingEvents` (and what it is subscribed to).
+
 `PUT` (or `PATCH`) sets named fields and nothing else. It is deliberately dumb:
 it raises no qualifying events and writes no history, because setting a field is
 for staging a starting position (a pump that was already suspended before the

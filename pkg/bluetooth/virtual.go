@@ -725,11 +725,12 @@ func (v *VirtualTransport) Notify(charType CharacteristicType, data []byte) erro
 	v.mu.Unlock()
 
 	if c == nil {
-		return fmt.Errorf("no notifier registered for %s", charType)
+		return fmt.Errorf("%w: %s notification not sent", ErrNoCentral, charType)
 	}
 	if !c.isSubscribed(uuid) {
 		log.Debugf("pkg bluetooth; virtual transport dropping notification on %s: central is not subscribed", charType)
-		return fmt.Errorf("no notifier registered for %s", charType)
+		return fmt.Errorf("%w to %s: notification dropped (subscribed to: %s)", ErrNotSubscribed, charType,
+			subscribedList(c.subscribedNames()))
 	}
 
 	if filter := v.getNotifyFilter(); filter != nil && !filter(charType, data) {
@@ -748,6 +749,37 @@ func (v *VirtualTransport) Notify(charType CharacteristicType, data []byte) erro
 
 	log.Debugf("pkg bluetooth; virtual transport sending notification on %s: %s", charType, hex.EncodeToString(data))
 	return c.send(virtualMessage{Type: "notify", Characteristic: uuid, Value: hex.EncodeToString(data)})
+}
+
+func (c *virtualConn) subscribedNames() []string {
+	c.subsMtx.RLock()
+	defer c.subsMtx.RUnlock()
+	names := []string{}
+	for _, ct := range allCharacteristicTypes {
+		if c.subs[NormalizeUUID(PumpCharacteristicUUID(ct))] {
+			names = append(names, SubscriptionName(ct))
+		}
+	}
+	return names
+}
+
+func subscribedList(names []string) string {
+	if len(names) == 0 {
+		return "nothing"
+	}
+	return strings.Join(names, ", ")
+}
+
+// Subscriptions lists the characteristics the attached central is subscribed
+// to, by SubscriptionName; empty when no central is attached.
+func (v *VirtualTransport) Subscriptions() []string {
+	v.mu.Lock()
+	c := v.attached
+	v.mu.Unlock()
+	if c == nil {
+		return []string{}
+	}
+	return c.subscribedNames()
 }
 
 // IsConnected returns true if a central device is attached
