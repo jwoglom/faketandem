@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/hex"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/jwoglom/faketandem/pkg/pumpx2"
@@ -79,6 +80,17 @@ func (h *ResumePumpingHandler) RequiresAuth() bool {
 func (h *ResumePumpingHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState *state.PumpState) (*Response, error) {
 	log.Infof("Handling ResumePumpingRequest: txID=%d", msg.TxID)
 
+	if alarms := pumpState.ResumeBlockingAlarms(); len(alarms) > 0 && pumpState.IsPumpingSuspended() {
+		log.Warnf("Refusing ResumePumpingRequest: resume-pump alarm(s) %v stand until dismissed", alarms)
+		response, err := h.bridge.EncodeMessage(msg.TxID, "ResumePumpingResponse", map[string]interface{}{
+			"status": resumeRefusedStatus,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to encode ResumePumpingResponse: %w", err)
+		}
+		return &Response{ResponseMessage: response, Immediate: true}, nil
+	}
+
 	response, err := h.bridge.EncodeMessage(
 		msg.TxID,
 		"ResumePumpingResponse",
@@ -98,6 +110,11 @@ func (h *ResumePumpingHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpStat
 		},
 	}, nil
 }
+
+// resumeRefusedStatus is the status a refused ResumePumping answers with
+// while RESUME_PUMP_ALARM or RESUME_PUMP_ALARM2 stands. pumpX2 names no value;
+// TandemKit takes any nonzero one as a refusal. Modeled, not confirmed.
+const resumeRefusedStatus = 1
 
 // SetTempRateHandler handles SetTempRateRequest messages
 type SetTempRateHandler struct {
@@ -137,7 +154,9 @@ func (h *SetTempRateHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState 
 	}
 
 	if !tempRateIsSupported(percentage, durationMinutes) {
-		return h.refuseUnsupportedTempRate(msg, percentage, durationMinutes)
+		log.Warnf("Refusing temp rate of %d%% for %d minutes: outside %d-%d%% and %d-%d minutes",
+			percentage, durationMinutes, minTempRatePercent, maxTempRatePercent, minTempRateMinutes, maxTempRateMinutes)
+		return h.refuseTempRate(msg)
 	}
 
 	// A percentage temp rate applies to the PROFILE basal rate, not to whatever
@@ -145,6 +164,10 @@ func (h *SetTempRateHandler) HandleMessage(msg *pumpx2.ParsedMessage, pumpState 
 	// percentages whenever one temp rate replaced another.
 	profileRate := pumpState.GetProfileBasalRate()
 	tempRate := profileRate * float64(percentage) / 100.0
+	if reason := tempRateRefusal(pumpState, percentage, tempRate); reason != "" {
+		log.Warnf("Refusing temp rate of %d%% (%.3f U/hr) for %d minutes: %s", percentage, tempRate, durationMinutes, reason)
+		return h.refuseTempRate(msg)
+	}
 	tempStart := pumpState.Now()
 	tempEnd := tempStart.Add(time.Duration(durationMinutes) * time.Minute)
 	tempRateID := pumpState.NextTempRateID()
@@ -209,11 +232,29 @@ func tempRateIsSupported(percent, minutes int) bool {
 		minutes >= minTempRateMinutes && minutes <= maxTempRateMinutes
 }
 
-// refuseUnsupportedTempRate answers without starting a temp rate or using a tempRateId. pumpX2
-// names no status for this refusal; any nonzero status is a refusal to a driver, and 1 is assumed.
-func (h *SetTempRateHandler) refuseUnsupportedTempRate(msg *pumpx2.ParsedMessage, percent, minutes int) (*Response, error) {
-	log.Warnf("Refusing temp rate of %d%% for %d minutes: outside %d-%d%% and %d-%d minutes",
-		percent, minutes, minTempRatePercent, maxTempRatePercent, minTempRateMinutes, maxTempRateMinutes)
+// tempRateRefusal is why the pump refuses a temp rate it could otherwise run,
+// or "" when it takes it. Each refusal is a state.Refusals switch.
+func tempRateRefusal(ps *state.PumpState, percent int, rate float64) string {
+	refusals := ps.GetRefusals()
+	switch {
+	case refusals.TempRateUnderControlIQ && ps.IsClosedLoopEnabled():
+		return "Control-IQ is on and takes no temp rate from the host"
+	case refusals.TempRateWhileRunning && ps.GetTempRate().Active:
+		return "a temp rate is already running; the pump wants StopTempRate first"
+	// Compared in milliunits per hour, so a rate a hair under 0.1 from float
+	// arithmetic is not refused.
+	case refusals.TempRateBelowMinimum && percent > 0 &&
+		math.Round(rate*1000) < state.MinimumTempRateUnitsPerHour*1000:
+		return fmt.Sprintf("under the pump's %.1f U/hr minimum", state.MinimumTempRateUnitsPerHour)
+	case refusals.TempRateAboveMaxBasal && math.Round(rate*1000) > float64(ps.GetDeliveryLimits().MaxBasalMilliunits):
+		return fmt.Sprintf("above the max basal of %d mU/hr", ps.GetDeliveryLimits().MaxBasalMilliunits)
+	}
+	return ""
+}
+
+// refuseTempRate answers without starting a temp rate or using a tempRateId. pumpX2 names no
+// status for a refusal; any nonzero status is a refusal to a driver, and 1 is assumed.
+func (h *SetTempRateHandler) refuseTempRate(msg *pumpx2.ParsedMessage) (*Response, error) {
 	response, err := h.bridge.EncodeMessage(msg.TxID, "SetTempRateResponse", map[string]interface{}{
 		"raw": setTempRateResponseRawCargo(1, 0),
 	})

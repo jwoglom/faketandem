@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net"
 	"strings"
 	"testing"
@@ -437,6 +438,11 @@ func TestVirtualTransportNotifyRequiresSubscription(t *testing.T) {
 	// No central at all.
 	if err := v.Notify(CharCurrentStatus, []byte{0x01}); err == nil {
 		t.Error("Notify with no central should fail")
+	} else if !errors.Is(err, ErrNoCentral) {
+		t.Errorf("Notify with no central = %v, want ErrNoCentral", err)
+	}
+	if got := v.Subscriptions(); len(got) != 0 {
+		t.Errorf("Subscriptions with no central = %v, want none", got)
 	}
 
 	c := dialTransport(t, v)
@@ -446,10 +452,17 @@ func TestVirtualTransportNotifyRequiresSubscription(t *testing.T) {
 	// Attached but not subscribed: dropped.
 	if err := v.Notify(CharCurrentStatus, []byte{0x01}); err == nil {
 		t.Error("Notify without subscription should fail")
+	} else if !errors.Is(err, ErrNotSubscribed) || errors.Is(err, ErrNoCentral) {
+		t.Errorf("Notify without subscription = %v, want ErrNotSubscribed", err)
 	}
 	c.expectNothing(150 * time.Millisecond)
 
 	c.subscribe(CurrentStatusCharUUID, true)
+	c.subscribe(QualifyingEventsCharUUID, true)
+	if got := strings.Join(v.Subscriptions(), ","); got != "CURRENT_STATUS,QUALIFYING_EVENTS" {
+		t.Errorf("Subscriptions = %q", got)
+	}
+	c.subscribe(QualifyingEventsCharUUID, false)
 
 	if err := v.Notify(CharCurrentStatus, []byte{0x01, 0x02}); err != nil {
 		t.Fatalf("Notify while subscribed: %v", err)

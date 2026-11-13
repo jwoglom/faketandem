@@ -50,10 +50,14 @@ func (ps *PumpState) SetWorkflowMode(mode WorkflowMode) {
 	defer ps.mutex.Unlock()
 	ps.workflowMode = mode
 	ps.fillTubingButtonDown = false
+	ps.cartridge.readyToChange = false
+	ps.cartridge.fillUnits = 0
 }
 
 // EnterWorkflow opens mode and reports whether the pump accepted it. Change-cartridge also needs
-// delivery suspended (pumpX2: "Precondition: insulin must be suspended").
+// delivery suspended (pumpX2: "Precondition: insulin must be suspended"), and no new cartridge
+// waiting for its tubing fill: a Mobi refused change mode after an exit it took as the new
+// cartridge being in.
 func (ps *PumpState) EnterWorkflow(mode WorkflowMode) bool {
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
@@ -69,19 +73,44 @@ func (ps *PumpState) enterWorkflowUnlocked(mode WorkflowMode) bool {
 		log.Warnf("Refusing to enter %s: delivery is not suspended", mode)
 		return false
 	}
+	if mode == WorkflowChangeCartridge && (ps.cartridge.detecting || ps.cartridge.loaded) {
+		log.Warnf("Refusing to enter %s: a new cartridge is waiting for its tubing fill", mode)
+		return false
+	}
 
 	ps.workflowMode = mode
 	log.Infof("Entered %s mode", mode)
 	return true
 }
 
-// ExitWorkflow closes mode and reports whether the pump was in it.
+// ExitWorkflow closes mode and reports whether the pump was in it. Leaving change cartridge mode
+// starts checking the new cartridge (ExitChangeCartridge), and leaving fill tubing mode ends the
+// fill (ExitFillTubing).
 func (ps *PumpState) ExitWorkflow(mode WorkflowMode) bool {
+	switch mode {
+	case WorkflowChangeCartridge:
+		accepted, _ := ps.ExitChangeCartridge()
+		return accepted
+	case WorkflowFillTubing:
+		accepted, _ := ps.ExitFillTubing()
+		return accepted
+	}
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
+	return ps.exitWorkflowUnlocked(mode)
+}
 
+// exitWorkflowOpen reports whether mode is the open procedure, logging the refusal when not.
+func (ps *PumpState) exitWorkflowOpen(mode WorkflowMode) bool {
 	if open := ps.WorkflowModeUnlocked(); open != mode {
 		log.Warnf("Refusing to exit %s: pump is in %s", mode, open)
+		return false
+	}
+	return true
+}
+
+func (ps *PumpState) exitWorkflowUnlocked(mode WorkflowMode) bool {
+	if !ps.exitWorkflowOpen(mode) {
 		return false
 	}
 
@@ -102,6 +131,7 @@ func (ps *PumpState) EnterFillTubing(txID uint8) bool {
 	}
 	ps.fillTubingTxID = txID
 	ps.fillTubingButtonDown = false
+	ps.cartridge.fillUnits = 0
 	return true
 }
 
@@ -122,12 +152,13 @@ func (ps *PumpState) FillTubingButtonDownUnlocked() bool {
 // pump streams the button's state under, and refuses outside fill tubing mode,
 // where the button does something else.
 func (ps *PumpState) SetFillTubingButton(down bool) (uint8, error) {
+	now := ps.Now()
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
 
 	if open := ps.WorkflowModeUnlocked(); open != WorkflowFillTubing {
 		return 0, fmt.Errorf("the pump is in %s, not %s", open, WorkflowFillTubing)
 	}
-	ps.fillTubingButtonDown = down
+	ps.fillTubingButtonUnlocked(down, now)
 	return ps.fillTubingTxID, nil
 }

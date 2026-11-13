@@ -25,6 +25,11 @@ type Simulator struct {
 	// batteryDrainCarry is the drain, in percentage points, not yet taken off
 	// the whole-percent battery level. Guarded by the pump state's mutex.
 	batteryDrainCarry float64
+	// lowReservoirRaised and lowBatteryRaised latch the simulator's own alerts
+	// from the crossing until the level recovers, so one acknowledged on the
+	// pump is not raised again on the next tick. Guarded by the pump state's mutex.
+	lowReservoirRaised bool
+	lowBatteryRaised   bool
 }
 
 // NewSimulator creates a new background simulator
@@ -358,31 +363,46 @@ func (s *Simulator) checkAlerts() {
 	s.checkBatteryAlerts()
 }
 
-// checkReservoirAlert checks for low reservoir conditions
+// checkReservoirAlert raises LOW_INSULIN_ALERT once the reservoir drops under
+// 20 U, and re-arms once it is back above.
 func (s *Simulator) checkReservoirAlert() {
-	if s.pumpState.Reservoir.CurrentUnits < 20.0 && !s.hasAlert(AlertLowReservoir) {
-		log.Warnf("Low reservoir alert: %.1f units remaining", s.pumpState.Reservoir.CurrentUnits)
-		alert := s.addAlert(AlertLowReservoir, PriorityWarning, "Low reservoir")
-		s.notifyAlert(alert)
-		s.notifyReservoirLow(s.pumpState.Reservoir.CurrentUnits)
+	units := s.pumpState.Reservoir.CurrentUnits
+	if units >= 20.0 {
+		s.lowReservoirRaised = false
+		return
 	}
+	if s.lowReservoirRaised {
+		return
+	}
+	s.lowReservoirRaised = true
+	log.Warnf("Low reservoir alert: %.1f units remaining", units)
+	if alert, ok := s.addAlert(AlertLowReservoir, PriorityWarning, "Low reservoir"); ok {
+		s.notifyAlert(alert)
+	}
+	s.notifyReservoirLow(units)
 }
 
-// checkBatteryAlerts checks for low battery conditions
+// checkBatteryAlerts raises LOW_POWER_ALERT once the battery drops under 20%,
+// and re-arms once it is back above.
 func (s *Simulator) checkBatteryAlerts() {
 	batteryPct := s.pumpState.Battery.Percentage
-
-	if batteryPct < 10 && !s.hasAlert(AlertLowBattery) {
-		log.Errorf("Critical battery alert: %d%% remaining", batteryPct)
-		alert := s.addAlert(AlertLowBattery, PriorityCritical, "Critical battery")
-		s.notifyAlert(alert)
-		s.notifyBatteryLow(batteryPct)
-	} else if batteryPct < 20 && !s.hasAlert(AlertLowBattery) {
-		log.Warnf("Low battery alert: %d%% remaining", batteryPct)
-		alert := s.addAlert(AlertLowBattery, PriorityWarning, "Low battery")
-		s.notifyAlert(alert)
-		s.notifyBatteryLow(batteryPct)
+	if batteryPct >= 20 {
+		s.lowBatteryRaised = false
+		return
 	}
+	if s.lowBatteryRaised {
+		return
+	}
+	s.lowBatteryRaised = true
+	priority, message := PriorityWarning, "Low battery"
+	if batteryPct < 10 {
+		priority, message = PriorityCritical, "Critical battery"
+	}
+	log.Warnf("%s alert: %d%% remaining", message, batteryPct)
+	if alert, ok := s.addAlert(AlertLowBattery, priority, message); ok {
+		s.notifyAlert(alert)
+	}
+	s.notifyBatteryLow(batteryPct)
 }
 
 // notifyAlert sends an alert notification
@@ -412,28 +432,19 @@ func (s *Simulator) notifyBatteryLow(percentage int) {
 	}
 }
 
-// hasAlert checks if an alert type is already active (must hold mutex)
-func (s *Simulator) hasAlert(alertType AlertType) bool {
-	for _, alert := range s.pumpState.ActiveAlerts {
-		if alert.Type == alertType && !alert.Acknowledged {
-			return true
-		}
+// addAlert raises an alert into the live notification bitmask, with its
+// activation record (must hold mutex). False when its bit already stands.
+func (s *Simulator) addAlert(alertType AlertType, priority AlertPriority, message string) (Alert, bool) {
+	alert, ok := s.pumpState.raiseNotificationLocked(Alert{
+		Type:      alertType,
+		Priority:  priority,
+		Message:   message,
+		Timestamp: s.pumpState.Now(),
+	})
+	if ok {
+		s.pumpState.RecordNotificationActivated(alert, "simulator")
 	}
-	return false
-}
-
-// addAlert adds a new alert (must hold mutex) and returns the alert
-func (s *Simulator) addAlert(alertType AlertType, priority AlertPriority, message string) Alert {
-	alert := Alert{
-		ID:           uint32(len(s.pumpState.ActiveAlerts) + 1),
-		Type:         alertType,
-		Priority:     priority,
-		Message:      message,
-		Timestamp:    s.pumpState.Now(),
-		Acknowledged: false,
-	}
-	s.pumpState.ActiveAlerts = append(s.pumpState.ActiveAlerts, alert)
-	return alert
+	return alert, ok
 }
 
 // GetStats returns simulator statistics

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -24,6 +25,7 @@ var testInstant = time.Date(2024, time.March, 5, 12, 0, 0, 0, time.UTC)
 // putting them on a wire, so a test can assert which qualifying events an
 // action raised without standing up a link.
 type recordingTransport struct {
+	mu            sync.Mutex
 	notifications []notification
 	connected     bool
 	shutdowns     int
@@ -42,6 +44,8 @@ func (r *recordingTransport) SetCharacteristicData(bluetooth.CharacteristicType,
 }
 
 func (r *recordingTransport) Notify(charType bluetooth.CharacteristicType, data []byte) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.notifications = append(r.notifications, notification{char: charType, data: append([]byte(nil), data...)})
 	return nil
 }
@@ -597,7 +601,7 @@ func TestSuspendStopsBolusAndTempRateAndRaisesEverything(t *testing.T) {
 	assertHasBit(t, bits, 1024, "bolusChange")
 	assertHasBit(t, bits, 512, "basalChange")
 	assertHasBit(t, bits, 64, "pumpSuspend")
-	assertHasBit(t, bits, 1, "alert")
+	assertHasBit(t, bits, 2, "alarm")
 
 	if code, _ := do(t, mux, http.MethodPost, "/api/state/suspend", ""); code != http.StatusConflict {
 		t.Errorf("suspending twice = %d, want 409", code)

@@ -16,7 +16,7 @@ type EventNotifier interface {
 	NotifyAlert(alert Alert) error
 
 	// NotifyAlertCleared notifies that an alert was cleared
-	NotifyAlertCleared(alertID uint32) error
+	NotifyAlertCleared(alert Alert) error
 
 	// NotifyBasalRateChange notifies about a basal rate change
 	NotifyBasalRateChange(oldRate, newRate float64, tempBasal bool) error
@@ -58,7 +58,7 @@ func (n *NoOpEventNotifier) NotifyAlert(alert Alert) error {
 }
 
 // NotifyAlertCleared is a no-op implementation
-func (n *NoOpEventNotifier) NotifyAlertCleared(alertID uint32) error {
+func (n *NoOpEventNotifier) NotifyAlertCleared(alert Alert) error {
 	return nil
 }
 

@@ -70,6 +70,8 @@ type PumpState struct {
 	// fillTubingTxID and fillTubingButtonDown are fill tubing mode's stream; see workflow.go.
 	fillTubingTxID       uint8
 	fillTubingButtonDown bool
+	// cartridge is the rest of a cartridge change; see cartridge.go.
+	cartridge cartridgeProcedure
 	// idpProfiles are the insulin delivery profiles in slot order; see idp.go.
 	idpProfiles []IDPProfile
 	// suspendReason records WHY delivery is suspended ("user", "occlusion",
@@ -89,6 +91,9 @@ type PumpState struct {
 	// InitiateBolusRequest refuses a bolus above the max.
 	deliveryLimits DeliveryLimits
 
+	// refusals switches off refusals a test does not want; see refusals.go.
+	refusals Refusals
+
 	// Weight (kg) and TotalDailyInsulin (units) back the ControlIQInfo response.
 	Weight            int
 	TotalDailyInsulin int
@@ -98,6 +103,9 @@ type PumpState struct {
 
 	// Alerts/Alarms
 	ActiveAlerts []Alert
+
+	// lastAlertID backs the alert id allocator.
+	lastAlertID uint32
 
 	// clearedAlerts is the log of alarms that have been raised and cleared,
 	// with the instant each was cleared. See ClearedAlert.
@@ -326,6 +334,13 @@ type Alert struct {
 	Message      string
 	Timestamp    time.Time
 	Acknowledged bool
+
+	// Category and Bit are the pump bitmask the alert sets (see
+	// notifications.go); an alert raised by Type alone gets its type's.
+	Category NotificationCategory
+	Bit      uint
+	// FaultID is a malfunction's fault code, which HighestAam reports.
+	FaultID uint32
 }
 
 // AlertType identifies the type of alert
@@ -337,6 +352,9 @@ const (
 	AlertCartridgeExpired
 	AlertOcclusion
 	AlertBasalSuspended
+	// AlertNotification is an alert raised by its pumpX2 name through the HTTP
+	// API; its Category and Bit say which.
+	AlertNotification
 )
 
 // AlertPriority indicates alert severity
@@ -394,6 +412,7 @@ func newDefaultPumpState(now time.Time) *PumpState {
 
 		ClosedLoopEnabled: false,
 		deliveryLimits:    DefaultDeliveryLimits(),
+		refusals:          DefaultRefusals(),
 		Weight:            70,
 
 		BolusRateUnitsPerSecond: DefaultBolusRateUnitsPerSecond,
@@ -848,6 +867,10 @@ func (ps *PumpState) SetBatteryLevel(pct int) {
 func (ps *PumpState) AddAlert(alert Alert) {
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
+	alert = resolveNotification(alert)
+	if alert.ID == 0 {
+		alert.ID = ps.allocateAlertIDLocked()
+	}
 	ps.ActiveAlerts = append(ps.ActiveAlerts, alert)
 }
 
@@ -864,10 +887,21 @@ type ClearedAlert struct {
 	ClearedAt time.Time
 }
 
-// ClearAlerts drops every active alert, moving each into the cleared-alarm log
-// stamped at `when` (the pump's current clock when zero), and returns what it
-// cleared in the order they were raised.
+// ClearAlerts drops every standing notification but a malfunction, which no
+// acknowledgement clears, along with the alarm bits set directly. Each dropped
+// alert moves into the cleared-alarm log stamped at `when` (the pump's current
+// clock when zero) and is returned in the order they were raised.
 func (ps *PumpState) ClearAlerts(when time.Time) []ClearedAlert {
+	return ps.clearAlerts(when, func(a Alert) bool { return a.Category != NotificationMalfunction })
+}
+
+// ClearAllNotifications is ClearAlerts with the malfunctions too: a pump
+// staged afresh, not one acknowledged.
+func (ps *PumpState) ClearAllNotifications(when time.Time) []ClearedAlert {
+	return ps.clearAlerts(when, func(Alert) bool { return true })
+}
+
+func (ps *PumpState) clearAlerts(when time.Time, clear func(Alert) bool) []ClearedAlert {
 	if when.IsZero() {
 		when = ps.Now()
 	}
@@ -875,15 +909,18 @@ func (ps *PumpState) ClearAlerts(when time.Time) []ClearedAlert {
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
 
-	if len(ps.ActiveAlerts) == 0 {
-		return nil
-	}
-	cleared := make([]ClearedAlert, 0, len(ps.ActiveAlerts))
+	ps.AlarmBitmask = 0
+	var cleared []ClearedAlert
+	standing := make([]Alert, 0)
 	for _, a := range ps.ActiveAlerts {
-		cleared = append(cleared, ClearedAlert{Alert: a, ClearedAt: when})
+		if clear(a) {
+			cleared = append(cleared, ClearedAlert{Alert: a, ClearedAt: when})
+			continue
+		}
+		standing = append(standing, a)
 	}
 	ps.clearedAlerts = append(ps.clearedAlerts, cleared...)
-	ps.ActiveAlerts = nil
+	ps.ActiveAlerts = standing
 	return cleared
 }
 
@@ -923,53 +960,15 @@ func (ps *PumpState) SetAlarm(bit uint, active bool) {
 }
 
 // DismissAlarm clears one AlarmStatusResponse bit, as acknowledging that alarm
-// on the pump does: the bit set directly and every standing alert raised as
-// that alarm, each moved into the cleared-alarm log stamped `when` (the pump's
-// current clock when zero) and returned in the order they were raised.
+// on the pump does (see ClearNotification).
 func (ps *PumpState) DismissAlarm(bit uint, when time.Time) []ClearedAlert {
-	if bit > 63 {
-		return nil
-	}
-	if when.IsZero() {
-		when = ps.Now()
-	}
-
-	ps.mutex.Lock()
-	defer ps.mutex.Unlock()
-
-	ps.AlarmBitmask &^= uint64(1) << bit
-	var cleared []ClearedAlert
-	standing := make([]Alert, 0, len(ps.ActiveAlerts))
-	for _, a := range ps.ActiveAlerts {
-		if alarmBit, ok := alertAlarmBits[a.Type]; ok && alarmBit == bit {
-			cleared = append(cleared, ClearedAlert{Alert: a, ClearedAt: when})
-			continue
-		}
-		standing = append(standing, a)
-	}
-	ps.ActiveAlerts = standing
-	ps.clearedAlerts = append(ps.clearedAlerts, cleared...)
-	return cleared
-}
-
-// alertAlarmBits maps the alerts a pump raises as alarms to their
-// AlarmStatusResponse bit.
-var alertAlarmBits = map[AlertType]uint{
-	AlertOcclusion: 2, // OCCLUSION_ALARM
+	return ps.ClearNotification(NotificationAlarm, bit, when)
 }
 
 // GetAlarmBitmask returns the pump's active-alarm bitmask: the bits set
-// directly, and those of the standing alerts in alertAlarmBits.
+// directly, and those of the standing alarms.
 func (ps *PumpState) GetAlarmBitmask() uint64 {
-	ps.mutex.RLock()
-	defer ps.mutex.RUnlock()
-	mask := ps.AlarmBitmask
-	for _, alert := range ps.ActiveAlerts {
-		if bit, ok := alertAlarmBits[alert.Type]; ok {
-			mask |= uint64(1) << bit
-		}
-	}
-	return mask
+	return ps.NotificationBitmask(NotificationAlarm)
 }
 
 // SetControlIQMode sets the ControlIQ mode

@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/hex"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/jwoglom/faketandem/pkg/bluetooth"
@@ -37,6 +38,12 @@ type Router struct {
 
 	// Default handler for unknown messages
 	defaultHandler MessageHandler
+
+	// procs times the cartridge, tubing and cannula procedures' stream messages.
+	procs *procedureTimers
+	// nativeMu keeps the fragments of natively-encoded messages sent from timers and from the
+	// request path from interleaving on one characteristic.
+	nativeMu sync.Mutex
 }
 
 // NewRouter creates a new message router
@@ -54,6 +61,7 @@ func NewRouter(bridge *pumpx2.Bridge, pumpState *state.PumpState, ble bluetooth.
 		settingsManager: settingsManager,
 		jpakeManager:    NewJPAKESessionManager(jpakeMode, pumpX2Path, pumpX2Mode, gradleCmd, javaCmd, pumpX2JarPath, pumpState),
 		qeNotifier:      NewQualifyingEventsNotifier(ble, pumpState),
+		procs:           newProcedureTimers(),
 	}
 
 	// Register handlers
@@ -164,21 +172,21 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CurrentEGVGuiDataRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "HomeScreenMirrorRequest", true))
 	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMStatusRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "AlertStatusRequest", true))
+	r.RegisterHandler(NewNotificationStatusHandler(r.bridge, "AlertStatusRequest"))
 	// AlarmStatusRequest gets a dedicated handler rather than a static one:
 	// cliparser cannot construct AlarmStatusResponse at all (see
 	// alarm_status.go), so this one is built natively from PumpState.
 	r.RegisterHandler(NewAlarmStatusHandler())
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "LoadStatusRequest", true))
+	r.RegisterHandler(&LoadStatusHandler{bridge: r.bridge})
 	r.RegisterHandler(NewProfileStatusHandler(r.bridge))
 	r.RegisterHandler(NewLastBolusStatusHandler(r.bridge, "LastBolusStatusV2Request"))
 
 	// Notification/alarm/malfunction handlers
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "HighestAamRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ActiveAamBitsRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "MalfunctionStatusRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "ReminderStatusRequest", true))
-	r.RegisterHandler(NewGenericSettingsHandler(r.bridge, r.settingsManager, "CGMAlertStatusRequest", true))
+	r.RegisterHandler(NewNotificationStatusHandler(r.bridge, "HighestAamRequest"))
+	r.RegisterHandler(NewNotificationStatusHandler(r.bridge, "ActiveAamBitsRequest"))
+	r.RegisterHandler(NewNotificationStatusHandler(r.bridge, "MalfunctionStatusRequest"))
+	r.RegisterHandler(NewNotificationStatusHandler(r.bridge, "ReminderStatusRequest"))
+	r.RegisterHandler(NewNotificationStatusHandler(r.bridge, "CGMAlertStatusRequest"))
 
 	// ControlIQ info and sleep schedule handlers
 	r.RegisterHandler(NewControlIQInfoHandler(r.bridge, "ControlIQInfoV1Request"))
@@ -226,16 +234,16 @@ func (r *Router) registerHandlers() {
 	r.RegisterHandler(NewStopTempRateHandler(r.bridge))
 
 	// Cartridge change flow handlers
-	r.RegisterHandler(NewCartridgeModeHandler(r.bridge, "EnterChangeCartridgeModeRequest", state.WorkflowChangeCartridge, true))
-	r.RegisterHandler(NewCartridgeModeHandler(r.bridge, "ExitChangeCartridgeModeRequest", state.WorkflowChangeCartridge, false))
-	r.RegisterHandler(NewCartridgeModeHandler(r.bridge, "EnterFillTubingModeRequest", state.WorkflowFillTubing, true))
-	r.RegisterHandler(NewCartridgeModeHandler(r.bridge, "ExitFillTubingModeRequest", state.WorkflowFillTubing, false))
-	r.RegisterHandler(NewCartridgeHandler(r.bridge, "FillCannulaRequest"))
+	r.RegisterHandler(NewCartridgeModeHandler(r, "EnterChangeCartridgeModeRequest", state.WorkflowChangeCartridge, true))
+	r.RegisterHandler(NewCartridgeModeHandler(r, "ExitChangeCartridgeModeRequest", state.WorkflowChangeCartridge, false))
+	r.RegisterHandler(NewCartridgeModeHandler(r, "EnterFillTubingModeRequest", state.WorkflowFillTubing, true))
+	r.RegisterHandler(NewCartridgeModeHandler(r, "ExitFillTubingModeRequest", state.WorkflowFillTubing, false))
+	r.RegisterHandler(NewFillCannulaHandler(r))
 
 	r.RegisterHandler(NewChangeTimeDateHandler(r.bridge))
 
 	// Simple control handlers (log and return success)
-	r.RegisterHandler(NewDismissNotificationHandler(r.bridge, r.settingsManager))
+	r.RegisterHandler(NewDismissNotificationHandler(r.bridge))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "PlaySoundRequest"))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "DisconnectPumpRequest"))
 	r.RegisterHandler(NewSimpleControlHandler(r.bridge, "UserInteractionRequest"))
@@ -728,6 +736,8 @@ func (r *Router) sendNative(msg *protocol.NativeMessage) (sent int, dropped bool
 		return 0, true, nil
 	}
 
+	r.nativeMu.Lock()
+	defer r.nativeMu.Unlock()
 	fragments := r.refragmentNative(msg)
 
 	log.Infof("Sending native %s on %s: txID=%d, %d packet(s)",

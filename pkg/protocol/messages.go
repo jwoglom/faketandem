@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/jwoglom/faketandem/pkg/bluetooth"
+	"github.com/jwoglom/faketandem/pkg/pumpx2/messages/controlstream"
 )
 
 // Opcodes for the messages this package builds natively. Each matches the
@@ -13,6 +14,8 @@ import (
 const (
 	// OpcodeAlarmStatusResponse is AlarmStatusResponse (CURRENT_STATUS).
 	OpcodeAlarmStatusResponse uint8 = 71
+	// OpcodeReminderStatusResponse is ReminderStatusResponse (CURRENT_STATUS).
+	OpcodeReminderStatusResponse uint8 = 73
 	// OpcodeErrorResponse is ErrorResponse (CURRENT_STATUS). pumpX2 and
 	// TandemKit declare it unsigned and variable-size: 2 bytes, or 26 with a
 	// signature trailer.
@@ -23,6 +26,18 @@ const (
 	// OpcodeFillTubingStateStreamResponse is FillTubingStateStreamResponse
 	// (CONTROL_STREAM), the signed byte -27.
 	OpcodeFillTubingStateStreamResponse uint8 = 0xE5
+	// OpcodeEnterChangeCartridgeModeStateStreamResponse is
+	// EnterChangeCartridgeModeStateStreamResponse (CONTROL_STREAM), the signed byte -31.
+	OpcodeEnterChangeCartridgeModeStateStreamResponse uint8 = 0xE1
+	// OpcodeDetectingCartridgeStateStreamResponse is DetectingCartridgeStateStreamResponse
+	// (CONTROL_STREAM), the signed byte -29.
+	OpcodeDetectingCartridgeStateStreamResponse uint8 = 0xE3
+	// OpcodeFillCannulaStateStreamResponse is FillCannulaStateStreamResponse (CONTROL_STREAM),
+	// the signed byte -25.
+	OpcodeFillCannulaStateStreamResponse uint8 = 0xE7
+	// OpcodeExitFillTubingModeStateStreamResponse is ExitFillTubingModeStateStreamResponse
+	// (CONTROL_STREAM), the signed byte -23.
+	OpcodeExitFillTubingModeStateStreamResponse uint8 = 0xE9
 )
 
 // HistoryLogRecordLength is the fixed size of one history log record inside a
@@ -47,6 +62,21 @@ func BuildAlarmStatusResponse(txID uint8, alarmBitmask uint64) (*NativeMessage, 
 
 	return NewNativeMessage("AlarmStatusResponse", bluetooth.CharCurrentStatus, MessageSpec{
 		Opcode: OpcodeAlarmStatusResponse,
+		TxID:   txID,
+		Cargo:  cargo,
+	})
+}
+
+// BuildReminderStatusResponse builds a ReminderStatusResponse carrying the
+// pump's active-reminder bitmask, little-endian, bit N being ReminderType N.
+// Its only data constructor takes a BigInteger, which neither cliparser nor
+// the Go codec builds from a JSON number below 2^63.
+func BuildReminderStatusResponse(txID uint8, reminderBitmask uint64) (*NativeMessage, error) {
+	cargo := make([]byte, 8)
+	binary.LittleEndian.PutUint64(cargo, reminderBitmask)
+
+	return NewNativeMessage("ReminderStatusResponse", bluetooth.CharCurrentStatus, MessageSpec{
+		Opcode: OpcodeReminderStatusResponse,
 		TxID:   txID,
 		Cargo:  cargo,
 	})
@@ -149,4 +179,48 @@ func BuildFillTubingStateStreamResponse(txID uint8, buttonDown bool, authKey []b
 		AuthKey:        authKey,
 		TimeSinceReset: timeSinceReset,
 	})
+}
+
+func buildControlStream(name string, opcode, txID uint8, cargo, authKey []byte, timeSinceReset uint32) (*NativeMessage, error) {
+	return NewNativeMessage(name, bluetooth.CharControlStream, MessageSpec{
+		Opcode:         opcode,
+		TxID:           txID,
+		Cargo:          cargo,
+		Signed:         true,
+		AuthKey:        authKey,
+		TimeSinceReset: timeSinceReset,
+	})
+}
+
+// BuildEnterChangeCartridgeModeStateStreamResponse builds the signed message the pump streams
+// under the EnterChangeCartridgeModeRequest's txID as it gets ready for the cartridge to come out.
+// pumpX2 names only stateID 2, READY_TO_CHANGE.
+func BuildEnterChangeCartridgeModeStateStreamResponse(txID uint8, stateID int32, authKey []byte, timeSinceReset uint32) (*NativeMessage, error) {
+	cargo := controlstream.NewEnterChangeCartridgeModeStateStreamResponse(stateID).Cargo()
+	return buildControlStream("EnterChangeCartridgeModeStateStreamResponse", OpcodeEnterChangeCartridgeModeStateStreamResponse,
+		txID, cargo, authKey, timeSinceReset)
+}
+
+// BuildDetectingCartridgeStateStreamResponse builds the signed message the pump streams while it
+// checks a new cartridge, its two-byte progress climbing to 100.
+func BuildDetectingCartridgeStateStreamResponse(txID uint8, percentComplete int32, authKey []byte, timeSinceReset uint32) (*NativeMessage, error) {
+	cargo := controlstream.NewDetectingCartridgeStateStreamResponse(percentComplete).Cargo()
+	return buildControlStream("DetectingCartridgeStateStreamResponse", OpcodeDetectingCartridgeStateStreamResponse,
+		txID, cargo, authKey, timeSinceReset)
+}
+
+// BuildFillCannulaStateStreamResponse builds the signed message the pump streams under the
+// FillCannulaRequest's txID. pumpX2 names only stateID 2, CANNULA_FILLED.
+func BuildFillCannulaStateStreamResponse(txID uint8, stateID int32, authKey []byte, timeSinceReset uint32) (*NativeMessage, error) {
+	cargo := controlstream.NewFillCannulaStateStreamResponse(stateID).Cargo()
+	return buildControlStream("FillCannulaStateStreamResponse", OpcodeFillCannulaStateStreamResponse,
+		txID, cargo, authKey, timeSinceReset)
+}
+
+// BuildExitFillTubingModeStateStreamResponse builds the one-byte form of the signed message the
+// pump streams under the ExitFillTubingModeRequest's txID: 0 NOT_COMPLETE, 1 TUBING_FILLED.
+func BuildExitFillTubingModeStateStreamResponse(txID uint8, stateID int32, authKey []byte, timeSinceReset uint32) (*NativeMessage, error) {
+	cargo := controlstream.NewExitFillTubingModeStateStreamResponse(stateID).Cargo()
+	return buildControlStream("ExitFillTubingModeStateStreamResponse", OpcodeExitFillTubingModeStateStreamResponse,
+		txID, cargo, authKey, timeSinceReset)
 }

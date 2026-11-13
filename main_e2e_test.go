@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -49,6 +50,9 @@ type e2ePump struct {
 	codec  *pumpx2.Bridge
 	txID   int
 	apiURL string
+	// events are the qualifying-event bitmasks notified so far, set aside by
+	// exchange while it waits for a reply.
+	events []uint32
 }
 
 // startWithoutPumpX2 runs the emulator in its default configuration with an
@@ -115,12 +119,12 @@ func (p *e2ePump) exchange(char bluetooth.CharacteristicType, uuid, name string,
 	}
 	var fragments []string
 	for {
-		got := p.client.CollectNotifications(1, 5*time.Second)
-		if len(got) == 0 {
+		got, ok := p.nextNotification(uuid, 5*time.Second)
+		if !ok {
 			p.t.Fatalf("no reply to %s (have %v)", name, fragments)
 		}
-		fragments = append(fragments, got[0])
-		if b, _ := hex.DecodeString(got[0]); len(b) > 0 && b[0]&0x0f == 0 {
+		fragments = append(fragments, got)
+		if b, _ := hex.DecodeString(got); len(b) > 0 && b[0]&0x0f == 0 {
 			break
 		}
 	}
@@ -129,6 +133,33 @@ func (p *e2ePump) exchange(char bluetooth.CharacteristicType, uuid, name string,
 		p.t.Fatalf("reply to %s does not parse: %v %v", name, fragments, err)
 	}
 	return reply
+}
+
+// nextNotification reads the next notification on uuid, setting qualifying
+// events aside in p.events.
+func (p *e2ePump) nextNotification(uuid string, wait time.Duration) (string, bool) {
+	deadline := time.Now().Add(wait)
+	for time.Now().Before(deadline) {
+		p.client.SetTimeout(time.Until(deadline))
+		msg, err := p.client.TryRecv()
+		p.client.SetTimeout(virtualtest.DefaultTimeout)
+		if err != nil {
+			return "", false
+		}
+		if msg.Type != "notify" {
+			continue
+		}
+		if strings.EqualFold(msg.Characteristic, bluetooth.QualifyingEventsCharUUID) {
+			if b, err := hex.DecodeString(msg.Value); err == nil && len(b) == 4 {
+				p.events = append(p.events, uint32(b[0])|uint32(b[1])<<8|uint32(b[2])<<16|uint32(b[3])<<24)
+			}
+			continue
+		}
+		if strings.EqualFold(msg.Characteristic, uuid) {
+			return msg.Value, true
+		}
+	}
+	return "", false
 }
 
 // pair runs EC-JPAKE with the pairing code 123456 and returns the derived
@@ -252,11 +283,24 @@ func TestFillTubingButtonStreamsToTheApp(t *testing.T) {
 func (p *e2ePump) readFillTubingButtonState(sessionKey []byte, txID byte) int32 {
 	t := p.t
 	t.Helper()
+	payload := p.readStream(sessionKey, protocol.OpcodeFillTubingStateStreamResponse, txID)
+	response, err := controlstream.NewFillTubingStateStreamResponseFromCargo(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return response.ButtonState
+}
+
+// readStream reads the next CONTROL_STREAM message, which must be opcode under
+// txID signed with sessionKey, and returns its payload, signature and all.
+func (p *e2ePump) readStream(sessionKey []byte, opcode, txID byte) []byte {
+	t := p.t
+	t.Helper()
 	var body []byte
 	for {
 		got := p.client.CollectNotifications(1, 5*time.Second)
 		if len(got) == 0 {
-			t.Fatal("no FillTubingStateStreamResponse arrived")
+			t.Fatalf("no stream message with opcode %#x arrived", opcode)
 		}
 		fragment, _ := hex.DecodeString(got[0])
 		body = append(body, fragment[2:]...)
@@ -268,14 +312,157 @@ func (p *e2ePump) readFillTubingButtonState(sessionKey []byte, txID byte) int32 
 		t.Errorf("stream message %x is not signed with the session key (%v)", body, err)
 	}
 	parsed, err := protocol.ParseMessageBody(body)
-	if err != nil || parsed.Opcode != protocol.OpcodeFillTubingStateStreamResponse || parsed.TxID != txID {
-		t.Fatalf("stream message %x (%v), want a FillTubingStateStreamResponse under txID %d", body, err, txID)
+	if err != nil || parsed.Opcode != opcode || parsed.TxID != txID {
+		t.Fatalf("stream message %x (%v), want opcode %#x under txID %d", body, err, opcode, txID)
 	}
-	response, err := controlstream.NewFillTubingStateStreamResponseFromCargo(parsed.Payload)
+	return parsed.Payload
+}
+
+// readStreamCargo is readStream without the signature.
+func (p *e2ePump) readStreamCargo(sessionKey []byte, opcode, txID byte) string {
+	payload := p.readStream(sessionKey, opcode, txID)
+	return hex.EncodeToString(payload[:len(payload)-protocol.SignedTrailerLength])
+}
+
+// TestCartridgeChangeRunsEndToEnd changes the cartridge, fills the tubing and
+// fills the cannula as TandemKit's wizards do, reading each procedure's stream
+// off CONTROL_STREAM, signed with the session key, under its request's txID.
+func TestCartridgeChangeRunsEndToEnd(t *testing.T) {
+	if testing.Short() {
+		t.Skip("starts the emulator as a separate process")
+	}
+	p := startWithoutPumpX2(t)
+	sessionKey := []byte(hex.EncodeToString(p.pair()))
+	p.client.Subscribe(bluetooth.ControlStreamCharUUID, true)
+	if code := p.request(http.MethodPut, "/api/state", `{"suspended":true,"reservoir_units":20,"cartridge_ready_seconds":0.2,
+		"cartridge_detect_seconds":0.2,"bolus_rate_units_per_second":1}`); code != http.StatusOK {
+		t.Fatalf("staging answered %d", code)
+	}
+
+	p.changeCartridge(sessionKey)
+	p.fillTubing(sessionKey)
+
+	cannula := p.control("FillCannulaRequest", map[string]interface{}{"primeSizeMilliUnits": 300})
+	fillState := protocol.OpcodeFillCannulaStateStreamResponse
+	if got := []string{p.readStreamCargo(sessionKey, fillState, cannula), p.readStreamCargo(sessionKey, fillState, cannula)}; got[0] != "00" || got[1] != "02" {
+		t.Errorf("fill cannula states %v, want filling then cannulaFilled", got)
+	}
+
+	p.checkCartridgeChanged()
+}
+
+// control sends a request on CONTROL, which must be accepted, and returns its txID.
+func (p *e2ePump) control(name string, params map[string]interface{}) byte {
+	p.t.Helper()
+	reply := p.exchange(bluetooth.CharControl, bluetooth.ControlCharUUID, name, params)
+	if status, _ := reply.Cargo["status"].(int); status != 0 {
+		p.t.Fatalf("%s answered %v", name, reply.Cargo)
+	}
+	return byte(p.txID)
+}
+
+func (p *e2ePump) changeCartridge(sessionKey []byte) {
+	t := p.t
+	t.Helper()
+	enter := p.control("EnterChangeCartridgeModeRequest", nil)
+	changeState := protocol.OpcodeEnterChangeCartridgeModeStateStreamResponse
+	if got := []string{p.readStreamCargo(sessionKey, changeState, enter), p.readStreamCargo(sessionKey, changeState, enter)}; got[0] != "00" || got[1] != "02" {
+		t.Errorf("change cartridge states %v, want retracting then readyToChange", got)
+	}
+	if code := p.request(http.MethodPost, "/api/state/cartridge/insert", `{"units":250}`); code != http.StatusOK {
+		t.Fatalf("inserting the cartridge answered %d", code)
+	}
+
+	exit := p.control("ExitChangeCartridgeModeRequest", nil)
+	for _, percent := range []int32{0, 20, 40, 60, 80, 100} {
+		payload := p.readStream(sessionKey, protocol.OpcodeDetectingCartridgeStateStreamResponse, exit)
+		response, err := controlstream.NewDetectingCartridgeStateStreamResponseFromCargo(payload)
+		if err != nil || response.PercentComplete != percent {
+			t.Fatalf("cartridge check %v (%v), want %d%%", response, err, percent)
+		}
+	}
+	load := p.exchange(bluetooth.CharCurrentStatus, bluetooth.CurrentStatusCharUUID, "LoadStatusRequest", nil)
+	if load.Cargo["isLoadingActive"] != true || load.Cargo["loadStateId"] != 1 {
+		t.Errorf("LoadStatusResponse %v, want LOAD_CARTRIDGE active", load.Cargo)
+	}
+}
+
+func (p *e2ePump) fillTubing(sessionKey []byte) {
+	t := p.t
+	t.Helper()
+	enter := p.control("EnterFillTubingModeRequest", nil)
+	if code := p.request(http.MethodPost, "/api/state/filltubing/button", `{"hold_seconds":0.3}`); code != http.StatusOK {
+		t.Fatalf("holding the button answered %d", code)
+	}
+	p.readFillTubingButtonState(sessionKey, enter)
+	p.readFillTubingButtonState(sessionKey, enter)
+	exit := p.control("ExitFillTubingModeRequest", nil)
+	if got := p.readStreamCargo(sessionKey, protocol.OpcodeExitFillTubingModeStateStreamResponse, exit); got != "01" {
+		t.Errorf("exit fill tubing state %s, want TUBING_FILLED", got)
+	}
+}
+
+// checkCartridgeChanged reads the pump's own account of the change.
+func (p *e2ePump) checkCartridgeChanged() {
+	t := p.t
+	t.Helper()
+	var snapshot struct {
+		Insulin struct {
+			ReservoirUnits float64 `json:"reservoir_units"`
+		} `json:"insulin"`
+		Cartridge struct {
+			LoadState string `json:"load_state"`
+		} `json:"cartridge"`
+		History struct {
+			Entries []struct {
+				Type string `json:"type"`
+			} `json:"entries"`
+		} `json:"history"`
+	}
+	p.getJSON("/api/state", &snapshot)
+	if units := snapshot.Insulin.ReservoirUnits; units >= 249.7 || units < 240 {
+		t.Errorf("reservoir %v U, want the 250 U cartridge less the tubing and 0.3 U cannula fills", units)
+	}
+	if snapshot.Cartridge.LoadState != "none" {
+		t.Errorf("load state %q after the cannula fill, want none", snapshot.Cartridge.LoadState)
+	}
+	var records []string
+	for _, e := range snapshot.History.Entries {
+		switch e.Type {
+		case "CartridgeFilled", "TubingFilled", "CannulaFilled":
+			records = append(records, e.Type)
+		}
+	}
+	if want := "CartridgeFilled,TubingFilled,CannulaFilled"; strings.Join(records, ",") != want {
+		t.Errorf("records %v, want %s", records, want)
+	}
+}
+
+func (p *e2ePump) request(method, path, body string) int {
+	p.t.Helper()
+	req, err := http.NewRequest(method, p.apiURL+path, strings.NewReader(body))
 	if err != nil {
-		t.Fatal(err)
+		p.t.Fatal(err)
 	}
-	return response.ButtonState
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	_ = resp.Body.Close() // Safe to ignore: the status is all that is read.
+	return resp.StatusCode
+}
+
+func (p *e2ePump) getJSON(path string, v interface{}) {
+	p.t.Helper()
+	resp, err := http.Get(p.apiURL + path)
+	if err != nil {
+		p.t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }() // Safe to ignore: the body has been read.
+	if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
+		p.t.Fatal(err)
+	}
 }
 
 func (p *e2ePump) post(path, body string) int {
