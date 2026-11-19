@@ -1,0 +1,15 @@
+{
+  "name": "clock-73h-behind",
+  "description": "Six hours on a 0.85 U/hr profile with the pump's clock set 73 hours back on its screen 180 minutes ago: it ends 73 hours behind the phone, so the app has to set it. Before it, a 2.0 U pump bolus 240 minutes ago and a 150% temp rate from 200 minutes ago that ends after the change; after it, a 1.0 U pump bolus 90 minutes ago, so the records either side of the change are stamped on different clocks.",
+  "hours": 6,
+  "basal_cycle": true,
+  "basal_profile": [
+    {"start": "00:00", "rate": 0.85}
+  ],
+  "events": [
+    {"minutes_ago": 240, "type": "bolus", "units": 2.0, "source": "pump"},
+    {"minutes_ago": 200, "type": "temp_basal", "percent": 150, "duration_minutes": 30},
+    {"minutes_ago": 180, "type": "clock_change", "delta_minutes": -4380},
+    {"minutes_ago": 90, "type": "bolus", "units": 1.0, "source": "pump"}
+  ]
+}

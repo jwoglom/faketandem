@@ -694,6 +694,13 @@ curl -X POST http://127.0.0.1:8080/api/state/scenario -d '{
 | `control-iq` | Six hours with Control-IQ on throughout and still on: its rate moves between 0 and 1.4 U/hr, two automatic boluses (source 7) and one from the pump's screen. Every 279 is Control-IQ's. About 3.1 U IOB. |
 | `pump-profile-differs` | Six hours on a six-segment profile (0.6 to 1.1 U/hr, every segment at most 4 hours, so any window crosses a change), a pump bolus and a 130% temp rate: a pump whose profile is not the app's. About 1.0 U IOB. |
 | `day-of-use` | Twenty-four hours on 0.85 U/hr: boluses from the pump and an app (one stopped short), 0%, 120% and 70% temp rates from an app, a 25-minute suspend. About 290 279s, four times the 6-hour window a setup history load reads. About 3.7 U IOB. |
+| `clock-spring-forward`, `clock-fall-back` | Six hours on 0.85 U/hr across a DST change the pump is set for: its clock starts an hour behind (ahead of) the phone's and is set an hour ahead (back) on its screen 180 minutes ago, a `TimeChanged` record, ending on the phone's time. A 2.0 U pump bolus and a 150% temp rate before the change, the temp ending after it, and a 1.0 U pump bolus after it, so records either side are stamped on different clocks. About 1.1 U IOB. |
+| `clock-travel-east`, `clock-travel-west` | The same across a trip three hours east (west): the clock starts three hours behind (ahead) and is set three hours ahead (back), ending on the phone's time. |
+| `clock-travel-12h-east`, `clock-travel-12h-west` | The same across a trip twelve hours east (west), whose set crosses midnight on the pump's clock (`TimeChanged`, and a `DateChange` when the date moves). |
+| `clock-73h-ahead`, `clock-73h-behind` | The same doses, with the pump's clock set 73 hours ahead (back) on its screen and left there (`TimeChanged` and `DateChange`): past the 24 hours TandemKit trusts, so the app has to set it. |
+| `clock-reset-2008`, `clock-reset-2020` | A 2.0 U pump bolus, then a pump reset 180 minutes ago: the clock restarts at 2008-01-01 (2020-01-01) 00:00 and the uptime at 0, IOB and the last bolus are forgotten, and `NewDay`, `ArmInit` and `VersionInfo` are written but no `TimeChanged` or `DateChange`. Delivery goes on, and a 1.0 U pump bolus follows on the restarted clock. About 0.7 U IOB. |
+| `clock-jump-2035` | A 2.0 U pump bolus, then the pump's clock jumps to 2035-01-01 00:00 with no record at all, and a 1.0 U pump bolus on the 2035 clock. About 1.1 U IOB. |
+| `shelf-mode-wake` | A field report compressed into eight hours: two pump boluses, a suspend, a `ShelfMode` record and a reset to 2008, the clock set on the pump to 2020-01-01 four minutes later (a `DateChange`), still suspended. Setup's clock write moves it about 6.9 years forward; a driver that adds that change to the boluses from before shelf mode reports them years ahead. No IOB, no last bolus. |
 
 - `hours` (default 6) is how far back the replay starts, at least the oldest
   event's age. Event times are `minutes_ago`, before the end of the replay.
@@ -702,9 +709,22 @@ curl -X POST http://127.0.0.1:8080/api/state/scenario -d '{
   `duration_seconds`, else the pump's bolus rate), `temp_basal` (`percent` or
   `rate` in U/hr, `duration_minutes`; `source` `remote` also writes the
   `SetTempRateResponse` record), `temp_basal_stop`, `suspend` (a user suspend),
-  `resume`, and `control_iq_rate` (`rate` in U/hr Control-IQ runs at from its
-  next cycle, negative for the profile's; needs `state.closed_loop_enabled`).
-  Overlapping boluses and a bolus while suspended are refused.
+  `resume`, `control_iq_rate` (`rate` in U/hr Control-IQ runs at from its
+  next cycle, negative for the profile's; needs `state.closed_loop_enabled`),
+  and `clock_change`. Overlapping boluses and a bolus while suspended are
+  refused.
+- `clock_change` moves the pump's clock. `clock` `set` (the default) is the
+  date and time set on the pump's screen by `delta_minutes`, writing
+  `TimeChanged` and `DateChange` as `POST /api/state/time` does (see [Clock](#clock));
+  `reset` restarts the clock at midnight on `to_date` (`YYYY-MM-DD`, default
+  2008-01-01) and the uptime at 0, forgets IOB and the last bolus, and writes
+  `NewDay`, `ArmInit` and `VersionInfo` but no change record, after a
+  `ShelfMode` record with `shelf_mode`; `jump` moves the clock to midnight on
+  `to_date` with no record at all. Records already written keep their stamps.
+- `pump_clock_offset_minutes` is how far the pump's clock reads ahead (negative:
+  behind) of its current setting from the window's start, with no record: a
+  pump not yet set for a DST change or a trip, which a later `clock_change`
+  sets right.
 - `basal_profile` is the active profile's basal schedule, segments from
   `00:00` on the pump's clock with their `rate` in U/hr. Each 279 carries the
   rate in force at its cycle: the segment's, a temp rate's percent of it, or 0
@@ -721,7 +741,9 @@ curl -X POST http://127.0.0.1:8080/api/state/scenario -d '{
   (`409`) while a driver is connected, a bolus is in progress, a temp rate is
   running or delivery is suspended. No qualifying events are raised.
 
-The response carries the scenario's `boluses`, `temp_rates`, every 279 it
+The response carries the scenario's `boluses`, `temp_rates`, `clock_changes`
+(each one's `clock`, `time`, and the pump's clock before and after it as wire
+seconds), every 279 it
 wrote in `basal_deliveries` (sequence, time, `source`: profile, temp, suspended
 or control_iq, and the rate), the window's `start` and `end`, how many
 `records` it wrote, the `final` readings a driver will see (IOB, profile and

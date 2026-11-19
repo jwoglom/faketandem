@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"reflect"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -237,15 +238,27 @@ type presetReadings struct {
 
 func TestEveryScenarioPresetReplaysToTheReadingsItDescribes(t *testing.T) {
 	want := map[string]presetReadings{
-		"app-doses":            {1.47, 0.425, true, false, 0.6, []string{"profile", "temp"}, 73},
-		"stopped-boluses":      {2.74, 0.85, false, false, 0, []string{"profile"}, 73},
-		"control-iq":           {3.09, 0.85, false, false, 0.4, []string{"control_iq"}, 73},
-		"day-of-use":           {3.67, 0.85, false, false, 2, []string{"profile", "suspended", "temp"}, 290},
-		"pump-boluses":         {4.91, 0.85, false, false, 0.8, []string{"profile"}, 73},
-		"pump-profile-differs": {1, 0.95, false, false, 2, []string{"profile", "temp"}, 73},
-		"recent-doses":         {3.205, 1.275, true, false, 1.2, []string{"profile", "suspended", "temp"}, 74},
-		"scheduled-basal":      {0, 0.85, false, false, -1, []string{"profile"}, 73},
-		"suspended-now":        {1.95, 0, false, true, 1.5, []string{"profile", "suspended"}, 73},
+		"app-doses":             {1.47, 0.425, true, false, 0.6, []string{"profile", "temp"}, 73},
+		"clock-73h-ahead":       {1.1, 0.85, false, false, 1, []string{"profile", "temp"}, 73},
+		"clock-73h-behind":      {1.1, 0.85, false, false, 1, []string{"profile", "temp"}, 73},
+		"clock-fall-back":       {1.1, 0.85, false, false, 1, []string{"profile", "temp"}, 73},
+		"clock-jump-2035":       {1.1, 0.85, false, false, 1, []string{"profile"}, 73},
+		"clock-reset-2008":      {0.7, 0.85, false, false, 1, []string{"profile"}, 73},
+		"clock-reset-2020":      {0.7, 0.85, false, false, 1, []string{"profile"}, 73},
+		"clock-spring-forward":  {1.1, 0.85, false, false, 1, []string{"profile", "temp"}, 73},
+		"clock-travel-12h-east": {1.1, 0.85, false, false, 1, []string{"profile", "temp"}, 73},
+		"clock-travel-12h-west": {1.1, 0.85, false, false, 1, []string{"profile", "temp"}, 73},
+		"clock-travel-east":     {1.1, 0.85, false, false, 1, []string{"profile", "temp"}, 73},
+		"clock-travel-west":     {1.1, 0.85, false, false, 1, []string{"profile", "temp"}, 73},
+		"stopped-boluses":       {2.74, 0.85, false, false, 0, []string{"profile"}, 73},
+		"control-iq":            {3.09, 0.85, false, false, 0.4, []string{"control_iq"}, 73},
+		"day-of-use":            {3.67, 0.85, false, false, 2, []string{"profile", "suspended", "temp"}, 290},
+		"pump-boluses":          {4.91, 0.85, false, false, 0.8, []string{"profile"}, 73},
+		"pump-profile-differs":  {1, 0.95, false, false, 2, []string{"profile", "temp"}, 73},
+		"recent-doses":          {3.205, 1.275, true, false, 1.2, []string{"profile", "suspended", "temp"}, 74},
+		"scheduled-basal":       {0, 0.85, false, false, -1, []string{"profile"}, 73},
+		"shelf-mode-wake":       {0, 0, false, true, -1, []string{"profile", "suspended"}, 97},
+		"suspended-now":         {1.95, 0, false, true, 1.5, []string{"profile", "suspended"}, 73},
 	}
 	for _, name := range ScenarioPresets() {
 		t.Run(name, func(t *testing.T) {
@@ -303,5 +316,115 @@ func TestScenarioControlIQRateNeedsControlIQOn(t *testing.T) {
 		{"minutes_ago":30,"type":"control_iq_rate","rate":1.2}]}`)
 	if status != http.StatusBadRequest {
 		t.Fatalf("status %d (%v); want 400", status, body)
+	}
+}
+
+func historyTypes(ps *state.PumpState) []string {
+	first, last := ps.GetHistoryLogSequenceRange()
+	var types []string
+	for _, e := range ps.GetHistoryLogEntries(first, last) {
+		switch e.Type {
+		case "TimeChanged", "DateChange", "ShelfMode", "NewDay", "ArmInit", "VersionInfo":
+			types = append(types, e.Type)
+		}
+	}
+	return types
+}
+
+func TestScenarioClockChangeSetWritesTheChangeAndKeepsEarlierStamps(t *testing.T) {
+	h, ps, _ := scenarioHarness(t)
+	before := ps.PumpTimeFor(testInstant)
+
+	result, err := h.ApplyScenario(Scenario{Hours: 2, PumpClockOffsetMinutes: -720, Events: []ScenarioEvent{
+		{MinutesAgo: 90, Type: EventBolus, Units: 1},
+		{MinutesAgo: 60, Type: EventClockChange, DeltaMinutes: 720},
+	}})
+	if err != nil {
+		t.Fatalf("ApplyScenario: %v", err)
+	}
+
+	if got := ps.PumpTimeFor(testInstant); got != before {
+		t.Errorf("the pump's clock reads %d after an offset of -12 h and a change of +12 h; want %d", got, before)
+	}
+	if got := historyTypes(ps); !reflect.DeepEqual(got, []string{"TimeChanged", "DateChange"}) &&
+		!reflect.DeepEqual(got, []string{"TimeChanged"}) {
+		t.Errorf("clock records %v; want a TimeChanged, and a DateChange if it crossed midnight", got)
+	}
+	change := result.ClockChanges[0]
+	if int64(change.PumpSeconds)-int64(change.PriorPumpSeconds) != 12*3600 {
+		t.Errorf("clock change %+v; want 12 hours ahead", change)
+	}
+	first, last := ps.GetHistoryLogSequenceRange()
+	for _, e := range ps.GetHistoryLogEntries(first, last) {
+		if e.Type == "BolusActivated" && e.PumpTime != ps.PumpTimeFor(e.Timestamp)-12*3600 {
+			t.Errorf("the bolus before the change is stamped %d; want the clock 12 hours behind, %d", e.PumpTime, ps.PumpTimeFor(e.Timestamp)-12*3600)
+		}
+	}
+}
+
+func TestScenarioClockChangeResetRestartsTheClockWithResetRecordsOnly(t *testing.T) {
+	h, ps, _ := scenarioHarness(t)
+
+	result, err := h.ApplyScenario(Scenario{Hours: 2, Events: []ScenarioEvent{
+		{MinutesAgo: 100, Type: EventBolus, Units: 1},
+		{MinutesAgo: 60, Type: EventClockChange, Clock: ClockReset, ToDate: "2020-01-01", ShelfMode: true},
+	}})
+	if err != nil {
+		t.Fatalf("ApplyScenario: %v", err)
+	}
+
+	if got := historyTypes(ps); !reflect.DeepEqual(got, []string{"ShelfMode", "NewDay", "ArmInit", "VersionInfo"}) {
+		t.Errorf("clock records %v; want ShelfMode, NewDay, ArmInit and VersionInfo only", got)
+	}
+	if want := uint32(4383*86400 + 3600); ps.PumpTimeFor(testInstant) != want {
+		t.Errorf("the pump's clock reads %d an hour after the reset; want %d", ps.PumpTimeFor(testInstant), want)
+	}
+	if uptime := ps.GetTimeSinceReset(); uptime != 3600 {
+		t.Errorf("time since reset %d s; want 3600", uptime)
+	}
+	if _, ok := ps.GetLastBolus(); ok || ps.GetIOB() != 0 {
+		t.Errorf("IOB %.2f and a last bolus survived the reset", ps.GetIOB())
+	}
+	if len(result.ClockChanges) != 1 || result.ClockChanges[0].Clock != ClockReset {
+		t.Errorf("clock changes %+v; want the reset", result.ClockChanges)
+	}
+}
+
+func TestScenarioClockChangeJumpWritesNoRecord(t *testing.T) {
+	h, ps, _ := scenarioHarness(t)
+
+	if _, err := h.ApplyScenario(Scenario{Hours: 1, Events: []ScenarioEvent{
+		{MinutesAgo: 30, Type: EventClockChange, Clock: ClockJump, ToDate: "2035-01-01"},
+	}}); err != nil {
+		t.Fatalf("ApplyScenario: %v", err)
+	}
+
+	if got := historyTypes(ps); len(got) != 0 {
+		t.Errorf("clock records %v; want none", got)
+	}
+	if want := uint32(9862*86400 + 1800); ps.PumpTimeFor(testInstant) != want {
+		t.Errorf("the pump's clock reads %d half an hour after the jump; want %d", ps.PumpTimeFor(testInstant), want)
+	}
+}
+
+func TestScenarioEndpointRejectsAClockChangeItCannotStage(t *testing.T) {
+	for name, event := range map[string]string{
+		"a set with no delta":       `{"type":"clock_change"}`,
+		"a set with a date":         `{"type":"clock_change","delta_minutes":60,"to_date":"2020-01-01"}`,
+		"a jump with no date":       `{"type":"clock_change","clock":"jump"}`,
+		"a reset with a delta":      `{"type":"clock_change","clock":"reset","delta_minutes":60}`,
+		"a date that is not a date": `{"type":"clock_change","clock":"reset","to_date":"Jan 1 2020"}`,
+		"a date before 2008":        `{"type":"clock_change","clock":"jump","to_date":"2007-12-31"}`,
+		"shelf mode with a jump":    `{"type":"clock_change","clock":"jump","to_date":"2035-01-01","shelf_mode":true}`,
+		"a clock it does not know":  `{"type":"clock_change","clock":"drift","delta_minutes":5}`,
+		"a set back before 2008":    `{"type":"clock_change","delta_minutes":-10000000}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, mux := scenarioHarness(t)
+			body := `{"hours":1,"events":[` + strings.Replace(event, "{", `{"minutes_ago":30,`, 1) + `]}`
+			if status, resp := do(t, mux, http.MethodPost, "/api/state/scenario", body); status != http.StatusBadRequest {
+				t.Errorf("status %d (%v); want 400", status, resp)
+			}
+		})
 	}
 }

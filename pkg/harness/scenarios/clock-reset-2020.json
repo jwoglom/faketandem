@@ -1,0 +1,14 @@
+{
+  "name": "clock-reset-2020",
+  "description": "As clock-reset-2008, but the clock restarts at 2020-01-01 00:00.",
+  "hours": 6,
+  "basal_cycle": true,
+  "basal_profile": [
+    {"start": "00:00", "rate": 0.85}
+  ],
+  "events": [
+    {"minutes_ago": 240, "type": "bolus", "units": 2.0, "source": "pump"},
+    {"minutes_ago": 180, "type": "clock_change", "clock": "reset", "to_date": "2020-01-01"},
+    {"minutes_ago": 90, "type": "bolus", "units": 1.0, "source": "pump"}
+  ]
+}

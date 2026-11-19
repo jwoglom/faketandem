@@ -1,0 +1,14 @@
+{
+  "name": "clock-jump-2035",
+  "description": "Six hours on a 0.85 U/hr profile with the pump's clock jumping to 2035-01-01 00:00 180 minutes ago with no record at all, as a fault might leave it. A 2.0 U pump bolus 240 minutes ago on the right clock and a 1.0 U one 90 minutes ago on the 2035 clock; the pump ends nine years ahead, so the app has to set it.",
+  "hours": 6,
+  "basal_cycle": true,
+  "basal_profile": [
+    {"start": "00:00", "rate": 0.85}
+  ],
+  "events": [
+    {"minutes_ago": 240, "type": "bolus", "units": 2.0, "source": "pump"},
+    {"minutes_ago": 180, "type": "clock_change", "clock": "jump", "to_date": "2035-01-01"},
+    {"minutes_ago": 90, "type": "bolus", "units": 1.0, "source": "pump"}
+  ]
+}

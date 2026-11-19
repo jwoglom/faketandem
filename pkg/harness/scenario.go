@@ -52,7 +52,27 @@ const (
 	EventSuspend       = "suspend"
 	EventResume        = "resume"
 	EventControlIQRate = "control_iq_rate"
+	EventClockChange   = "clock_change"
 )
+
+// How a clock_change moves the pump's clock.
+const (
+	// ClockSet is the date and time set on the pump's screen, by
+	// delta_minutes: TimeChanged and DateChange records, as SetPumpWallClock
+	// writes them.
+	ClockSet = "set"
+	// ClockReset is a pump reset: its clock restarts at midnight on to_date
+	// (default 2008-01-01), its uptime at 0, it forgets its IOB and last bolus,
+	// and it writes NewDay, ArmInit and VersionInfo records but no TimeChanged
+	// or DateChange. shelf_mode writes a ShelfMode record first, as a pump put
+	// into shelf mode does.
+	ClockReset = "reset"
+	// ClockJump moves the clock to midnight on to_date with no record at all.
+	ClockJump = "jump"
+)
+
+// tandemEpochDate is the day a Tandem pump's clock counts from.
+var tandemEpochDate = time.Date(2008, 1, 1, 0, 0, 0, 0, time.UTC)
 
 // Scenario is the body of POST /api/state/scenario and the file -scenario
 // reads.
@@ -66,6 +86,10 @@ type Scenario struct {
 	// Hours is how far back the replay starts; at least the oldest event's
 	// age. Default 6.
 	Hours float64 `json:"hours,omitempty"`
+	// PumpClockOffsetMinutes is how far the pump's clock reads ahead of its
+	// current setting at the window's start, with no record: a pump not yet set
+	// for a DST change or a trip, which a clock_change later sets right.
+	PumpClockOffsetMinutes float64 `json:"pump_clock_offset_minutes,omitempty"`
 	// BasalCycle delivers basal in 5-minute cycles from the window's start and
 	// after it, so the log carries a BasalDelivery record every 5 minutes, as a
 	// pump's does. Default true.
@@ -120,17 +144,39 @@ type ScenarioEvent struct {
 	Percent         *int    `json:"percent,omitempty"`
 	Rate            float64 `json:"rate,omitempty"`
 	DurationMinutes int     `json:"duration_minutes,omitempty"`
+
+	// Clock is how a clock_change moves the pump's clock: set (the default),
+	// reset or jump. DeltaMinutes is a set's change; ToDate ("YYYY-MM-DD") the
+	// day a reset or a jump lands at midnight of; ShelfMode puts a reset after
+	// a ShelfMode record.
+	Clock        string  `json:"clock,omitempty"`
+	DeltaMinutes float64 `json:"delta_minutes,omitempty"`
+	ToDate       string  `json:"to_date,omitempty"`
+	ShelfMode    bool    `json:"shelf_mode,omitempty"`
+}
+
+// ScenarioClockChange is one change a clock_change made to the pump's clock.
+type ScenarioClockChange struct {
+	Clock string `json:"clock"`
+	// Time is the true instant of the change; PriorPumpSeconds and
+	// PumpSeconds the pump's clock just before and after it, as the wire
+	// carries them.
+	Time             string `json:"time"`
+	PriorPumpSeconds uint32 `json:"prior_pump_seconds"`
+	PumpSeconds      uint32 `json:"pump_seconds"`
 }
 
 // ScenarioResult reports what a replay wrote.
 type ScenarioResult struct {
 	Name string `json:"name"`
 	// Start is the window's first instant on the pump's Clock, End its last.
-	Start   string           `json:"start"`
-	End     string           `json:"end"`
-	Records int              `json:"records"`
-	Boluses []ScenarioBolus  `json:"boluses"`
-	Temps   []ScenarioTemp   `json:"temp_rates"`
+	Start   string          `json:"start"`
+	End     string          `json:"end"`
+	Records int             `json:"records"`
+	Boluses []ScenarioBolus `json:"boluses"`
+	Temps   []ScenarioTemp  `json:"temp_rates"`
+	// ClockChanges are the clock_change events, in order.
+	ClockChanges []ScenarioClockChange `json:"clock_changes"`
 	// BasalDeliveries are the BasalDelivery records the replay wrote, one per
 	// 5-minute cycle.
 	BasalDeliveries []ScenarioBasalDelivery `json:"basal_deliveries"`
@@ -255,12 +301,65 @@ func (e ScenarioEvent) validate() error {
 		if e.Rate > maxScenarioBasalRate {
 			return fmt.Errorf("a control_iq_rate rate must be at most %g U/hr", maxScenarioBasalRate)
 		}
+	case EventClockChange:
+		return e.validateClockChange()
 	case EventTempBasalStop, EventSuspend, EventResume:
 	default:
-		return fmt.Errorf("unknown type %q (expected %s, %s, %s, %s, %s or %s)", e.Type,
-			EventBolus, EventTempBasal, EventTempBasalStop, EventSuspend, EventResume, EventControlIQRate)
+		return fmt.Errorf("unknown type %q (expected %s, %s, %s, %s, %s, %s or %s)", e.Type,
+			EventBolus, EventTempBasal, EventTempBasalStop, EventSuspend, EventResume, EventControlIQRate, EventClockChange)
 	}
 	return nil
+}
+
+func (e ScenarioEvent) validateClockChange() error {
+	switch e.clockKind() {
+	case ClockSet:
+		if e.DeltaMinutes == 0 {
+			return errors.New("a clock_change set needs a non-zero delta_minutes")
+		}
+		if e.ToDate != "" || e.ShelfMode {
+			return errors.New("a clock_change set takes delta_minutes, not to_date or shelf_mode")
+		}
+	case ClockReset, ClockJump:
+		if e.DeltaMinutes != 0 {
+			return fmt.Errorf("a clock_change %s takes to_date, not delta_minutes", e.clockKind())
+		}
+		if e.ShelfMode && e.clockKind() == ClockJump {
+			return errors.New("shelf_mode goes with a clock_change reset")
+		}
+		if _, err := e.toPumpSeconds(); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("unknown clock %q (expected %s, %s or %s)", e.Clock, ClockSet, ClockReset, ClockJump)
+	}
+	return nil
+}
+
+func (e ScenarioEvent) clockKind() string {
+	if e.Clock == "" {
+		return ClockSet
+	}
+	return e.Clock
+}
+
+// toPumpSeconds is midnight on ToDate as the pump's clock counts it.
+func (e ScenarioEvent) toPumpSeconds() (uint32, error) {
+	if e.ToDate == "" {
+		if e.clockKind() == ClockReset {
+			return 0, nil
+		}
+		return 0, errors.New("a clock_change jump needs to_date")
+	}
+	day, err := time.Parse("2006-01-02", e.ToDate)
+	if err != nil {
+		return 0, fmt.Errorf("to_date %q is not YYYY-MM-DD", e.ToDate)
+	}
+	seconds := day.Sub(tandemEpochDate).Seconds()
+	if seconds < 0 || seconds > math.MaxUint32 {
+		return 0, fmt.Errorf("to_date %q is outside what a pump's clock holds", e.ToDate)
+	}
+	return uint32(seconds), nil
 }
 
 // basalSegments is BasalProfile as the active profile's segments, each with
@@ -372,13 +471,20 @@ func (h *Harness) replayScenario(s Scenario, events []ScenarioEvent) (ScenarioRe
 	start := end.Add(-s.window())
 	r := &replay{h: h, ps: ps, clock: state.NewFrozenClock(start), bolusRate: ps.GetBolusRate()}
 	r.result = ScenarioResult{Name: s.Name, Start: formatTime(start), End: formatTime(end),
-		Boluses: []ScenarioBolus{}, Temps: []ScenarioTemp{}}
+		Boluses: []ScenarioBolus{}, Temps: []ScenarioTemp{}, ClockChanges: []ScenarioClockChange{}}
 	log.Infof("harness: replaying scenario %q from %s", s.Name, start.Format(time.RFC3339))
 
 	ps.SetBasalCycleEnabled(false)
 	ps.ForgetPast()
 	ps.SetClock(r.clock)
 	h.rebaseSimulator()
+	if s.PumpClockOffsetMinutes != 0 {
+		target := int64(ps.PumpTimeNow()) + int64(math.Round(s.PumpClockOffsetMinutes*60))
+		if target < 0 {
+			target = 0
+		}
+		ps.MovePumpWallClock(uint32(target))
+	}
 
 	staged := s.State
 	staged.BasalCycleEnabled = nil
@@ -540,7 +646,38 @@ func (r *replay) apply(e ScenarioEvent) error {
 			return fmt.Errorf("control_iq_rate %.1f minutes ago: Control-IQ is off (state.closed_loop_enabled)", e.MinutesAgo)
 		}
 		r.ps.SetControlIQAlgorithmRate(e.Rate)
+	case EventClockChange:
+		return r.clockChange(e, now)
 	}
+	return nil
+}
+
+func (r *replay) clockChange(e ScenarioEvent, now time.Time) error {
+	change := ScenarioClockChange{Clock: e.clockKind(), Time: formatTime(now)}
+	switch e.clockKind() {
+	case ClockSet:
+		target := int64(r.ps.PumpTimeNow()) + int64(math.Round(e.DeltaMinutes*60))
+		if target < 0 {
+			return fmt.Errorf("clock_change %.1f minutes ago: the pump's clock cannot go before 2008", e.MinutesAgo)
+		}
+		change.PriorPumpSeconds, change.PumpSeconds = r.ps.SetPumpWallClock(uint32(target))
+	case ClockReset:
+		if e.ShelfMode {
+			r.ps.AppendHistory(state.HistoryEvent{TypeID: state.HistoryShelfMode, Name: "ShelfMode"})
+		}
+		// Validated before the replay began.
+		target, _ := e.toPumpSeconds()
+		change.PriorPumpSeconds, change.PumpSeconds = r.ps.MovePumpWallClock(target)
+		r.ps.RestartUptime()
+		r.ps.ForgetInsulinOnBoard()
+		r.ps.AppendHistory(state.HistoryEvent{TypeID: state.HistoryNewDay, Name: "NewDay"})
+		r.ps.AppendHistory(state.HistoryEvent{TypeID: state.HistoryArmInit, Name: "ArmInit"})
+		r.ps.AppendHistory(state.HistoryEvent{TypeID: state.HistoryVersionInfo, Name: "VersionInfo"})
+	case ClockJump:
+		target, _ := e.toPumpSeconds()
+		change.PriorPumpSeconds, change.PumpSeconds = r.ps.MovePumpWallClock(target)
+	}
+	r.result.ClockChanges = append(r.result.ClockChanges, change)
 	return nil
 }
 

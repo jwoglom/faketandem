@@ -472,6 +472,16 @@ func (ps *PumpState) UpdateTimeSinceReset() {
 	ps.CurrentTime = now
 }
 
+// RestartUptime starts TimeSinceReset again from 0 now, as a pump reset does.
+func (ps *PumpState) RestartUptime() {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+	now := ps.Now()
+	ps.StartTime = now
+	ps.CurrentTime = now
+	ps.TimeSinceReset = 0
+}
+
 // SetAuthenticated marks the pump as authenticated
 func (ps *PumpState) SetAuthenticated(authKey []byte) {
 	ps.mutex.Lock()

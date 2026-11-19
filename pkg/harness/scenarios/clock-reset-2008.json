@@ -1,0 +1,14 @@
+{
+  "name": "clock-reset-2008",
+  "description": "Six hours on a 0.85 U/hr profile with a pump reset 180 minutes ago: its clock restarts at 2008-01-01 00:00 and its uptime at 0, it forgets its IOB and last bolus, it writes NewDay, ArmInit and VersionInfo records and no TimeChanged or DateChange, and it keeps delivering. A 2.0 U pump bolus 240 minutes ago on the old clock and a 1.0 U one 90 minutes ago on the 2008 clock; the pump ends in 2008 by its clock, so the app has to set it. About 0.7 U IOB, the later bolus's.",
+  "hours": 6,
+  "basal_cycle": true,
+  "basal_profile": [
+    {"start": "00:00", "rate": 0.85}
+  ],
+  "events": [
+    {"minutes_ago": 240, "type": "bolus", "units": 2.0, "source": "pump"},
+    {"minutes_ago": 180, "type": "clock_change", "clock": "reset"},
+    {"minutes_ago": 90, "type": "bolus", "units": 1.0, "source": "pump"}
+  ]
+}

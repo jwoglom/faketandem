@@ -258,6 +258,12 @@ func (ps *PumpState) compareAndSetSuspended(suspended bool, reason string) bool 
 // recent use onto. Nothing may be running; the caller checks.
 func (ps *PumpState) ForgetPast() {
 	ps.EraseHistory(1)
+	ps.ForgetInsulinOnBoard()
+}
+
+// ForgetInsulinOnBoard drops the doses IOB counts and the last bolus, as a pump
+// reset does: a Mobi that had reset answered with 0 U on board and no last bolus.
+func (ps *PumpState) ForgetInsulinOnBoard() {
 	ps.mutex.Lock()
 	defer ps.mutex.Unlock()
 	ps.iob = insulinOnBoard{}

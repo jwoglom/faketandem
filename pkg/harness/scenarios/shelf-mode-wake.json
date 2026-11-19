@@ -1,0 +1,16 @@
+{
+  "name": "shelf-mode-wake",
+  "description": "The field report behind TandemKit's undatable-history rule, compressed into eight hours on a 0.85 U/hr profile: a 2.0 U and a 1.0 U pump bolus, delivery suspended 445 minutes ago, then shelf mode 441 minutes ago (a ShelfMode record) and the pump woken at once with its clock restarted at 2008-01-01 (NewDay, ArmInit, VersionInfo), set on its screen to 2020-01-01 four minutes later (a DateChange), and still suspended. Setup's clock write then moves the pump about 6.9 years forward; a driver that adds that change to the boluses from before shelf mode reports them years in the future.",
+  "hours": 8,
+  "basal_cycle": true,
+  "basal_profile": [
+    {"start": "00:00", "rate": 0.85}
+  ],
+  "events": [
+    {"minutes_ago": 470, "type": "bolus", "units": 2.0, "source": "pump"},
+    {"minutes_ago": 455, "type": "bolus", "units": 1.0, "source": "pump"},
+    {"minutes_ago": 445, "type": "suspend"},
+    {"minutes_ago": 441, "type": "clock_change", "clock": "reset", "shelf_mode": true},
+    {"minutes_ago": 437, "type": "clock_change", "delta_minutes": 6311520}
+  ]
+}
