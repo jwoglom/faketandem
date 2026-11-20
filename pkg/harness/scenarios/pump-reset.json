@@ -1,6 +1,6 @@
 {
   "name": "pump-reset",
-  "description": "Six hours on a 0.85 U/hr profile with boluses from the pump's screen, then suspended and reset three hours ago with no ShelfMode record: the clock restarted at 2008-01-01 with no record of it (NewDay, ArmInit and VersionInfo records). Resumed on that clock and a 1.5 U bolus from its screen an hour ago, which no one has set the clock since. Nothing from before the reset can be dated; the bolus after it is dated once setup sets the clock, and should reach the host at the instant it was given. With Control-IQ off the pump shows about 1.4 U IOB.",
+  "description": "Six hours on a 0.85 U/hr profile with boluses from the pump's screen, then suspended and reset three hours ago with no ShelfMode record: the clock restarted at 2008-01-01 with no record of it (NewDay, ArmInit and VersionInfo records). Resumed on that clock and a 1.5 U bolus from its screen an hour ago; no one has set the clock since. Nothing from before the reset can be dated; the bolus after it is dated once setup sets the clock, and should reach the host at the instant it was given. With Control-IQ off the pump shows about 1.4 U IOB.",
   "hours": 9,
   "basal_cycle": true,
   "basal_profile": [
