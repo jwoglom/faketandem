@@ -1,0 +1,17 @@
+{
+  "name": "reboot-kept-clock",
+  "description": "Six hours on a 0.85 U/hr profile. A 2.0 U bolus from the pump's screen 45 minutes ago, then a stop and a reboot 30 minutes ago that kept the pump's clock (ArmInit and VersionInfo records, no clock change), resumed, and a 1.0 U bolus 10 minutes ago. Every record is dated right, but a reader that takes an ArmInit record as the end of the clock before it leaves the 2.0 U bolus out. Whether a reboot keeps the clock is not known; this is the case where it does.",
+  "hours": 6,
+  "basal_cycle": true,
+  "basal_profile": [
+    {"start": "00:00", "rate": 0.85}
+  ],
+  "events": [
+    {"minutes_ago": 200, "type": "bolus", "units": 3.0, "source": "pump"},
+    {"minutes_ago": 45, "type": "bolus", "units": 2.0, "source": "pump"},
+    {"minutes_ago": 32, "type": "suspend"},
+    {"minutes_ago": 30, "type": "reset", "keep_clock": true},
+    {"minutes_ago": 28, "type": "resume"},
+    {"minutes_ago": 10, "type": "bolus", "units": 1.0, "source": "pump"}
+  ]
+}

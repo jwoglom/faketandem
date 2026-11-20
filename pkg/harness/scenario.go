@@ -52,6 +52,10 @@ const (
 	EventSuspend       = "suspend"
 	EventResume        = "resume"
 	EventControlIQRate = "control_iq_rate"
+	EventShelfMode     = "shelf_mode"
+	EventReset         = "reset"
+	EventClockSet      = "clock_set"
+	EventClockJump     = "clock_jump"
 )
 
 // Scenario is the body of POST /api/state/scenario and the file -scenario
@@ -95,8 +99,8 @@ type ScenarioBasalSegment struct {
 type ScenarioEvent struct {
 	// MinutesAgo is how long before the end of the replay (now) it happened.
 	MinutesAgo float64 `json:"minutes_ago"`
-	// Type is bolus, temp_basal, temp_basal_stop, suspend, resume or
-	// control_iq_rate.
+	// Type is bolus, temp_basal, temp_basal_stop, suspend, resume,
+	// control_iq_rate, shelf_mode, reset, clock_set or clock_jump.
 	Type string `json:"type"`
 
 	// Units is a bolus's requested volume, and DeliveredUnits what it put in
@@ -120,6 +124,13 @@ type ScenarioEvent struct {
 	Percent         *int    `json:"percent,omitempty"`
 	Rate            float64 `json:"rate,omitempty"`
 	DurationMinutes int     `json:"duration_minutes,omitempty"`
+
+	// DeltaSeconds moves the pump's clock for clock_set and clock_jump;
+	// negative moves it back.
+	DeltaSeconds float64 `json:"delta_seconds,omitempty"`
+	// KeepClock leaves a reset's clock where it was; by default it restarts at
+	// 2008-01-01.
+	KeepClock bool `json:"keep_clock,omitempty"`
 }
 
 // ScenarioResult reports what a replay wrote.
@@ -235,15 +246,7 @@ func (e ScenarioEvent) validate() error {
 	}
 	switch e.Type {
 	case EventBolus:
-		if e.Units <= 0 {
-			return errors.New("a bolus needs positive units")
-		}
-		if e.DeliveredUnits != nil && (*e.DeliveredUnits < 0 || *e.DeliveredUnits > e.Units) {
-			return errors.New("delivered_units must be between 0 and units")
-		}
-		if _, err := resolveBolusSource(bolusStartBody{Source: e.Source, SourceID: e.SourceID}); err != nil {
-			return err
-		}
+		return e.validateBolus()
 	case EventTempBasal:
 		if (e.Percent == nil) == (e.Rate <= 0) {
 			return errors.New("a temp_basal needs one of percent and rate")
@@ -255,12 +258,29 @@ func (e ScenarioEvent) validate() error {
 		if e.Rate > maxScenarioBasalRate {
 			return fmt.Errorf("a control_iq_rate rate must be at most %g U/hr", maxScenarioBasalRate)
 		}
-	case EventTempBasalStop, EventSuspend, EventResume:
+	case EventClockSet, EventClockJump:
+		if e.DeltaSeconds == 0 {
+			return fmt.Errorf("a %s needs a nonzero delta_seconds", e.Type)
+		}
+	case EventTempBasalStop, EventSuspend, EventResume, EventShelfMode, EventReset:
 	default:
-		return fmt.Errorf("unknown type %q (expected %s, %s, %s, %s, %s or %s)", e.Type,
-			EventBolus, EventTempBasal, EventTempBasalStop, EventSuspend, EventResume, EventControlIQRate)
+		return fmt.Errorf("unknown type %q (expected %s)", e.Type, strings.Join([]string{
+			EventBolus, EventTempBasal, EventTempBasalStop, EventSuspend, EventResume, EventControlIQRate,
+			EventShelfMode, EventReset, EventClockSet, EventClockJump,
+		}, ", "))
 	}
 	return nil
+}
+
+func (e ScenarioEvent) validateBolus() error {
+	if e.Units <= 0 {
+		return errors.New("a bolus needs positive units")
+	}
+	if e.DeliveredUnits != nil && (*e.DeliveredUnits < 0 || *e.DeliveredUnits > e.Units) {
+		return errors.New("delivered_units must be between 0 and units")
+	}
+	_, err := resolveBolusSource(bolusStartBody{Source: e.Source, SourceID: e.SourceID})
+	return err
 }
 
 // basalSegments is BasalProfile as the active profile's segments, each with
@@ -315,7 +335,11 @@ type replay struct {
 	stopAt    time.Time
 	stopAfter float64
 	bolusRate float64
-	result    ScenarioResult
+	// shelved is a pump on the shelf: it writes nothing, so the clock jumps to
+	// the next event.
+	shelved    bool
+	basalCycle bool
+	result     ScenarioResult
 }
 
 // ApplyScenario replays s over the pump's past, ending now. It refuses while a
@@ -393,9 +417,8 @@ func (h *Harness) replayScenario(s Scenario, events []ScenarioEvent) (ScenarioRe
 		ps.SetIDPProfiles(profiles)
 		ps.PutActiveProfileInForce()
 	}
-	if s.BasalCycle == nil || *s.BasalCycle {
-		ps.SetBasalCycleEnabled(true)
-	}
+	r.basalCycle = s.BasalCycle == nil || *s.BasalCycle
+	ps.SetBasalCycleEnabled(r.basalCycle)
 
 	var err error
 	for _, e := range events {
@@ -476,6 +499,10 @@ func (h *Harness) scenarioReadings() ScenarioReadings {
 // runTo steps the clock to target, ticking the simulator at least every
 // scenarioStep and at the instant the bolus in progress ends.
 func (r *replay) runTo(target time.Time) {
+	if r.shelved {
+		r.clock.Set(target)
+		return
+	}
 	for now := r.ps.Now(); now.Before(target); now = r.ps.Now() {
 		next := now.Add(scenarioStep)
 		if end, ok := r.bolusEnd(); ok && end.Before(next) {
@@ -540,6 +567,35 @@ func (r *replay) apply(e ScenarioEvent) error {
 			return fmt.Errorf("control_iq_rate %.1f minutes ago: Control-IQ is off (state.closed_loop_enabled)", e.MinutesAgo)
 		}
 		r.ps.SetControlIQAlgorithmRate(e.Rate)
+	case EventShelfMode, EventReset, EventClockSet, EventClockJump:
+		return r.clockEvent(e)
+	}
+	return nil
+}
+
+// clockEvent applies shelf_mode, reset, clock_set or clock_jump.
+func (r *replay) clockEvent(e ScenarioEvent) error {
+	pumpSeconds := int64(r.ps.PumpTimeNow()) + int64(math.Round(e.DeltaSeconds))
+	if pumpSeconds < 0 {
+		pumpSeconds = 0
+	}
+	switch e.Type {
+	case EventShelfMode:
+		if err := r.h.enterShelfMode(); err != nil {
+			return fmt.Errorf("shelf_mode %.1f minutes ago: %w", e.MinutesAgo, err)
+		}
+		r.ps.SetBasalCycleEnabled(false)
+		r.shelved = true
+	case EventReset:
+		if err := r.h.resetPump(e.KeepClock); err != nil {
+			return fmt.Errorf("reset %.1f minutes ago: %w", e.MinutesAgo, err)
+		}
+		r.shelved = false
+		r.ps.SetBasalCycleEnabled(r.basalCycle)
+	case EventClockSet:
+		r.ps.SetPumpWallClock(uint32(pumpSeconds))
+	case EventClockJump:
+		r.ps.MovePumpWallClock(uint32(pumpSeconds))
 	}
 	return nil
 }

@@ -1,0 +1,22 @@
+{
+  "name": "out-of-shelf-mode",
+  "description": "A Mobi as one came to setup in a field log. Used 201 days ago on a right clock, on a 0.85 U/hr profile, with six boluses from its screen and an app (one stopped part-way) up to four hours before it was suspended and put on the shelf (a ShelfMode record). Woken 7 h 20 min ago: its clock restarted at 2008-01-01 with no record of it (NewDay, ArmInit and VersionInfo records), and about 4 minutes later was set to 2020-01-01 00:00 on the pump (a DateChange and a TimeChanged record). Suspended ever since, so the pump's clock reads 2020-01-01 07:16 and setup has to move it forward 6.9 years. Nothing given before the ShelfMode record may reach the host: setup's clock change, carried back to those boluses, dated them years ahead.",
+  "hours": 4838,
+  "basal_cycle": true,
+  "basal_profile": [
+    {"start": "00:00", "rate": 0.85}
+  ],
+  "events": [
+    {"minutes_ago": 290210, "type": "bolus", "units": 1.2, "source": "pump"},
+    {"minutes_ago": 290195, "type": "bolus", "units": 2.4, "delivered_units": 0.84, "source": "pump"},
+    {"minutes_ago": 290185, "type": "bolus", "units": 1.8, "source": "remote"},
+    {"minutes_ago": 290150, "type": "bolus", "units": 2.0, "source": "pump"},
+    {"minutes_ago": 290148, "type": "bolus", "units": 2.0, "source": "pump"},
+    {"minutes_ago": 290120, "type": "bolus", "units": 1.0, "source": "pump"},
+    {"minutes_ago": 289890, "type": "suspend"},
+    {"minutes_ago": 289880, "type": "shelf_mode"},
+    {"minutes_ago": 440, "type": "reset"},
+    {"minutes_ago": 436, "type": "clock_set", "delta_seconds": 378691200},
+    {"minutes_ago": 436, "type": "clock_set", "delta_seconds": -240}
+  ]
+}

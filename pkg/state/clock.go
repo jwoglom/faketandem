@@ -254,15 +254,7 @@ func (ps *PumpState) WallClockForPumpTime(pumpSeconds uint32) time.Time {
 // The change lands in the offset, not the skew: the skew stays a separate lie a
 // scenario controls. It returns the clock's reading before and after.
 func (ps *PumpState) SetPumpWallClock(pumpSeconds uint32) (prior, after uint32) {
-	prior = ps.PumpTimeNow()
-	delta := int64(pumpSeconds) - int64(prior)
-
-	ps.clockMtx.Lock()
-	ps.pumpUTCOffset += int(delta)
-	ps.pumpTimeZone = fixedZoneFor(ps.pumpUTCOffset)
-	ps.clockMtx.Unlock()
-
-	after = ps.PumpTimeNow()
+	prior, after = ps.MovePumpWallClock(pumpSeconds)
 	rtc := ps.GetTimeSinceReset()
 	const secondsPerDay = 86400
 	if prior%secondsPerDay != after%secondsPerDay {
@@ -288,6 +280,23 @@ func (ps *PumpState) SetPumpWallClock(pumpSeconds uint32) (prior, after uint32) 
 		})
 	}
 	return prior, after
+}
+
+// MovePumpWallClock moves the pump's date and time to pumpSeconds and writes no
+// history record, as a pump's clock restarting at a reset does: nothing in the log
+// says the clock moved, and records already in it keep their stamps. A person
+// setting the clock is SetPumpWallClock. It returns the clock's reading before and
+// after.
+func (ps *PumpState) MovePumpWallClock(pumpSeconds uint32) (prior, after uint32) {
+	prior = ps.PumpTimeNow()
+	delta := int64(pumpSeconds) - int64(prior)
+
+	ps.clockMtx.Lock()
+	ps.pumpUTCOffset += int(delta)
+	ps.pumpTimeZone = fixedZoneFor(ps.pumpUTCOffset)
+	ps.clockMtx.Unlock()
+
+	return prior, ps.PumpTimeNow()
 }
 
 // fixedZoneFor names an offset the way time.Time prints one ("UTC-07:00").
