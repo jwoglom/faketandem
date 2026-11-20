@@ -1,0 +1,16 @@
+{
+  "name": "clock-set-back",
+  "description": "Six hours on a 0.85 U/hr profile with boluses from the pump's screen. Two hours ago the user set the pump's clock back an hour on its screen (a TimeChanged record) and gave a 1.5 U bolus 90 minutes ago on that clock; an hour ago they set it forward again (another TimeChanged record) and gave 1.0 U 30 minutes ago. Each clock change is in the log, so every bolus can be dated to the instant it was given; the one given while the clock was back is stamped an hour early.",
+  "hours": 6,
+  "basal_cycle": true,
+  "basal_profile": [
+    {"start": "00:00", "rate": 0.85}
+  ],
+  "events": [
+    {"minutes_ago": 300, "type": "bolus", "units": 2.5, "source": "pump"},
+    {"minutes_ago": 120, "type": "clock_set", "delta_seconds": -3600},
+    {"minutes_ago": 90, "type": "bolus", "units": 1.5, "source": "pump"},
+    {"minutes_ago": 60, "type": "clock_set", "delta_seconds": 3600},
+    {"minutes_ago": 30, "type": "bolus", "units": 1.0, "source": "pump"}
+  ]
+}

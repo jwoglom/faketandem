@@ -75,6 +75,7 @@ func (h *Harness) stateActions() map[string]http.HandlerFunc {
 		"scenario":          h.actionScenario,
 		"qualifyingevent":   h.actionQualifyingEvent,
 		"time":              h.actionSetPumpTime,
+		"reset":             h.actionReset,
 		"filltubing/button": h.actionFillTubingButton,
 		"cartridge/ready":   h.actionCartridgeReady,
 		"cartridge/insert":  h.actionCartridgeInsert,

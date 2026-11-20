@@ -246,6 +246,10 @@ func TestEveryScenarioPresetReplaysToTheReadingsItDescribes(t *testing.T) {
 		"recent-doses":         {3.205, 1.275, true, false, 1.2, []string{"profile", "suspended", "temp"}, 74},
 		"scheduled-basal":      {0, 0.85, false, false, -1, []string{"profile"}, 73},
 		"suspended-now":        {1.95, 0, false, true, 1.5, []string{"profile", "suspended"}, 73},
+		"out-of-shelf-mode":    {0, 0, false, true, 1, []string{"profile", "suspended"}, 170},
+		"pump-reset":           {1.4, 0.85, false, false, 1.5, []string{"profile", "suspended"}, 110},
+		"reboot-kept-clock":    {3.67, 0.85, false, false, 1, []string{"profile", "suspended"}, 73},
+		"clock-set-back":       {1.95, 0.85, false, false, 1, []string{"profile"}, 73},
 	}
 	for _, name := range ScenarioPresets() {
 		t.Run(name, func(t *testing.T) {

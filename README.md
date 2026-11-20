@@ -218,6 +218,22 @@ curl -X PUT http://127.0.0.1:8080/api/clock -d '{"mode":"real","pump_offset_seco
 `delta_seconds` and `local_time` and returns the clock's reading before and
 after (`prior_pump_seconds`, `pump_seconds`), the clock and the history tail.
 
+`pump_timezone` and `pump_offset_seconds` move the pump's clock with no history
+record, which a pump never does: it records every change a person makes. To
+model one, set the time with `POST /api/state/time`; to model a pump losing its
+clock, reset it:
+
+```bash
+# Reboot a suspended pump: ArmInit and VersionInfo, its clock restarted at
+# 2008-01-01 with no record (a NewDay marks it). shelf_mode writes a ShelfMode
+# record first, as a pump woken from the shelf has; keep_clock leaves the clock.
+curl -X POST http://127.0.0.1:8080/api/state/reset -d '{"shelf_mode":true}'
+curl -X POST http://127.0.0.1:8080/api/state/reset -d '{"keep_clock":true}'
+```
+
+`POST /api/state/reset` returns `409` while the pump delivers. A connected
+driver stays connected, where a pump would drop the link.
+
 `POST /api/clock/advance` returns `409` while the pump is on the real clock.
 Advancing is time passing: the simulator delivers over the step. Setting the
 clock with a `PUT` is not: the next tick counts from the new reading.
@@ -694,6 +710,10 @@ curl -X POST http://127.0.0.1:8080/api/state/scenario -d '{
 | `control-iq` | Six hours with Control-IQ on throughout and still on: its rate moves between 0 and 1.4 U/hr, two automatic boluses (source 7) and one from the pump's screen. Every 279 is Control-IQ's. About 3.1 U IOB. |
 | `pump-profile-differs` | Six hours on a six-segment profile (0.6 to 1.1 U/hr, every segment at most 4 hours, so any window crosses a change), a pump bolus and a 130% temp rate: a pump whose profile is not the app's. About 1.0 U IOB. |
 | `day-of-use` | Twenty-four hours on 0.85 U/hr: boluses from the pump and an app (one stopped short), 0%, 120% and 70% temp rates from an app, a 25-minute suspend. About 290 279s, four times the 6-hour window a setup history load reads. About 3.7 U IOB. |
+| `out-of-shelf-mode` | A Mobi as one came to setup in a field log: six boluses 201 days ago on a right clock, a suspend and a `ShelfMode` record; woken 7 h 20 min ago with its clock restarted at 2008-01-01 and no record of it (`NewDay`, `ArmInit`, `VersionInfo`), set to 2020-01-01 on the pump four minutes later (`DateChange`, `TimeChanged`), and suspended since. The clock reads 2020-01-01 07:16, 6.9 years behind. No IOB. |
+| `pump-reset` | Six hours on 0.85 U/hr, then a suspend and a reset three hours ago with no `ShelfMode` record: the clock restarts at 2008-01-01 with no record. Resumed on that clock, and a 1.5 U pump bolus an hour ago. About 1.4 U IOB. |
+| `reboot-kept-clock` | Six hours on 0.85 U/hr: a 2.0 U pump bolus 45 minutes ago, then a stop and a reboot 30 minutes ago that keeps the clock (`ArmInit`, `VersionInfo`, no clock change), resumed, and a 1.0 U bolus 10 minutes ago. Every record is dated right. About 3.7 U IOB. |
+| `clock-set-back` | Six hours on 0.85 U/hr: the user sets the pump's clock back an hour on its screen two hours ago, gives 1.5 U on that clock, and sets it forward again an hour ago (a `TimeChanged` record each way); 1.0 U 30 minutes ago. About 2.0 U IOB. |
 
 - `hours` (default 6) is how far back the replay starts, at least the oldest
   event's age. Event times are `minutes_ago`, before the end of the replay.
@@ -705,6 +725,17 @@ curl -X POST http://127.0.0.1:8080/api/state/scenario -d '{
   `resume`, and `control_iq_rate` (`rate` in U/hr Control-IQ runs at from its
   next cycle, negative for the profile's; needs `state.closed_loop_enabled`).
   Overlapping boluses and a bolus while suspended are refused.
+- Clock events: `shelf_mode` writes a `ShelfMode` record and puts the pump on
+  the shelf, where it writes nothing and the replay jumps to the next event;
+  `reset` reboots it, writing `ArmInit` and `VersionInfo` and restarting its
+  time since reset, and restarts its clock at 2008-01-01 with no record (a
+  `NewDay` marks the new date) unless `keep_clock`. Both need delivery
+  suspended, as a pump goes on the shelf and comes back from a reset. A pump
+  woken from shelf mode lost its clock; whether a reset otherwise does is not
+  known. `clock_set` (`delta_seconds`) is a person setting the date and time on
+  the pump, with its `TimeChanged`/`DateChange` records, as `POST
+  /api/state/time`; `clock_jump` (`delta_seconds`) moves the clock with no
+  record at all, which only a reset does on a pump.
 - `basal_profile` is the active profile's basal schedule, segments from
   `00:00` on the pump's clock with their `rate` in U/hr. Each 279 carries the
   rate in force at its cycle: the segment's, a temp rate's percent of it, or 0

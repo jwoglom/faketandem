@@ -461,6 +461,17 @@ func (ps *PumpState) GetTimeSinceReset() uint32 {
 	return ps.TimeSinceReset
 }
 
+// RestartTimeSinceReset starts the pump's time since reset again from 0, as a
+// reset does.
+func (ps *PumpState) RestartTimeSinceReset() {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+
+	ps.StartTime = ps.Now()
+	ps.CurrentTime = ps.StartTime
+	ps.TimeSinceReset = 0
+}
+
 // UpdateTimeSinceReset updates the time since reset
 func (ps *PumpState) UpdateTimeSinceReset() {
 	ps.mutex.Lock()
