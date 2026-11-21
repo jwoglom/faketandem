@@ -157,6 +157,227 @@ func TestClockSetBackStampsTheBolusGivenMeanwhileAnHourEarly(t *testing.T) {
 	}
 }
 
+// stampOnTheClockNow is e's stamp moved by every TimeChanged and DateChange
+// record after it, as a reader of the log dates a record.
+func stampOnTheClockNow(entries []state.HistoryLogEntry, e state.HistoryLogEntry) int64 {
+	stamp := int64(e.PumpTime)
+	for _, change := range entries {
+		if change.Sequence <= e.Sequence {
+			continue
+		}
+		switch change.Type {
+		case "TimeChanged":
+			stamp += (toInt(change.Data["timeAfter"]) - toInt(change.Data["timePrior"])) / 1000
+		case "DateChange":
+			stamp += (toInt(change.Data["dateAfter"]) - toInt(change.Data["datePrior"])) * secondsPerDay
+		}
+	}
+	return stamp
+}
+
+// checkBolusesDatedByTheLog checks that the clock records date each bolus
+// activation to the instant it was given, or, where datable is false, do not.
+func checkBolusesDatedByTheLog(t *testing.T, ps *state.PumpState, datable ...bool) []state.HistoryLogEntry {
+	t.Helper()
+	entries := pumpLog(ps)
+	boluses := entriesOfType(entries, "BolusActivated")
+	if len(boluses) != len(datable) {
+		t.Fatalf("%d boluses; want %d", len(boluses), len(datable))
+	}
+	for i, b := range boluses {
+		dated, given := stampOnTheClockNow(entries, b), int64(ps.PumpTimeFor(b.Timestamp))
+		if (dated == given) != datable[i] {
+			t.Errorf("bolus %d given at %d on the clock now is dated %d by the log; datable %v", i+1, given, dated, datable[i])
+		}
+	}
+	return boluses
+}
+
+func countClockChanges(entries []state.HistoryLogEntry) int {
+	return len(entriesOfType(entries, "TimeChanged")) + len(entriesOfType(entries, "DateChange"))
+}
+
+func TestClockDriftedAheadStampsEveryRecordSevenMinutesAheadWithNoRecordOfIt(t *testing.T) {
+	h, ps, _ := scenarioHarness(t)
+	before := ps.PumpTimeNow()
+	if _, err := h.ApplyScenario(Scenario{Preset: "clock-drifted-ahead"}); err != nil {
+		t.Fatalf("ApplyScenario: %v", err)
+	}
+	entries := pumpLog(ps)
+
+	if n := countClockChanges(entries); n != 0 {
+		t.Errorf("%d clock change records; a drift writes none", n)
+	}
+	if got, want := ps.PumpTimeNow(), before+420; got != want {
+		t.Errorf("the pump's clock reads %d; want %d", got, want)
+	}
+	for _, e := range entries {
+		if want := ps.PumpTimeFor(e.Timestamp); e.PumpTime != want {
+			t.Fatalf("%s at %d stamped %d; want %d, on the clock 7 minutes ahead", e.Type, e.Sequence, e.PumpTime, want)
+		}
+	}
+	checkBolusesDatedByTheLog(t, ps, true, true, true)
+}
+
+func TestClockNudgedBackStampsTheLaterBolusBeforeTheEarlierOne(t *testing.T) {
+	h, ps, _ := scenarioHarness(t)
+	before := ps.PumpTimeNow()
+	if _, err := h.ApplyScenario(Scenario{Preset: "clock-nudged-back"}); err != nil {
+		t.Fatalf("ApplyScenario: %v", err)
+	}
+	entries := pumpLog(ps)
+
+	changed := onlyEntry(t, entries, "TimeChanged")
+	if got := toInt(changed.Data["timeAfter"]) - toInt(changed.Data["timePrior"]); got != -180000 {
+		t.Errorf("TimeChanged moves the clock %d ms; want -180000", got)
+	}
+	if n := len(entriesOfType(entries, "DateChange")); n != 0 {
+		t.Errorf("%d DateChange records; want none", n)
+	}
+	boluses := checkBolusesDatedByTheLog(t, ps, true, true, true)
+	if boluses[2].PumpTime >= boluses[1].PumpTime {
+		t.Errorf("the bolus after the change stamped %d, not before the one ahead of it at %d", boluses[2].PumpTime, boluses[1].PumpTime)
+	}
+	if got := ps.PumpTimeNow(); got != before {
+		t.Errorf("the pump's clock reads %d; want %d, set right again", got, before)
+	}
+}
+
+func TestClockSetAheadHoursLeavesThePumpSixHoursAheadWithEveryBolusDatable(t *testing.T) {
+	h, ps, _ := scenarioHarness(t)
+	before := ps.PumpTimeNow()
+	if _, err := h.ApplyScenario(Scenario{Preset: "clock-set-ahead-hours"}); err != nil {
+		t.Fatalf("ApplyScenario: %v", err)
+	}
+	entries := pumpLog(ps)
+
+	if n := len(entriesOfType(entries, "TimeChanged")); n != 1 {
+		t.Errorf("%d TimeChanged records; want 1", n)
+	}
+	boluses := checkBolusesDatedByTheLog(t, ps, true, true, true)
+	for i, offset := range []int64{0, 21600, 21600} {
+		want := int64(before) - int64(testInstant.Sub(boluses[i].Timestamp).Seconds()) + offset
+		if int64(boluses[i].PumpTime) != want {
+			t.Errorf("bolus %d stamped %d; want %d", i+1, boluses[i].PumpTime, want)
+		}
+	}
+	if got, want := ps.PumpTimeNow(), before+21600; got != want {
+		t.Errorf("the pump's clock reads %d; want %d", got, want)
+	}
+}
+
+func TestClockDateSetBackWritesOnlyADateChangeAndStampsTheLastBolusAMonthEarly(t *testing.T) {
+	h, ps, _ := scenarioHarness(t)
+	before := ps.PumpTimeNow()
+	if _, err := h.ApplyScenario(Scenario{Preset: "clock-date-set-back"}); err != nil {
+		t.Fatalf("ApplyScenario: %v", err)
+	}
+	entries := pumpLog(ps)
+
+	dateChange := onlyEntry(t, entries, "DateChange")
+	if got := toInt(dateChange.Data["dateAfter"]) - toInt(dateChange.Data["datePrior"]); got != -31 {
+		t.Errorf("DateChange moves the date %d days; want -31", got)
+	}
+	if n := len(entriesOfType(entries, "TimeChanged")); n != 0 {
+		t.Errorf("%d TimeChanged records; the time of day did not move", n)
+	}
+	boluses := checkBolusesDatedByTheLog(t, ps, true, true, true)
+	if boluses[2].PumpTime >= boluses[0].PumpTime {
+		t.Errorf("the bolus after the change stamped %d, not before the first at %d", boluses[2].PumpTime, boluses[0].PumpTime)
+	}
+	if got, want := ps.PumpTimeNow(), before-31*secondsPerDay; got != want {
+		t.Errorf("the pump's clock reads %d; want %d", got, want)
+	}
+}
+
+func TestClockJumpedBackLeavesEveryEarlierRecordUndatable(t *testing.T) {
+	h, ps, _ := scenarioHarness(t)
+	before := ps.PumpTimeNow()
+	if _, err := h.ApplyScenario(Scenario{Preset: "clock-jumped-back"}); err != nil {
+		t.Fatalf("ApplyScenario: %v", err)
+	}
+	entries := pumpLog(ps)
+
+	if n := countClockChanges(entries); n != 0 {
+		t.Errorf("%d clock change records; the jump writes none", n)
+	}
+	for _, name := range []string{"ArmInit", "NewDay", "ShelfMode"} {
+		if n := len(entriesOfType(entries, name)); n != 0 {
+			t.Errorf("%d %s records; want none", n, name)
+		}
+	}
+	boluses := checkBolusesDatedByTheLog(t, ps, false, false, true)
+	if boluses[2].PumpTime >= boluses[0].PumpTime {
+		t.Errorf("the bolus after the jump stamped %d, not before the first at %d", boluses[2].PumpTime, boluses[0].PumpTime)
+	}
+	if got, want := ps.PumpTimeNow(), before-2*secondsPerDay; got != want {
+		t.Errorf("the pump's clock reads %d; want %d", got, want)
+	}
+}
+
+func TestClockChangePresetsDateEveryRecordByTheLogAndEndWhereTheySay(t *testing.T) {
+	for name, endsMinutes := range map[string]int64{
+		"clock-fall-back":       0,
+		"clock-spring-forward":  0,
+		"clock-travel-east":     0,
+		"clock-travel-west":     0,
+		"clock-travel-12h-east": 0,
+		"clock-travel-12h-west": 0,
+		"clock-73h-ahead":       73 * 60,
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, ps, _ := scenarioHarness(t)
+			before := ps.PumpTimeNow()
+			if _, err := h.ApplyScenario(Scenario{Preset: name}); err != nil {
+				t.Fatalf("ApplyScenario: %v", err)
+			}
+			entries := pumpLog(ps)
+
+			if n := len(entriesOfType(entries, "TimeChanged")) + len(entriesOfType(entries, "DateChange")); n == 0 {
+				t.Error("no clock change record")
+			}
+			for _, e := range entries {
+				if e.Type == "TimeChanged" || e.Type == "DateChange" {
+					continue // a change run is stamped on its final clock
+				}
+				if dated, want := stampOnTheClockNow(entries, e), int64(ps.PumpTimeFor(e.Timestamp)); dated != want {
+					t.Errorf("%s at %d is dated %d by the log; written at %d on the clock now", e.Type, e.Sequence, dated, want)
+				}
+			}
+			activated, completed := onlyEntry(t, entries, "TempRateActivated"), onlyEntry(t, entries, "TempRateCompleted")
+			if change := entriesOfType(entries, "TimeChanged"); len(change) > 0 &&
+				(activated.Sequence >= change[0].Sequence || change[0].Sequence >= completed.Sequence) {
+				t.Errorf("the temp rate (%d to %d) does not run across the change at %d", activated.Sequence, completed.Sequence, change[0].Sequence)
+			}
+			if got, want := int64(ps.PumpTimeNow()), int64(before)+endsMinutes*60; got != want {
+				t.Errorf("the pump's clock reads %d; want %d", got, want)
+			}
+		})
+	}
+}
+
+func TestClockJumpedAheadLeavesTheBolusBeforeItOnAClockNothingExplains(t *testing.T) {
+	h, ps, _ := scenarioHarness(t)
+	before := ps.PumpTimeNow()
+	if _, err := h.ApplyScenario(Scenario{Preset: "clock-jumped-ahead"}); err != nil {
+		t.Fatalf("ApplyScenario: %v", err)
+	}
+	entries := pumpLog(ps)
+
+	if n := countClockChanges(entries); n != 0 {
+		t.Errorf("%d clock change records; the jump writes none", n)
+	}
+	for i := 1; i < len(entries); i++ {
+		if entries[i].PumpTime < entries[i-1].PumpTime {
+			t.Fatalf("%s at %d stamped %d runs back from %d", entries[i].Type, entries[i].Sequence, entries[i].PumpTime, entries[i-1].PumpTime)
+		}
+	}
+	checkBolusesDatedByTheLog(t, ps, false, true)
+	if got, want := int64(ps.PumpTimeNow()), int64(before)+(9*365+2)*secondsPerDay; got != want {
+		t.Errorf("the pump's clock reads %d; want %d", got, want)
+	}
+}
+
 func TestAScenarioRefusesAResetWhileThePumpDelivers(t *testing.T) {
 	_, _, mux := scenarioHarness(t)
 

@@ -1,0 +1,15 @@
+{
+  "name": "clock-drifted-ahead",
+  "description": "Six hours on a 0.85 U/hr profile with boluses from the pump's screen, on a pump whose clock has drifted 7 minutes ahead since it was last set, with no record of it (the drift happened before the window). Every record is stamped 7 minutes ahead and nothing in the log says so: only the pump's clock against the phone's tells, and that is past a 5-minute skew threshold but well inside a 24-hour trust limit. Every bolus should reach the host at the instant it was given.",
+  "hours": 6,
+  "basal_cycle": true,
+  "basal_profile": [
+    {"start": "00:00", "rate": 0.85}
+  ],
+  "events": [
+    {"minutes_ago": 360, "type": "clock_jump", "delta_seconds": 420},
+    {"minutes_ago": 200, "type": "bolus", "units": 2.0, "source": "pump"},
+    {"minutes_ago": 90, "type": "bolus", "units": 1.5, "source": "pump"},
+    {"minutes_ago": 20, "type": "bolus", "units": 0.8, "source": "pump"}
+  ]
+}

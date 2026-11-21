@@ -714,6 +714,19 @@ curl -X POST http://127.0.0.1:8080/api/state/scenario -d '{
 | `pump-reset` | Six hours on 0.85 U/hr, then a suspend and a reset three hours ago with no `ShelfMode` record: the clock restarts at 2008-01-01 with no record. Resumed on that clock, and a 1.5 U pump bolus an hour ago. About 1.4 U IOB. |
 | `reboot-kept-clock` | Six hours on 0.85 U/hr: a 2.0 U pump bolus 45 minutes ago, then a stop and a reboot 30 minutes ago that keeps the clock (`ArmInit`, `VersionInfo`, no clock change), resumed, and a 1.0 U bolus 10 minutes ago. Every record is dated right. About 3.7 U IOB. |
 | `clock-set-back` | Six hours on 0.85 U/hr: the user sets the pump's clock back an hour on its screen two hours ago, gives 1.5 U on that clock, and sets it forward again an hour ago (a `TimeChanged` record each way); 1.0 U 30 minutes ago. About 2.0 U IOB. |
+| `clock-drifted-ahead` | Six hours on 0.85 U/hr with three pump boluses, on a pump whose clock drifted 7 minutes ahead before the window with no record of it: every record is stamped 7 minutes ahead, and only the pump's clock against the phone's tells. Past TandemKit's 5-minute skew threshold, inside its 24-hour trust limit. About 2.5 U IOB. |
+| `clock-nudged-back` | Six hours on 0.85 U/hr, on a pump 3 minutes ahead with no record of it: 1.0 U 35 minutes ago, the clock set back 3 minutes on its screen a minute later (`TimeChanged`), and 0.8 U a minute after that, stamped before the bolus ahead of it. The clock ends right. About 2.0 U IOB. |
+| `clock-set-ahead-hours` | Six hours on 0.85 U/hr: the clock set six hours ahead on the pump's screen 150 minutes ago, as for a flight east (`TimeChanged`, and `DateChange` when it crosses midnight), with pump boluses on both sides. The clock ends six hours ahead of the zone it was set in: past the skew threshold, inside the trust limit. About 2.1 U IOB. |
+| `clock-date-set-back` | Six hours on 0.85 U/hr: the date set back 31 days on the pump's screen two hours ago, time of day left alone (`DateChange`, no `TimeChanged`), and 1.2 U an hour ago, stamped a month before the boluses ahead of it. The clock ends 31 days behind, past the trust limit. About 1.6 U IOB. |
+| `clock-jumped-back` | Six hours on 0.85 U/hr: the clock goes back two days three hours ago with no record and no reboot, so every earlier record is stamped two days after every later one and nothing explains it. No pump is known to do this; a reader can find it only by a stamp running back. One pump bolus after it. The clock ends two days behind. About 1.1 U IOB. |
+| `clock-fall-back` | Six hours on 0.85 U/hr across a DST change back the phone made on its own: the pump starts an hour ahead (no record) and is set an hour back on its screen 180 minutes ago, ending on the phone's time; a 2.0 U pump bolus before it, a 150% temp rate running across it and a 1.0 U bolus after it. About 1.1 U IOB. |
+| `clock-spring-forward` | As `clock-fall-back`, the other way: the pump starts an hour behind and is set an hour ahead; a 2.0 U pump bolus before it, a 150% temp rate running across it and a 1.0 U bolus after it. About 1.1 U IOB. |
+| `clock-travel-east` | A trip three hours east with the phone already moved: the pump starts three hours behind (no record) and is set three hours ahead 180 minutes ago, ending on the phone's time; a 2.0 U pump bolus before it, a 150% temp rate running across it and a 1.0 U bolus after it. About 1.1 U IOB. |
+| `clock-travel-west` | As `clock-travel-east`, three hours west; a 2.0 U pump bolus before it, a 150% temp rate running across it and a 1.0 U bolus after it. About 1.1 U IOB. |
+| `clock-travel-12h-east` | As `clock-travel-east`, twelve hours (a `DateChange` too when the change crosses midnight); a 2.0 U pump bolus before it, a 150% temp rate running across it and a 1.0 U bolus after it. About 1.1 U IOB. |
+| `clock-travel-12h-west` | As `clock-travel-12h-east`, twelve hours west; a 2.0 U pump bolus before it, a 150% temp rate running across it and a 1.0 U bolus after it. About 1.1 U IOB. |
+| `clock-73h-ahead` | The clock set 73 hours ahead on the pump's screen 180 minutes ago (`TimeChanged`, `DateChange`), ending past the 24-hour trust limit, so the app has to set it; a 2.0 U pump bolus before it, a 150% temp rate running across it and a 1.0 U bolus after it. About 1.1 U IOB. |
+| `clock-jumped-ahead` | The clock goes nine years ahead with no record and no reboot three hours ago: a 2.0 U pump bolus before it, 1.0 U after. Every stamp still runs forward, so a reader cannot tell the jump from time passing; one that carries the app's clock write back to the earlier bolus dates it nine years early. No pump is known to do this. About 1.1 U IOB. |
 
 - `hours` (default 6) is how far back the replay starts, at least the oldest
   event's age. Event times are `minutes_ago`, before the end of the replay.
@@ -735,7 +748,10 @@ curl -X POST http://127.0.0.1:8080/api/state/scenario -d '{
   known. `clock_set` (`delta_seconds`) is a person setting the date and time on
   the pump, with its `TimeChanged`/`DateChange` records, as `POST
   /api/state/time`; `clock_jump` (`delta_seconds`) moves the clock with no
-  record at all, which only a reset does on a pump.
+  record at all, which only a reset does on a pump. An event at the window's
+  start (`minutes_ago` equal to `hours` × 60) comes before its first
+  `BasalDelivery` record, so a `clock_jump` there stands for a drift from before
+  the window and moves every stamp.
 - `basal_profile` is the active profile's basal schedule, segments from
   `00:00` on the pump's clock with their `rate` in U/hr. Each 279 carries the
   rate in force at its cycle: the segment's, a temp rate's percent of it, or 0

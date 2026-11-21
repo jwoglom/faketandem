@@ -1,0 +1,15 @@
+{
+  "name": "clock-date-set-back",
+  "description": "Six hours on a 0.85 U/hr profile with boluses from the pump's screen. Two hours ago the user set the pump's date back 31 days on its screen by mistake, leaving the time of day alone (a DateChange record and no TimeChanged), and gave 1.2 U an hour ago, stamped a month before the boluses given ahead of it. Only the DateChange record puts them in order, and every bolus can still be dated to the instant it was given. The pump's clock ends 31 days behind: more than any time zone or DST change explains, past a 24-hour trust limit.",
+  "hours": 6,
+  "basal_cycle": true,
+  "basal_profile": [
+    {"start": "00:00", "rate": 0.85}
+  ],
+  "events": [
+    {"minutes_ago": 300, "type": "bolus", "units": 2.5, "source": "pump"},
+    {"minutes_ago": 200, "type": "bolus", "units": 2.0, "source": "pump"},
+    {"minutes_ago": 120, "type": "clock_set", "delta_seconds": -2678400},
+    {"minutes_ago": 60, "type": "bolus", "units": 1.2, "source": "pump"}
+  ]
+}

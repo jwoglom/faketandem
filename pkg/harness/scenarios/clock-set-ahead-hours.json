@@ -1,0 +1,15 @@
+{
+  "name": "clock-set-ahead-hours",
+  "description": "Six hours on a 0.85 U/hr profile with boluses from the pump's screen. Two and a half hours ago the user set the pump's clock six hours ahead on its screen, as for a flight east (a TimeChanged record, and a DateChange record too when the change crosses midnight), and gave 1.5 U 100 minutes ago and 0.8 U 25 minutes ago on that clock. The change is in the log, so every bolus can be dated to the instant it was given. The pump's clock ends six hours ahead of the zone it was set in before: past a 5-minute skew threshold, inside a 24-hour trust limit.",
+  "hours": 6,
+  "basal_cycle": true,
+  "basal_profile": [
+    {"start": "00:00", "rate": 0.85}
+  ],
+  "events": [
+    {"minutes_ago": 240, "type": "bolus", "units": 2.0, "source": "pump"},
+    {"minutes_ago": 150, "type": "clock_set", "delta_seconds": 21600},
+    {"minutes_ago": 100, "type": "bolus", "units": 1.5, "source": "pump"},
+    {"minutes_ago": 25, "type": "bolus", "units": 0.8, "source": "pump"}
+  ]
+}

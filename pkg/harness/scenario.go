@@ -418,14 +418,26 @@ func (h *Harness) replayScenario(s Scenario, events []ScenarioEvent) (ScenarioRe
 		ps.PutActiveProfileInForce()
 	}
 	r.basalCycle = s.BasalCycle == nil || *s.BasalCycle
-	ps.SetBasalCycleEnabled(r.basalCycle)
 
+	at := func(e ScenarioEvent) time.Time { return end.Add(-time.Duration(e.MinutesAgo * float64(time.Minute))) }
+	// Events at the window's start go before its first basal cycle's record, so
+	// a clock moved there (a drift from before the window) stamps every record.
 	var err error
-	for _, e := range events {
-		r.runTo(end.Add(-time.Duration(e.MinutesAgo * float64(time.Minute))))
-		if err = r.apply(e); err != nil {
+	next := 0
+	for ; next < len(events) && !at(events[next]).After(start); next++ {
+		if err = r.apply(events[next]); err != nil {
 			break
 		}
+	}
+	if !r.shelved {
+		ps.SetBasalCycleEnabled(r.basalCycle)
+	}
+	for _, e := range events[next:] {
+		if err != nil {
+			break
+		}
+		r.runTo(at(e))
+		err = r.apply(e)
 	}
 	if err == nil {
 		r.runTo(end)
