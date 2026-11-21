@@ -237,19 +237,24 @@ type presetReadings struct {
 
 func TestEveryScenarioPresetReplaysToTheReadingsItDescribes(t *testing.T) {
 	want := map[string]presetReadings{
-		"app-doses":            {1.47, 0.425, true, false, 0.6, []string{"profile", "temp"}, 73},
-		"stopped-boluses":      {2.74, 0.85, false, false, 0, []string{"profile"}, 73},
-		"control-iq":           {3.09, 0.85, false, false, 0.4, []string{"control_iq"}, 73},
-		"day-of-use":           {3.67, 0.85, false, false, 2, []string{"profile", "suspended", "temp"}, 290},
-		"pump-boluses":         {4.91, 0.85, false, false, 0.8, []string{"profile"}, 73},
-		"pump-profile-differs": {1, 0.95, false, false, 2, []string{"profile", "temp"}, 73},
-		"recent-doses":         {3.205, 1.275, true, false, 1.2, []string{"profile", "suspended", "temp"}, 74},
-		"scheduled-basal":      {0, 0.85, false, false, -1, []string{"profile"}, 73},
-		"suspended-now":        {1.95, 0, false, true, 1.5, []string{"profile", "suspended"}, 73},
-		"out-of-shelf-mode":    {0, 0, false, true, 1, []string{"profile", "suspended"}, 170},
-		"pump-reset":           {1.4, 0.85, false, false, 1.5, []string{"profile", "suspended"}, 110},
-		"reboot-kept-clock":    {3.67, 0.85, false, false, 1, []string{"profile", "suspended"}, 73},
-		"clock-set-back":       {1.95, 0.85, false, false, 1, []string{"profile"}, 73},
+		"app-doses":             {1.47, 0.425, true, false, 0.6, []string{"profile", "temp"}, 73},
+		"stopped-boluses":       {2.74, 0.85, false, false, 0, []string{"profile"}, 73},
+		"control-iq":            {3.09, 0.85, false, false, 0.4, []string{"control_iq"}, 73},
+		"day-of-use":            {3.67, 0.85, false, false, 2, []string{"profile", "suspended", "temp"}, 290},
+		"pump-boluses":          {4.91, 0.85, false, false, 0.8, []string{"profile"}, 73},
+		"pump-profile-differs":  {1, 0.95, false, false, 2, []string{"profile", "temp"}, 73},
+		"recent-doses":          {3.205, 1.275, true, false, 1.2, []string{"profile", "suspended", "temp"}, 74},
+		"scheduled-basal":       {0, 0.85, false, false, -1, []string{"profile"}, 73},
+		"suspended-now":         {1.95, 0, false, true, 1.5, []string{"profile", "suspended"}, 73},
+		"out-of-shelf-mode":     {0, 0, false, true, 1, []string{"profile", "suspended"}, 170},
+		"pump-reset":            {1.4, 0.85, false, false, 1.5, []string{"profile", "suspended"}, 110},
+		"reboot-kept-clock":     {3.67, 0.85, false, false, 1, []string{"profile", "suspended"}, 73},
+		"clock-set-back":        {1.95, 0.85, false, false, 1, []string{"profile"}, 73},
+		"clock-drifted-ahead":   {2.46, 0.85, false, false, 0.8, []string{"profile"}, 73},
+		"clock-nudged-back":     {2, 0.85, false, false, 0.8, []string{"profile"}, 73},
+		"clock-set-ahead-hours": {2.13, 0.85, false, false, 0.8, []string{"profile"}, 73},
+		"clock-date-set-back":   {1.63, 0.85, false, false, 1.2, []string{"profile"}, 73},
+		"clock-jumped-back":     {1.1, 0.85, false, false, 1, []string{"profile"}, 73},
 	}
 	for _, name := range ScenarioPresets() {
 		t.Run(name, func(t *testing.T) {

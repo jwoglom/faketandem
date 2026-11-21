@@ -1,0 +1,15 @@
+{
+  "name": "clock-jumped-back",
+  "description": "Six hours on a 0.85 U/hr profile with boluses from the pump's screen. Three hours ago the pump's clock went back two days with no record of it and no reboot: everything before is stamped two days after everything since, and nothing in the log explains it. No pump is known to do this (only a reset is known to move the clock unrecorded); it stands for a clock lost without a trace, which a reader can find only by a stamp running back. Nothing from before the jump can be dated; the 1.0 U bolus 90 minutes ago is on the clock the pump runs now, which ends two days behind, past a 24-hour trust limit.",
+  "hours": 6,
+  "basal_cycle": true,
+  "basal_profile": [
+    {"start": "00:00", "rate": 0.85}
+  ],
+  "events": [
+    {"minutes_ago": 300, "type": "bolus", "units": 2.5, "source": "pump"},
+    {"minutes_ago": 220, "type": "bolus", "units": 1.5, "source": "pump"},
+    {"minutes_ago": 180, "type": "clock_jump", "delta_seconds": -172800},
+    {"minutes_ago": 90, "type": "bolus", "units": 1.0, "source": "pump"}
+  ]
+}

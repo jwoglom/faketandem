@@ -1,0 +1,16 @@
+{
+  "name": "clock-nudged-back",
+  "description": "Six hours on a 0.85 U/hr profile with boluses from the pump's screen, on a pump whose clock had drifted 3 minutes ahead with no record of it. A 1.0 U bolus 35 minutes ago, then the user set the clock back 3 minutes on its screen 34 minutes ago (a TimeChanged record) and gave 0.8 U 33 minutes ago, which is stamped a minute before the bolus given two minutes earlier. Only the TimeChanged record puts the two in order. The pump's clock now matches the phone's.",
+  "hours": 6,
+  "basal_cycle": true,
+  "basal_profile": [
+    {"start": "00:00", "rate": 0.85}
+  ],
+  "events": [
+    {"minutes_ago": 360, "type": "clock_jump", "delta_seconds": 180},
+    {"minutes_ago": 240, "type": "bolus", "units": 2.0, "source": "pump"},
+    {"minutes_ago": 35, "type": "bolus", "units": 1.0, "source": "pump"},
+    {"minutes_ago": 34, "type": "clock_set", "delta_seconds": -180},
+    {"minutes_ago": 33, "type": "bolus", "units": 0.8, "source": "pump"}
+  ]
+}
