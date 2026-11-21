@@ -1,0 +1,42 @@
+{
+  "name": "clock-travel-12h-west",
+  "description": "Six hours on a 0.85 U/hr profile across a trip twelve hours west, with the phone already in the new zone: the pump's clock starts twelve hours ahead of the phone's (with no record: it was set before the window) and the user sets it twelve hours back on its screen 180 minutes ago (a TimeChanged record, and a DateChange too when the change crosses midnight), so it ends on the phone's time. Before it, a 2.0 U pump bolus 240 minutes ago and a 150% temp rate from 200 minutes ago that runs across it (its start is stamped on the old clock, its end on the new); after it, a 1.0 U pump bolus 90 minutes ago. The change is in the log, so every record can be dated to the instant it was written.",
+  "hours": 6,
+  "basal_cycle": true,
+  "basal_profile": [
+    {
+      "start": "00:00",
+      "rate": 0.85
+    }
+  ],
+  "events": [
+    {
+      "minutes_ago": 360,
+      "type": "clock_jump",
+      "delta_seconds": 43200
+    },
+    {
+      "minutes_ago": 240,
+      "type": "bolus",
+      "units": 2.0,
+      "source": "pump"
+    },
+    {
+      "minutes_ago": 200,
+      "type": "temp_basal",
+      "percent": 150,
+      "duration_minutes": 30
+    },
+    {
+      "minutes_ago": 180,
+      "type": "clock_set",
+      "delta_seconds": -43200
+    },
+    {
+      "minutes_ago": 90,
+      "type": "bolus",
+      "units": 1.0,
+      "source": "pump"
+    }
+  ]
+}

@@ -255,6 +255,14 @@ func TestEveryScenarioPresetReplaysToTheReadingsItDescribes(t *testing.T) {
 		"clock-set-ahead-hours": {2.13, 0.85, false, false, 0.8, []string{"profile"}, 73},
 		"clock-date-set-back":   {1.63, 0.85, false, false, 1.2, []string{"profile"}, 73},
 		"clock-jumped-back":     {1.1, 0.85, false, false, 1, []string{"profile"}, 73},
+		"clock-fall-back":       {1.1, 0.85, false, false, 1, []string{"profile", "temp"}, 73},
+		"clock-spring-forward":  {1.1, 0.85, false, false, 1, []string{"profile", "temp"}, 73},
+		"clock-travel-east":     {1.1, 0.85, false, false, 1, []string{"profile", "temp"}, 73},
+		"clock-travel-west":     {1.1, 0.85, false, false, 1, []string{"profile", "temp"}, 73},
+		"clock-travel-12h-east": {1.1, 0.85, false, false, 1, []string{"profile", "temp"}, 73},
+		"clock-travel-12h-west": {1.1, 0.85, false, false, 1, []string{"profile", "temp"}, 73},
+		"clock-73h-ahead":       {1.1, 0.85, false, false, 1, []string{"profile", "temp"}, 73},
+		"clock-jumped-ahead":    {1.1, 0.85, false, false, 1, []string{"profile"}, 73},
 	}
 	for _, name := range ScenarioPresets() {
 		t.Run(name, func(t *testing.T) {

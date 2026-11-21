@@ -1,0 +1,37 @@
+{
+  "name": "clock-73h-ahead",
+  "description": "Six hours on a 0.85 U/hr profile with the pump's clock set 73 hours ahead on its screen 180 minutes ago (TimeChanged and DateChange records). It ends 73 hours ahead of the phone, past a 24-hour trust limit, so the app has to set it; a bolus read while the clock is that far off is a case TandemKit still misdates (conformance G7, G16). Before it, a 2.0 U pump bolus 240 minutes ago and a 150% temp rate from 200 minutes ago that runs across it (its start is stamped on the old clock, its end on the new); after it, a 1.0 U pump bolus 90 minutes ago. The change is in the log, so every record can be dated to the instant it was written.",
+  "hours": 6,
+  "basal_cycle": true,
+  "basal_profile": [
+    {
+      "start": "00:00",
+      "rate": 0.85
+    }
+  ],
+  "events": [
+    {
+      "minutes_ago": 240,
+      "type": "bolus",
+      "units": 2.0,
+      "source": "pump"
+    },
+    {
+      "minutes_ago": 200,
+      "type": "temp_basal",
+      "percent": 150,
+      "duration_minutes": 30
+    },
+    {
+      "minutes_ago": 180,
+      "type": "clock_set",
+      "delta_seconds": 262800
+    },
+    {
+      "minutes_ago": 90,
+      "type": "bolus",
+      "units": 1.0,
+      "source": "pump"
+    }
+  ]
+}
